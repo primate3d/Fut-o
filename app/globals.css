@@ -1,0 +1,44 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: light;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: #f8fbfa;
+  color: #0b2545;
+}
+
+a {
+  text-decoration: none;
+}
+
+@media print {
+  header,
+  footer,
+  aside,
+  .print\:hidden {
+    display: none !important;
+  }
+
+  body {
+    background: white;
+  }
+
+  main {
+    display: block !important;
+    max-width: none !important;
+    padding: 0 !important;
+  }
+
+  section {
+    color: #0b2545;
+  }
+}
