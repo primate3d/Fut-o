@@ -19,6 +19,7 @@ import { ProviderLogo } from "@/components/ui/ProviderLogo";
 import {
   getStoredAnalysisServer,
   getStoredMockAnalysis,
+  isAnalysisForDocuments,
   isEnrichedAnalysisForDocuments,
   refreshStoredAnalysisServer,
   storeMockAnalysis
@@ -145,11 +146,26 @@ export function LettersPanel() {
   useEffect(() => {
     const storedAnalysis = getStoredMockAnalysis();
     const documents = getStoredUploadedDocuments();
-    const hasCurrentAnalysis = isEnrichedAnalysisForDocuments(storedAnalysis, documents);
+    const hasCurrentAnalysis = isAnalysisForDocuments(storedAnalysis, documents);
+    const hasEnrichedAnalysis = isEnrichedAnalysisForDocuments(storedAnalysis, documents);
 
     setAnalysis(hasCurrentAnalysis ? storedAnalysis : null);
 
-    if (!storedAnalysis || !hasCurrentAnalysis) {
+    if (storedAnalysis && hasCurrentAnalysis) {
+      setPersonalization((currentValue) => ({
+        ...mergeDetectedPersonalization(
+          getPersonalizationFromAnalysis(storedAnalysis),
+          currentValue
+        )
+      }));
+      setLetters(generateLettersFromAnalysis(storedAnalysis));
+
+      if (hasEnrichedAnalysis) {
+        return;
+      }
+    }
+
+    if (!storedAnalysis || !hasEnrichedAnalysis) {
       async function loadServerState() {
         const serverDocuments = await getStoredUploadedDocumentsServer();
         let serverAnalysis = await getStoredAnalysisServer();
@@ -178,12 +194,6 @@ export function LettersPanel() {
     }
 
     const analysisToLoad = storedAnalysis;
-    setPersonalization((currentValue) => ({
-      ...mergeDetectedPersonalization(
-        getPersonalizationFromAnalysis(analysisToLoad),
-        currentValue
-      )
-    }));
 
     async function loadLetters() {
       try {
