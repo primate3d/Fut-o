@@ -3,10 +3,11 @@ import { Logo } from "@/components/layout/Logo";
 
 const productLinks = [
   { label: "Guides", href: "/guides" },
+  { label: "Résilier une box", href: "/resilier-box-internet" },
+  { label: "Négocier internet", href: "/negocier-forfait-internet" },
+  { label: "Énergie", href: "/changer-fournisseur-energie" },
   { label: "À propos", href: "/a-propos" },
   { label: "FAQ", href: "/faq" },
-  { label: "Cas concrets", href: "/cas-concrets" },
-  { label: "Sécurité", href: "/securite-confidentialite" },
   { label: "Contact", href: "/contact" }
 ];
 

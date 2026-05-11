@@ -15,9 +15,13 @@ import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { 
   isAnalysisForDocuments,
-  getStoredAnalysisServer 
+  getStoredAnalysisServer,
+  getStoredMockAnalysis
 } from "@/features/analysis";
-import { getStoredUploadedDocumentsServer } from "@/features/upload/storage";
+import {
+  getStoredUploadedDocuments,
+  getStoredUploadedDocumentsServer
+} from "@/features/upload/storage";
 import {
   expenseCategoryLabels,
   getMostExpensiveCategory,
@@ -37,12 +41,22 @@ export default function DashboardPage() {
 
   useEffect(() => {
     async function load() {
+      const localDocuments = getStoredUploadedDocuments();
+      const localAnalysis = getStoredMockAnalysis();
+      setDocuments(localDocuments);
+      setAnalysis(
+        isAnalysisForDocuments(localAnalysis, localDocuments) ? localAnalysis : null
+      );
+
       const serverDocuments = await getStoredUploadedDocumentsServer();
       const serverAnalysis = await getStoredAnalysisServer();
+      const nextAnalysis = isAnalysisForDocuments(serverAnalysis, serverDocuments)
+        ? serverAnalysis
+        : isAnalysisForDocuments(localAnalysis, serverDocuments)
+          ? localAnalysis
+          : null;
 
-      setAnalysis(
-        isAnalysisForDocuments(serverAnalysis, serverDocuments) ? serverAnalysis : null
-      );
+      setAnalysis(nextAnalysis);
       setDocuments(serverDocuments);
     }
     void load();

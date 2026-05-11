@@ -7,6 +7,7 @@ import { ExpenseCategory } from "@/types";
 import type {
   AccessKey,
   AnalysisAnomaly,
+  DetectedParties,
   Expense,
   MockAnalysis as Analysis,
   Recommendation,
@@ -168,6 +169,7 @@ export async function getAnalysisByKey(keyCode: string): Promise<Analysis | null
     id: record.id,
     generatedAt: record.generatedAt,
     documents: record.documentsData as UploadedDocument[],
+    detectedParties: record.detectedParties as DetectedParties | undefined,
     expenses: record.expenses as Expense[],
     recommendations: record.recommendations as Recommendation[],
     anomalies: record.anomalies as AnalysisAnomaly[],
@@ -185,6 +187,7 @@ export async function saveAnalysis(keyCode: string, analysis: Analysis): Promise
       keyCode,
       generatedAt: analysis.generatedAt,
       documentsData: analysis.documents,
+      detectedParties: analysis.detectedParties || null,
       expenses: analysis.expenses,
       recommendations: analysis.recommendations,
       anomalies: analysis.anomalies,
@@ -197,6 +200,7 @@ export async function saveAnalysis(keyCode: string, analysis: Analysis): Promise
       set: {
         generatedAt: analysis.generatedAt,
         documentsData: analysis.documents,
+        detectedParties: analysis.detectedParties || null,
         expenses: analysis.expenses,
         recommendations: analysis.recommendations,
         anomalies: analysis.anomalies,

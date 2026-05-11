@@ -42,6 +42,7 @@ export const analyses = pgTable("analyses", {
   keyCode: text("key_code").notNull().unique(),
   generatedAt: text("generated_at").notNull(),
   documentsData: jsonb("documents_data").notNull(),
+  detectedParties: jsonb("detected_parties"),
   expenses: jsonb("expenses").notNull(),
   recommendations: jsonb("recommendations").notNull(),
   anomalies: jsonb("anomalies").notNull(),

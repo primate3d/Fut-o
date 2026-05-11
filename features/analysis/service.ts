@@ -2,8 +2,10 @@ import {
   ExpenseCategory,
   ExpenseSubcategory,
   type AnalysisAnomaly,
+  type DetectedParties,
   type Expense,
   type MockAnalysis,
+  type ProviderProfile,
   type Recommendation,
   type UploadedDocument
 } from "@/types";
@@ -229,6 +231,52 @@ const templatesByDocumentType: Record<UploadedDocument["documentType"], ExpenseT
   ]
 };
 
+const knownProviderProfiles: Record<string, ProviderProfile> = {
+  EDF: {
+    name: "EDF",
+    address: "Service Client EDF\nTSA 21941\n62978 ARRAS CEDEX 9",
+    customerServiceUrl: "https://particulier.edf.fr/fr/accueil/aide-contact/contact.html"
+  },
+  Orange: {
+    name: "Orange",
+    address: "Orange Service Clients\nTSA 10001\n59878 LILLE CEDEX 9",
+    customerServiceUrl: "https://assistance.orange.fr/"
+  },
+  SFR: {
+    name: "SFR",
+    address: "SFR Service Client\nTSA 10101\n69947 LYON CEDEX 20",
+    customerServiceUrl: "https://assistance.sfr.fr/"
+  },
+  Free: {
+    name: "Free",
+    address: "Free Service Abonne\n75371 PARIS CEDEX 08",
+    customerServiceUrl: "https://assistance.free.fr/"
+  },
+  "Bouygues Telecom": {
+    name: "Bouygues Telecom",
+    address: "Bouygues Telecom\nService Clients\n60436 NOAILLES CEDEX",
+    customerServiceUrl: "https://www.assistance.bouyguestelecom.fr/"
+  }
+};
+
+function buildDetectedParties(documents: UploadedDocument[]): DetectedParties {
+  const providers = documents.reduce<NonNullable<DetectedParties["providers"]>>(
+    (accumulator, document) => {
+      if (!document.provider) return accumulator;
+
+      const knownProvider = knownProviderProfiles[document.provider];
+      accumulator[document.provider] = knownProvider ?? {
+        name: document.provider
+      };
+
+      return accumulator;
+    },
+    {}
+  );
+
+  return Object.keys(providers).length > 0 ? { providers } : {};
+}
+
 function buildExpense(
   template: ExpenseTemplate,
   document: UploadedDocument,
@@ -258,6 +306,8 @@ function buildExpense(
     monthlyAmount,
     yearlyAmount: monthlyAmount * 12,
     documentType: document.documentType,
+    sourceDocumentId: document.id,
+    sourceDocumentName: document.fileName,
     recurrence: "monthly"
   };
 }
@@ -302,6 +352,7 @@ export function generateMockAnalysisFromDocuments(
     id: `analysis_${Date.now()}`,
     generatedAt: new Date().toISOString(),
     documents: readyDocuments,
+    detectedParties: buildDetectedParties(readyDocuments),
     expenses,
     recommendations,
     anomalies,

@@ -1,10 +1,18 @@
 import { OpenAI } from "openai";
+import {
+  attachDocumentProfileToExpense,
+  buildDocumentPartyProfiles,
+  inferExpenseCategoryFromDocumentType,
+  inferExpenseSubcategoryFromDocumentType,
+  mergeDetectedParties,
+  type ExtractedDocument
+} from "@/features/analysis/document-profiles";
 import type {
   AnalysisAnomaly,
+  DetectedParties,
   Expense,
   MockAnalysis as Analysis,
-  Recommendation,
-  UploadedDocument
+  Recommendation
 } from "@/types";
 
 let _openai: OpenAI | null = null;
@@ -14,6 +22,7 @@ type AiRecommendation = Omit<Recommendation, "id">;
 type AiAnomaly = Omit<AnalysisAnomaly, "id">;
 
 type AiAnalysisPayload = {
+  detectedParties?: DetectedParties;
   expenses?: AiExpense[];
   recommendations?: AiRecommendation[];
   anomalies?: AiAnomaly[];
@@ -32,7 +41,7 @@ function getOpenAI() {
 }
 
 export async function analyzeDocumentsWithAI(
-  documents: (UploadedDocument & { extractedText: string })[],
+  documents: ExtractedDocument[],
   keyCode: string
 ): Promise<Analysis> {
   if (!process.env.OPENAI_API_KEY) {
@@ -42,10 +51,14 @@ export async function analyzeDocumentsWithAI(
   const context = documents
     .map(
       (document) =>
-        `### Document: ${document.fileName} (${document.documentType})
+        `### Document ID: ${document.id}
+Nom du fichier: ${document.fileName}
+Type detecte: ${document.documentType}
+Fournisseur detecte par l'application: ${document.provider || "inconnu"}
 Contenu extrait :\n${document.extractedText || "Contenu illisible ou vide."}`
     )
     .join("\n\n---\n\n");
+  const documentProfiles = buildDocumentPartyProfiles(documents);
 
   try {
     const openai = getOpenAI();
@@ -54,9 +67,14 @@ Contenu extrait :\n${document.extractedText || "Contenu illisible ou vide."}`
       messages: [
         {
           role: "system",
-          content: `Tu aides Futéo à préparer une lecture claire de contrats du foyer.
-Réponds uniquement en JSON avec trois tableaux : expenses, recommendations, anomalies.
-N'invente pas de garantie d'économie. Signale les limites quand le texte extrait est insuffisant.`
+          content: `Tu aides Futeo a preparer une lecture claire de contrats du foyer.
+Reponds uniquement en JSON avec quatre cles : detectedParties, expenses, recommendations, anomalies.
+detectedParties.customer doit contenir uniquement les informations client visibles dans les documents : firstName, lastName, fullName, address, email, phone, customerNumber.
+detectedParties.providers doit etre un objet indexe par nom fournisseur et contenir name, address, email, phone, customerServiceUrl si ces informations sont visibles.
+detectedParties.documents doit etre un objet indexe par Document ID. Chaque entree doit contenir documentId, fileName, documentType, providerName, subscriptionType, invoiceAmount, customer et provider quand ces donnees sont visibles.
+Chaque expense doit contenir sourceDocumentId avec le Document ID exact du document source, documentType, provider, category, subcategory, monthlyAmount et les references visibles utiles : customerNumber, contractNumber, invoiceNumber, phone.
+Ne melange jamais les informations de documents differents : une depense mobile doit utiliser uniquement les donnees de la facture mobile correspondante.
+N'invente pas de coordonnees client ou fournisseur. N'invente pas de garantie d'economie. Signale les limites quand le texte extrait est insuffisant.`
         },
         {
           role: "user",
@@ -70,12 +88,40 @@ N'invente pas de garantie d'économie. Signale les limites quand le texte extrai
       response.choices[0].message.content || "{}"
     ) as AiAnalysisPayload;
 
-    const expenses: Expense[] = (rawResult.expenses ?? []).map((expense, index) => ({
-      id: `exp_${keyCode}_${index}`,
-      ...expense,
-      yearlyAmount: expense.monthlyAmount * 12,
-      recurrence: "monthly"
-    }));
+    const aiExpenses = rawResult.expenses ?? [];
+    const fallbackExpenses: AiExpense[] =
+      aiExpenses.length > 0
+        ? []
+        : Object.values(documentProfiles)
+            .filter((profile) => profile.invoiceAmount)
+            .map((profile) => ({
+              label: profile.subscriptionType ?? "Contrat",
+              provider: profile.providerName ?? "Fournisseur",
+              category: inferExpenseCategoryFromDocumentType(profile.documentType),
+              subcategory: inferExpenseSubcategoryFromDocumentType(profile.documentType),
+              isRecurring: true,
+              monthlyAmount: profile.invoiceAmount ?? 0,
+              documentType: profile.documentType,
+              sourceDocumentId: profile.documentId,
+              sourceDocumentName: profile.fileName,
+              customerNumber: profile.customer?.customerNumber,
+              contractNumber: profile.customer?.contractNumber,
+              invoiceNumber: profile.customer?.invoiceNumber,
+              phone: profile.customer?.phone
+            }));
+
+    const expenses: Expense[] = [...aiExpenses, ...fallbackExpenses].map(
+      (expense, index) =>
+        attachDocumentProfileToExpense(
+          {
+            id: `exp_${keyCode}_${index}`,
+            ...expense,
+            yearlyAmount: expense.monthlyAmount * 12,
+            recurrence: "monthly"
+          },
+          documentProfiles
+        )
+    );
 
     const recommendations: Recommendation[] = (rawResult.recommendations ?? []).map(
       (recommendation, index) => ({
@@ -104,6 +150,7 @@ N'invente pas de garantie d'économie. Signale les limites quand le texte extrai
       id: `analysis_${keyCode}_${Date.now()}`,
       generatedAt: new Date().toISOString(),
       documents,
+      detectedParties: mergeDetectedParties(rawResult.detectedParties, documentProfiles),
       expenses,
       recommendations,
       anomalies,
@@ -114,6 +161,6 @@ N'invente pas de garantie d'économie. Signale les limites quand le texte extrai
   } catch (error: unknown) {
     console.error("Erreur OpenAI:", error);
     const message = error instanceof Error ? error.message : "Erreur inconnue";
-    throw new Error(`Échec de l'analyse IA: ${message}`);
+    throw new Error(`Echec de l'analyse IA: ${message}`);
   }
 }

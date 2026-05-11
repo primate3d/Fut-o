@@ -60,6 +60,13 @@ const shortCards: Record<
   }
 };
 
+const seoShortcuts = [
+  { label: "Résilier une box internet", href: "/resilier-box-internet" },
+  { label: "Négocier un forfait internet", href: "/negocier-forfait-internet" },
+  { label: "Changer de fournisseur d'énergie", href: "/changer-fournisseur-energie" },
+  { label: "Réduire ses dépenses mensuelles", href: "/reduire-depenses-mensuelles" }
+];
+
 export default function GuidesPage() {
   return (
     <main className="bg-[#fbf6ed] text-navy-900">
@@ -117,6 +124,14 @@ export default function GuidesPage() {
               </Card>
             );
           })}
+        </div>
+
+        <div className="mt-10 flex flex-wrap gap-3">
+          {seoShortcuts.map((link) => (
+            <Button href={link.href} key={link.href} variant="ghost">
+              {link.label} <ArrowRight size={16} />
+            </Button>
+          ))}
         </div>
       </section>
 

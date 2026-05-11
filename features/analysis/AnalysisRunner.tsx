@@ -7,7 +7,10 @@ import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { getDocumentTypeLabel } from "@/features/upload";
-import { getStoredUploadedDocuments } from "@/features/upload/storage";
+import {
+  getStoredUploadedDocuments,
+  getStoredUploadedDocumentsServer
+} from "@/features/upload/storage";
 import { expenseCategoryLabels, summarizeExpensesByCategory } from "@/lib/expense-summary";
 import { formatCurrency } from "@/lib/utils";
 import type { MockAnalysis, UploadedDocument } from "@/types";
@@ -30,23 +33,29 @@ export function AnalysisRunner() {
   const [serviceMessage, setServiceMessage] = useState<string | null>(null);
 
   useEffect(() => {
-    const storedDocuments = getStoredUploadedDocuments();
-    const usableDocuments = storedDocuments.filter(
-      (document) => document.status === "ready"
-    );
-    const storedAnalysis = getStoredMockAnalysis();
+    let timers: number[] = [];
 
-    setDocuments(storedDocuments);
+    async function load() {
+      const localDocuments = getStoredUploadedDocuments();
+      setDocuments(localDocuments);
 
-    if (usableDocuments.length === 0) {
-      return;
-    }
+      const storedDocuments = await getStoredUploadedDocumentsServer();
+      const usableDocuments = storedDocuments.filter(
+        (document) => document.status === "ready"
+      );
+      const storedAnalysis = getStoredMockAnalysis();
 
-    setCurrentStep(0);
-    setIsComplete(false);
+      setDocuments(storedDocuments);
 
-    const timers = analysisSteps.map((_, index) =>
-      window.setTimeout(() => {
+      if (usableDocuments.length === 0) {
+        return;
+      }
+
+      setCurrentStep(0);
+      setIsComplete(false);
+
+      timers = analysisSteps.map((_, index) =>
+        window.setTimeout(() => {
         setCurrentStep(index + 1);
 
         if (index === analysisSteps.length - 1) {
@@ -65,8 +74,11 @@ export function AnalysisRunner() {
           setAnalysis(currentAnalysis);
           setIsComplete(true);
         }
-      }, (index + 1) * 500)
-    );
+        }, (index + 1) * 500)
+      );
+    }
+
+    void load();
 
     return () => timers.forEach((timer) => window.clearTimeout(timer));
   }, []);

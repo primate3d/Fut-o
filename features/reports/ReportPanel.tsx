@@ -7,11 +7,19 @@ import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { StatCard } from "@/components/ui/StatCard";
-import { getStoredMockAnalysis, isAnalysisForDocuments } from "@/features/analysis";
+import {
+  getStoredAnalysisServer,
+  getStoredMockAnalysis,
+  isAnalysisForDocuments,
+  storeMockAnalysis
+} from "@/features/analysis";
 import { generateLettersFromAnalysis } from "@/features/letters/service";
 import type { AlternativeOffer } from "@/features/recommendations/service";
 import { findAlternativeOffers } from "@/features/recommendations/service";
-import { getStoredUploadedDocuments } from "@/features/upload/storage";
+import {
+  getStoredUploadedDocuments,
+  getStoredUploadedDocumentsServer
+} from "@/features/upload/storage";
 import {
   expenseCategoryLabels,
   getTopExpenses,
@@ -64,6 +72,19 @@ export function ReportPanel() {
     setAnalysis(hasCurrentAnalysis ? storedAnalysis : null);
 
     if (!storedAnalysis || !hasCurrentAnalysis) {
+      async function loadServerState() {
+        const serverDocuments = await getStoredUploadedDocumentsServer();
+        const serverAnalysis = await getStoredAnalysisServer();
+
+        if (isAnalysisForDocuments(serverAnalysis, serverDocuments) && serverAnalysis) {
+          storeMockAnalysis(serverAnalysis);
+          setAnalysis(serverAnalysis);
+          setAlternatives(findAlternativeOffers(serverAnalysis.expenses).slice(0, 5));
+          setRecommendedLetters(generateLettersFromAnalysis(serverAnalysis).slice(0, 5));
+        }
+      }
+
+      void loadServerState();
       return;
     }
 

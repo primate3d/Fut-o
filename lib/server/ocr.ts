@@ -1,4 +1,5 @@
 import path from "path";
+import { PDFParse } from "pdf-parse";
 import { OpenAI } from "openai";
 import { storage } from "@/lib/server/storage";
 import type { UploadedDocument } from "@/types";
@@ -25,8 +26,21 @@ async function extractTextFromPDF(physicalFileName: string): Promise<string> {
   const dataBuffer = await storage.get(physicalFileName);
   if (!dataBuffer) return "";
 
-  console.info(`Extraction PDF en attente de connexion OCR: ${physicalFileName}`);
-  return "";
+  const parser = new PDFParse({ data: dataBuffer });
+
+  try {
+    const result = await parser.getText();
+    return result.text.trim();
+  } catch (error) {
+    console.error("Erreur extraction texte PDF:", error);
+    return "";
+  } finally {
+    await parser.destroy();
+  }
+}
+
+function isUsableExtractedText(text: string) {
+  return text.trim().replace(/\s+/g, " ").length >= 40;
 }
 
 async function extractTextFromImage(physicalFileName: string): Promise<string> {
@@ -94,7 +108,15 @@ export async function extractTextFromDocument(
   const extension = path.extname(document.fileName).toLowerCase();
 
   if (extension === ".pdf") {
-    return extractTextFromPDF(physicalFileName);
+    const nativeText = await extractTextFromPDF(physicalFileName);
+    if (isUsableExtractedText(nativeText)) {
+      return nativeText;
+    }
+
+    console.warn(
+      `Extraction texte PDF native insuffisante pour ${physicalFileName}. Fallback OCR requis si le PDF est scanne.`
+    );
+    return nativeText;
   }
 
   if ([".jpg", ".jpeg", ".png"].includes(extension)) {

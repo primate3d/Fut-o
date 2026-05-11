@@ -32,7 +32,7 @@ export async function POST(request: Request) {
 
     // 2. Vérification du cache
     const existingAnalysis = await getAnalysisByKey(code);
-    if (existingAnalysis) {
+    if (existingAnalysis?.detectedParties?.documents) {
       return NextResponse.json({ analysis: existingAnalysis, cached: true });
     }
 
@@ -94,7 +94,7 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: "Code manquant" }, { status: 400 });
   }
 
-  const analysis = getAnalysisByKey(code);
+  const analysis = await getAnalysisByKey(code);
   if (!analysis) {
     return NextResponse.json({ error: "Aucune analyse trouvée" }, { status: 404 });
   }

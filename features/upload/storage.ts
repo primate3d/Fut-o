@@ -29,8 +29,13 @@ export async function getStoredUploadedDocumentsServer(): Promise<UploadedDocume
     return localDocuments;
   }
 
+  const controller = new AbortController();
+  const timeoutId = window.setTimeout(() => controller.abort(), 2500);
+
   try {
-    const response = await fetch(`/api/documents?code=${activeKey.code}`);
+    const response = await fetch(`/api/documents?code=${activeKey.code}`, {
+      signal: controller.signal
+    });
     if (!response.ok) return localDocuments;
 
     const { documents } = (await response.json()) as {
@@ -42,6 +47,8 @@ export async function getStoredUploadedDocumentsServer(): Promise<UploadedDocume
       : localDocuments;
   } catch {
     return localDocuments;
+  } finally {
+    window.clearTimeout(timeoutId);
   }
 }
 

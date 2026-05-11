@@ -90,6 +90,12 @@ export type Expense = {
   monthlyAmount: number;
   yearlyAmount: number;
   documentType?: UploadedDocumentType;
+  sourceDocumentId?: string;
+  sourceDocumentName?: string;
+  customerNumber?: string;
+  contractNumber?: string;
+  invoiceNumber?: string;
+  phone?: string;
   recurrence: "monthly" | "yearly" | "one_time";
 };
 
@@ -100,6 +106,43 @@ export type Recommendation = {
   category: ExpenseCategory;
   potentialSaving: number;
   priority: "low" | "medium" | "high";
+};
+
+export type CustomerProfile = {
+  firstName?: string;
+  lastName?: string;
+  fullName?: string;
+  address?: string;
+  email?: string;
+  phone?: string;
+  customerNumber?: string;
+  contractNumber?: string;
+  invoiceNumber?: string;
+};
+
+export type ProviderProfile = {
+  name: string;
+  address?: string;
+  email?: string;
+  phone?: string;
+  customerServiceUrl?: string;
+};
+
+export type DetectedParties = {
+  customer?: CustomerProfile;
+  providers?: Record<string, ProviderProfile>;
+  documents?: Record<string, DocumentPartyProfile>;
+};
+
+export type DocumentPartyProfile = {
+  documentId: string;
+  fileName?: string;
+  documentType?: UploadedDocumentType;
+  providerName?: string;
+  subscriptionType?: string;
+  invoiceAmount?: number;
+  customer?: CustomerProfile;
+  provider?: ProviderProfile;
 };
 
 export type AnalysisAnomaly = {
@@ -137,6 +180,10 @@ export type GeneratedLetter = {
   id: string;
   type: GeneratedLetterType;
   provider: string;
+  providerAddress?: string;
+  customerProfile?: CustomerProfile;
+  offerName?: string;
+  offerUrl?: string;
   category: ExpenseCategory;
   potentialSaving: number;
   monthlyAmount: number;
@@ -159,6 +206,7 @@ export type MockAnalysis = {
   id: string;
   generatedAt: string;
   documents: UploadedDocument[];
+  detectedParties?: DetectedParties;
   expenses: Expense[];
   recommendations: Recommendation[];
   anomalies: AnalysisAnomaly[];

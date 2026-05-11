@@ -114,14 +114,16 @@ export default async function GuideArticlePage({ params }: GuidePageProps) {
               La forme de la démarche, pas le courrier complet.
             </h2>
             <p className="mt-4 text-base leading-8 text-slate-600">
-              Cette page montre l'objectif et la structure. Le document complet
-              est généré dans Futéo, avec les informations utiles à votre situation.
+              Voir la forme, sans donner un modèle complet. Le document final est
+              généré dans Futéo, avec les informations utiles à votre situation.
             </p>
           </div>
           <LetterPreviewCard
             description={article.description}
             href="/tarifs"
             keywords={article.keywords}
+            object={article.preview.object}
+            previewText={article.preview.text}
             title={article.title}
           />
         </div>

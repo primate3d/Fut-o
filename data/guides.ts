@@ -43,7 +43,7 @@ export const guideArticles: GuideArticle[] = [
     ],
     preview: {
       object: "Objet : demande de résiliation du contrat d'assurance habitation",
-      text: "Voir la forme d'un courrier de résiliation sans fournir le modèle complet."
+      text: "Voir la forme, sans donner un modèle complet."
     },
     cta: "Préparer mon courrier"
   },
@@ -74,7 +74,7 @@ export const guideArticles: GuideArticle[] = [
     ],
     preview: {
       object: "Objet : demande de réévaluation de mon forfait internet",
-      text: "Exemple simplifié d'une structure de démarche de négociation."
+      text: "Voir la forme, sans donner un modèle complet."
     },
     cta: "Comparer mes contrats"
   },
@@ -105,7 +105,7 @@ export const guideArticles: GuideArticle[] = [
     ],
     preview: {
       object: "Synthèse : contrats à comparer en priorité",
-      text: "Aperçu limité d'une démarche de comparaison, sans accès au rapport complet."
+      text: "Voir la forme, sans donner un modèle complet."
     },
     cta: "Comparer mes contrats"
   },
@@ -136,7 +136,7 @@ export const guideArticles: GuideArticle[] = [
     ],
     preview: {
       object: "Objet : demande de réduction tarifaire",
-      text: "Aperçu très limité d'une demande, le courrier complet reste généré dans Futéo."
+      text: "Voir la forme, sans donner un modèle complet."
     },
     cta: "Générer ma démarche"
   },
@@ -167,7 +167,7 @@ export const guideArticles: GuideArticle[] = [
     ],
     preview: {
       object: "Objet : demande d'information sur mon contrat énergie",
-      text: "Voir la forme d'une demande claire sans fournir un modèle complet."
+      text: "Voir la forme, sans donner un modèle complet."
     },
     cta: "Comparer mes contrats"
   },
@@ -198,7 +198,7 @@ export const guideArticles: GuideArticle[] = [
     ],
     preview: {
       object: "Objet : résiliation de mon abonnement internet",
-      text: "Exemple simplifié d'une structure de résiliation, sans courrier complet copiable."
+      text: "Voir la forme, sans donner un modèle complet."
     },
     cta: "Préparer mon courrier"
   },
@@ -229,7 +229,7 @@ export const guideArticles: GuideArticle[] = [
     ],
     preview: {
       object: "Objet : demande de réduction tarifaire",
-      text: "Voir la forme d'un courrier de négociation sans donner le modèle complet."
+      text: "Voir la forme, sans donner un modèle complet."
     },
     cta: "Générer ma démarche"
   },
@@ -260,7 +260,7 @@ export const guideArticles: GuideArticle[] = [
     ],
     preview: {
       object: "Objet : demande de changement d'offre mobile",
-      text: "Aperçu limité d'une démarche prête à personnaliser dans Futéo."
+      text: "Voir la forme, sans donner un modèle complet."
     },
     cta: "Préparer mon courrier"
   }

@@ -1,11 +1,19 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { usePathname } from "next/navigation";
 import { ProgressSteps } from "@/components/ui/ProgressSteps";
 import { siteConfig } from "@/config/site";
-import { getStoredMockAnalysis, isAnalysisForDocuments } from "@/features/analysis";
-import { getStoredUploadedDocuments } from "@/features/upload/storage";
+import {
+  getStoredAnalysisServer,
+  getStoredMockAnalysis,
+  isAnalysisForDocuments,
+  storeMockAnalysis
+} from "@/features/analysis";
+import {
+  getStoredUploadedDocuments,
+  getStoredUploadedDocumentsServer
+} from "@/features/upload/storage";
 
 const stepByPath: Record<string, number> = {
   "/importer": 1,
@@ -20,9 +28,10 @@ export function JourneyProgress() {
   const currentStep = stepByPath[pathname] ?? 0;
   const [completedStep, setCompletedStep] = useState(0);
 
-  useEffect(() => {
-    const documents = getStoredUploadedDocuments();
-    const analysis = getStoredMockAnalysis();
+  const applyProgress = useCallback((
+    documents: ReturnType<typeof getStoredUploadedDocuments>,
+    analysis: ReturnType<typeof getStoredMockAnalysis>
+  ) => {
     const hasUsableDocuments = documents.some((document) => document.status !== "error");
     const hasAnalysis = isAnalysisForDocuments(analysis, documents);
 
@@ -37,7 +46,26 @@ export function JourneyProgress() {
     }
 
     setCompletedStep(Math.min(currentStep, 3));
-  }, [currentStep, pathname]);
+  }, [currentStep]);
+
+  useEffect(() => {
+    const documents = getStoredUploadedDocuments();
+    const analysis = getStoredMockAnalysis();
+    applyProgress(documents, analysis);
+
+    async function loadServerState() {
+      const serverDocuments = await getStoredUploadedDocumentsServer();
+      const serverAnalysis = await getStoredAnalysisServer();
+
+      if (serverAnalysis) {
+        storeMockAnalysis(serverAnalysis);
+      }
+
+      applyProgress(serverDocuments, serverAnalysis ?? analysis);
+    }
+
+    void loadServerState();
+  }, [applyProgress, pathname]);
 
   return (
     <ProgressSteps
