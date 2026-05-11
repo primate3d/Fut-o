@@ -19,6 +19,7 @@ import { ProviderLogo } from "@/components/ui/ProviderLogo";
 import {
   getStoredAnalysisServer,
   getStoredMockAnalysis,
+  generateMockAnalysisFromDocuments,
   isAnalysisForDocuments,
   isEnrichedAnalysisForDocuments,
   refreshStoredAnalysisServer,
@@ -148,6 +149,7 @@ export function LettersPanel() {
     const documents = getStoredUploadedDocuments();
     const hasCurrentAnalysis = isAnalysisForDocuments(storedAnalysis, documents);
     const hasEnrichedAnalysis = isEnrichedAnalysisForDocuments(storedAnalysis, documents);
+    const readyDocuments = documents.filter((document) => document.status === "ready");
 
     setAnalysis(hasCurrentAnalysis ? storedAnalysis : null);
 
@@ -163,6 +165,22 @@ export function LettersPanel() {
       if (hasEnrichedAnalysis) {
         return;
       }
+    }
+
+    if (!hasCurrentAnalysis && readyDocuments.length > 0) {
+      const fallbackAnalysis = generateMockAnalysisFromDocuments(readyDocuments);
+      storeMockAnalysis(fallbackAnalysis);
+      setAnalysis(fallbackAnalysis);
+      setPersonalization((currentValue) => ({
+        ...mergeDetectedPersonalization(
+          getPersonalizationFromAnalysis(fallbackAnalysis),
+          currentValue
+        )
+      }));
+      setLetters(generateLettersFromAnalysis(fallbackAnalysis));
+      setServiceMessage(
+        "Démarches préparées localement à partir des documents présents. Relancez l'analyse pour enrichir les coordonnées détectées."
+      );
     }
 
     if (!storedAnalysis || !hasEnrichedAnalysis) {
