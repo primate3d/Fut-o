@@ -7,6 +7,9 @@ export type ProviderBranding = {
 const providerDomains: Record<string, string> = {
   "Free": "free.fr",
   "Free Mobile": "free.fr",
+  "NRJ Mobile": "nrjmobile.fr",
+  "Prixtel": "prixtel.com",
+  "RED by SFR": "red-by-sfr.fr",
   "B&You": "bouyguestelecom.fr",
   "Bouygues": "bouyguestelecom.fr",
   "Bouygues Telecom": "bouyguestelecom.fr",

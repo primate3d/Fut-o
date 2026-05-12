@@ -54,8 +54,8 @@ export default function TermsPage() {
           </h1>
           <p className="mt-4 text-base leading-8 text-slate-600">
             Ces CGV sont nécessaires dès lors que Futéo vend un accès payant au
-            service. Elles restent volontairement simples et devront être
-            complétées avec les informations exactes de l'éditeur avant lancement.
+            service. Elles présentent les règles principales applicables à l'achat
+            d'un accès, à son utilisation et aux limites du service.
           </p>
         </div>
       </section>

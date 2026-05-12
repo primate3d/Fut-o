@@ -3,15 +3,13 @@
 import { useState } from "react";
 import { RotateCcw } from "lucide-react";
 import { Button } from "@/components/ui/Button";
-import { MOCK_ANALYSIS_STORAGE_KEY } from "@/features/analysis";
-import { UPLOADED_DOCUMENTS_STORAGE_KEY } from "@/features/upload";
+import { purgeFullAudit } from "./lifecycle";
 
 export function ResetAuditButton() {
   const [message, setMessage] = useState<string | null>(null);
 
   function resetAudit() {
-    window.localStorage.removeItem(UPLOADED_DOCUMENTS_STORAGE_KEY);
-    window.localStorage.removeItem(MOCK_ANALYSIS_STORAGE_KEY);
+    purgeFullAudit();
     setMessage("Votre audit est prêt à être recommencé.");
   }
 

@@ -84,12 +84,12 @@ export default function SecurityPage() {
           </Card>
           <Card className="bg-white/90">
             <h2 className="text-xl font-bold text-[#12243d]">
-              Ce qui évoluera ensuite
+              Services utilisés
             </h2>
             <p className="mt-3 leading-7 text-slate-600">
-              Si des services externes sont ajoutés, comme l'analyse avancée,
-              l'email ou le paiement réel, ils devront être expliqués clairement
-              dans les pages légales.
+              Les prestataires nécessaires au fonctionnement du service doivent
+              rester limités, documentés et cohérents avec les informations
+              indiquées dans les pages légales.
             </p>
           </Card>
         </div>

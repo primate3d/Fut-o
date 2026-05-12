@@ -46,6 +46,15 @@ export function storeMockAnalysis(analysis: MockAnalysis) {
   window.localStorage.setItem(MOCK_ANALYSIS_STORAGE_KEY, JSON.stringify(analysis));
 }
 
+export function hasUsableAnalysis(analysis: MockAnalysis | null) {
+  return Boolean(
+    analysis &&
+      Array.isArray(analysis.documents) &&
+      Array.isArray(analysis.expenses) &&
+      analysis.expenses.length > 0
+  );
+}
+
 export function hasDocumentProfiles(analysis: MockAnalysis | null) {
   return Boolean(
     analysis?.detectedParties?.documents &&
@@ -58,6 +67,10 @@ export function isAnalysisForDocuments(
   documents: UploadedDocument[]
 ) {
   if (!analysis) {
+    return false;
+  }
+
+  if (!Array.isArray(analysis.documents)) {
     return false;
   }
 
@@ -96,7 +109,8 @@ export async function refreshStoredAnalysisServer(
     },
     body: JSON.stringify({
       documents,
-      code: activeKey.code
+      code: activeKey.code,
+      force: true
     })
   });
 

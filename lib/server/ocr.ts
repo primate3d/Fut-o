@@ -1,4 +1,5 @@
 import path from "path";
+import { pathToFileURL } from "url";
 import { PDFParse } from "pdf-parse";
 import { OpenAI } from "openai";
 import { storage } from "@/lib/server/storage";
@@ -26,6 +27,11 @@ async function extractTextFromPDF(physicalFileName: string): Promise<string> {
   const dataBuffer = await storage.get(physicalFileName);
   if (!dataBuffer) return "";
 
+  PDFParse.setWorker(
+    pathToFileURL(
+      path.join(process.cwd(), "node_modules", "pdf-parse", "dist", "worker", "pdf.worker.mjs")
+    ).toString()
+  );
   const parser = new PDFParse({ data: dataBuffer });
 
   try {

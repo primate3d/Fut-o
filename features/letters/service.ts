@@ -35,10 +35,10 @@ export async function generateLetterDraftStub(
 }
 
 const defaultPersonalization: LetterPersonalization = {
-  firstName: "[Prenom]",
+  firstName: "[Prénom]",
   lastName: "[Nom]",
   address: "[Adresse]",
-  customerNumber: "[Numero client]",
+  customerNumber: "[Numéro client]",
   email: "[Email]"
 };
 
@@ -49,27 +49,30 @@ function getDocumentCustomerProfile(
   const documentProfile = expense.sourceDocumentId
     ? analysis.detectedParties?.documents?.[expense.sourceDocumentId]
     : undefined;
+  const fallbackCustomer = expense.sourceDocumentId
+    ? undefined
+    : analysis.detectedParties?.customer;
 
   return {
-    ...analysis.detectedParties?.customer,
+    ...fallbackCustomer,
     ...documentProfile?.customer,
     customerNumber:
       expense.customerNumber ||
       expense.contractNumber ||
       documentProfile?.customer?.customerNumber ||
-      analysis.detectedParties?.customer?.customerNumber,
+      fallbackCustomer?.customerNumber,
     contractNumber:
       expense.contractNumber ||
       documentProfile?.customer?.contractNumber ||
-      analysis.detectedParties?.customer?.contractNumber,
+      fallbackCustomer?.contractNumber,
     invoiceNumber:
       expense.invoiceNumber ||
       documentProfile?.customer?.invoiceNumber ||
-      analysis.detectedParties?.customer?.invoiceNumber,
+      fallbackCustomer?.invoiceNumber,
     phone:
       expense.phone ||
       documentProfile?.customer?.phone ||
-      analysis.detectedParties?.customer?.phone
+      fallbackCustomer?.phone
   };
 }
 
@@ -592,7 +595,7 @@ export function renderLetter(
     )
   };
 
-  return letter.bodyTemplate
+  let content = letter.bodyTemplate
     .replaceAll("{{firstName}}", values.firstName || defaultPersonalization.firstName)
     .replaceAll("{{lastName}}", values.lastName || defaultPersonalization.lastName)
     .replaceAll("{{address}}", values.address || defaultPersonalization.address)
@@ -602,4 +605,14 @@ export function renderLetter(
     )
     .replaceAll("{{email}}", values.email || defaultPersonalization.email)
     .replaceAll("{{subject}}", letter.subject);
+
+  if (personalization.provider) {
+    content = content.replaceAll(letter.provider, personalization.provider);
+  }
+
+  if (personalization.providerAddress && letter.providerAddress) {
+    content = content.replaceAll(letter.providerAddress, personalization.providerAddress);
+  }
+
+  return content;
 }

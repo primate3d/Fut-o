@@ -76,6 +76,15 @@ const alternativesByCategory: Partial<Record<ExpenseCategory, AlternativeTemplat
       action: "Comparer les frais de mise en service et la duree d'engagement."
     },
     {
+      provider: "Prixtel",
+      name: "Forfait ajustable",
+      url: "https://www.prixtel.com/forfait-mobile/",
+      monthlyPrice: 7.99,
+      subcategories: [ExpenseSubcategory.MOBILE],
+      reason: "Forfait ajustable utile quand la consommation varie selon les mois.",
+      action: "Comparer le palier de data réellement utilisé et le prix hors promotion."
+    },
+    {
       provider: "Free Mobile",
       name: "Forfait 5G sans engagement",
       url: "https://mobile.free.fr/",
@@ -85,6 +94,15 @@ const alternativesByCategory: Partial<Record<ExpenseCategory, AlternativeTemplat
       action: "Comparer l'enveloppe data, la couverture reseau et les conditions hors promotion."
     },
     {
+      provider: "RED by SFR",
+      name: "Forfait mobile sans engagement",
+      url: "https://www.red-by-sfr.fr/forfaits-mobiles/",
+      monthlyPrice: 10.99,
+      subcategories: [ExpenseSubcategory.MOBILE],
+      reason: "Offre sans engagement à vérifier selon la couverture réseau et la data nécessaire.",
+      action: "Comparer les options incluses, les frais de SIM et le prix après promotion."
+    },
+    {
       provider: "B&You",
       name: "Serie mobile sans engagement",
       url: "https://www.bouyguestelecom.fr/forfaits-mobiles/sans-engagement",
@@ -92,6 +110,15 @@ const alternativesByCategory: Partial<Record<ExpenseCategory, AlternativeTemplat
       subcategories: [ExpenseSubcategory.MOBILE],
       reason: "Prix mensuel inferieur au forfait detecte, a verifier selon la data necessaire.",
       action: "Comparer la quantite de data, les appels inclus et les frais de carte SIM."
+    },
+    {
+      provider: "Orange",
+      name: "Forfait mobile sans engagement",
+      url: "https://boutique.orange.fr/mobile/offres-sim-seule",
+      monthlyPrice: 14.99,
+      subcategories: [ExpenseSubcategory.MOBILE],
+      reason: "Alternative d'opérateur historique à comparer si la qualité réseau est prioritaire.",
+      action: "Vérifier l'enveloppe data et le tarif après remise éventuelle."
     },
     {
       provider: "Sosh",

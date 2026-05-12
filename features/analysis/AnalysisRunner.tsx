@@ -15,7 +15,20 @@ import { expenseCategoryLabels, summarizeExpensesByCategory } from "@/lib/expens
 import { formatCurrency } from "@/lib/utils";
 import type { MockAnalysis, UploadedDocument } from "@/types";
 import { generateMockAnalysisFromDocuments } from "./service";
-import { getStoredMockAnalysis, isAnalysisForDocuments, storeMockAnalysis } from "./storage";
+import {
+  getStoredMockAnalysis,
+  hasUsableAnalysis,
+  isAnalysisForDocuments,
+  storeMockAnalysis
+} from "./storage";
+
+const DEBUG_FLOW = process.env.NODE_ENV !== "production";
+
+function debugFlow(message: string, metadata?: Record<string, unknown>) {
+  if (DEBUG_FLOW) {
+    console.debug(`[Futéo flow] Analyse - ${message}`, metadata ?? {});
+  }
+}
 
 const analysisSteps = [
   "Lecture des éléments fournis",
@@ -46,6 +59,12 @@ export function AnalysisRunner() {
       const storedAnalysis = getStoredMockAnalysis();
 
       setDocuments(storedDocuments);
+      debugFlow("documents chargés", {
+        localCount: localDocuments.length,
+        syncedCount: storedDocuments.length,
+        documentIds: storedDocuments.map((document) => document.id),
+        hasStoredAnalysis: Boolean(storedAnalysis)
+      });
 
       if (usableDocuments.length === 0) {
         return;
@@ -59,7 +78,9 @@ export function AnalysisRunner() {
         setCurrentStep(index + 1);
 
         if (index === analysisSteps.length - 1) {
-          const hasCurrentAnalysis = isAnalysisForDocuments(storedAnalysis, storedDocuments);
+          const hasCurrentAnalysis =
+            isAnalysisForDocuments(storedAnalysis, storedDocuments) &&
+            hasUsableAnalysis(storedAnalysis);
           const currentAnalysis = hasCurrentAnalysis && storedAnalysis
             ? storedAnalysis
             : generateMockAnalysisFromDocuments(usableDocuments);
@@ -67,7 +88,7 @@ export function AnalysisRunner() {
           if (!hasCurrentAnalysis) {
             storeMockAnalysis(currentAnalysis);
             setServiceMessage(
-              "Analyse locale préparée à partir des documents ajoutés. Les services OCR et IA seront connectés ensuite."
+              "Analyse préparée avec les données disponibles. Vérifiez les montants et les informations affichées avant d'utiliser les démarches."
             );
           }
 

@@ -16,6 +16,7 @@ import type {
 } from "@/types";
 
 const UPLOADS_DIR = path.join(process.cwd(), "server-data", "uploads");
+const LOCAL_E2E_MODE = process.env.FUTEO_LOCAL_E2E === "1";
 
 type StoredUploadedDocument = UploadedDocument & {
   physicalFileName?: string;
@@ -40,11 +41,49 @@ type OrderRecord = OrderData & {
   id: string;
 };
 
+type LocalE2EStore = {
+  keys: AccessKey[];
+  documentsByKey: Record<string, UploadedDocument[]>;
+  analysesByKey: Record<string, Analysis>;
+  ordersBySessionId: Record<string, OrderRecord>;
+};
+
+const globalStore = globalThis as typeof globalThis & {
+  __futeoLocalE2EStore?: LocalE2EStore;
+};
+
+function getLocalE2EStore() {
+  if (!globalStore.__futeoLocalE2EStore) {
+    globalStore.__futeoLocalE2EStore = {
+      keys: [
+        {
+          id: "local_admin_dev",
+          code: "ADMIN-DEV",
+          plan: "premium",
+          usesRemaining: 999,
+          expiresAt: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString(),
+          isActive: true,
+          createdAt: new Date().toISOString()
+        }
+      ],
+      documentsByKey: {},
+      analysesByKey: {},
+      ordersBySessionId: {}
+    };
+  }
+
+  return globalStore.__futeoLocalE2EStore;
+}
+
 if (!fs.existsSync(UPLOADS_DIR)) {
   fs.mkdirSync(UPLOADS_DIR, { recursive: true });
 }
 
 export async function getKeys(): Promise<AccessKey[]> {
+  if (LOCAL_E2E_MODE) {
+    return getLocalE2EStore().keys;
+  }
+
   const records = await db.select().from(accessKeys);
   return records.map((record) => ({
     ...record,
@@ -54,6 +93,17 @@ export async function getKeys(): Promise<AccessKey[]> {
 }
 
 export async function saveKey(key: AccessKey): Promise<void> {
+  if (LOCAL_E2E_MODE) {
+    const store = getLocalE2EStore();
+    const index = store.keys.findIndex((item) => item.code === key.code);
+    if (index >= 0) {
+      store.keys[index] = key;
+    } else {
+      store.keys.push(key);
+    }
+    return;
+  }
+
   await db
     .insert(accessKeys)
     .values({
@@ -77,6 +127,12 @@ export async function saveKey(key: AccessKey): Promise<void> {
 }
 
 export async function findKeyByCode(code: string): Promise<AccessKey | undefined> {
+  if (LOCAL_E2E_MODE) {
+    return getLocalE2EStore().keys.find(
+      (key) => key.code.toUpperCase() === code.toUpperCase()
+    );
+  }
+
   const records = await db
     .select()
     .from(accessKeys)
@@ -93,6 +149,10 @@ export async function findKeyByCode(code: string): Promise<AccessKey | undefined
 }
 
 export async function getDocumentsByKey(keyCode: string): Promise<UploadedDocument[]> {
+  if (LOCAL_E2E_MODE) {
+    return getLocalE2EStore().documentsByKey[keyCode] ?? [];
+  }
+
   const records = await db
     .select()
     .from(documents)
@@ -115,6 +175,11 @@ export async function getDocumentsByKey(keyCode: string): Promise<UploadedDocume
 }
 
 export async function saveDocuments(keyCode: string, docs: UploadedDocument[]): Promise<void> {
+  if (LOCAL_E2E_MODE) {
+    getLocalE2EStore().documentsByKey[keyCode] = docs;
+    return;
+  }
+
   const existingDocs = await getDocumentsByKey(keyCode);
   const newIds = docs.map((document) => document.id);
   const idsToDelete = existingDocs
@@ -157,6 +222,10 @@ export async function saveDocuments(keyCode: string, docs: UploadedDocument[]): 
 }
 
 export async function getAnalysisByKey(keyCode: string): Promise<Analysis | null> {
+  if (LOCAL_E2E_MODE) {
+    return getLocalE2EStore().analysesByKey[keyCode] ?? null;
+  }
+
   const records = await db
     .select()
     .from(analyses)
@@ -180,6 +249,11 @@ export async function getAnalysisByKey(keyCode: string): Promise<Analysis | null
 }
 
 export async function saveAnalysis(keyCode: string, analysis: Analysis): Promise<void> {
+  if (LOCAL_E2E_MODE) {
+    getLocalE2EStore().analysesByKey[keyCode] = analysis;
+    return;
+  }
+
   await db
     .insert(analyses)
     .values({
@@ -212,6 +286,14 @@ export async function saveAnalysis(keyCode: string, analysis: Analysis): Promise
 }
 
 export async function saveOrder(sessionId: string, orderData: OrderData): Promise<void> {
+  if (LOCAL_E2E_MODE) {
+    getLocalE2EStore().ordersBySessionId[sessionId] = {
+      id: sessionId,
+      ...orderData
+    };
+    return;
+  }
+
   await db
     .insert(orders)
     .values({
@@ -240,6 +322,10 @@ export async function saveOrder(sessionId: string, orderData: OrderData): Promis
 }
 
 export async function getOrderBySessionId(sessionId: string): Promise<OrderRecord | undefined> {
+  if (LOCAL_E2E_MODE) {
+    return getLocalE2EStore().ordersBySessionId[sessionId];
+  }
+
   const records = await db.select().from(orders).where(eq(orders.id, sessionId));
   const record = records[0];
   if (!record) return undefined;

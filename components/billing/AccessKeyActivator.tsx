@@ -57,8 +57,7 @@ export function AccessKeyActivator() {
         </div>
         <div className="flex items-center gap-2">
           <ShoppingCart className="text-sage-700" size={17} />
-          Pas encore de clé ? La page tarifs permet de générer une clé temporaire
-          pendant la phase de test.
+          Pas encore de clé ? La page tarifs présente les accès disponibles.
         </div>
       </div>
       <form className="mt-6 space-y-4" onSubmit={handleSubmit}>

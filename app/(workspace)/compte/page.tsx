@@ -1,6 +1,5 @@
 import { RotateCcw, ShieldCheck } from "lucide-react";
 import { Card } from "@/components/ui/Card";
-import { mockUser } from "@/data/mock";
 import { ResetAuditButton } from "@/features/privacy/ResetAuditButton";
 import { DeleteDocumentsButton } from "@/features/privacy/DeleteDocumentsButton";
 
@@ -15,12 +14,12 @@ export default function AccountPage() {
         </p>
       </div>
       <Card>
-        <h2 className="text-xl font-semibold text-navy-900">Profil</h2>
+        <h2 className="text-xl font-semibold text-navy-900">Accès personnel</h2>
         <div className="mt-4 grid gap-3 text-sm text-slate-600 sm:grid-cols-2">
-          <p>Prénom : {mockUser.firstName}</p>
-          <p>Nom : {mockUser.lastName}</p>
-          <p>Email : {mockUser.email}</p>
-          <p>Inscription : {mockUser.createdAt}</p>
+          <p>Statut : espace ouvert</p>
+          <p>Durée : 14 jours après activation</p>
+          <p>Usage : personnel</p>
+          <p>Abonnement : aucun prélèvement mensuel</p>
         </div>
       </Card>
       <div className="grid gap-4 md:grid-cols-2">

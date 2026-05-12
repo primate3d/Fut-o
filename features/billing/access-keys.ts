@@ -157,6 +157,19 @@ export function getStoredAccessKey(): AccessKey | null {
 }
 
 export async function storeAccessKey(accessKey: AccessKey) {
+  const previousKey = getStoredAccessKey();
+  if (previousKey?.code !== accessKey.code && typeof window !== "undefined") {
+    window.localStorage.removeItem("futeo.uploadedDocuments");
+    window.localStorage.removeItem("futeo.mockAnalysis");
+    window.localStorage.removeItem("futeo.uploadedDocumentsOwner");
+    if (process.env.NODE_ENV !== "production") {
+      console.debug("[Futéo flow] Clé changée: audit local réinitialisé", {
+        previousKey: previousKey?.code,
+        nextKey: accessKey.code
+      });
+    }
+  }
+
   window.localStorage.setItem(ACCESS_KEY_STORAGE_KEY, JSON.stringify(accessKey));
 
   try {

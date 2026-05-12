@@ -2,7 +2,7 @@ const faqs = [
   {
     question: "Qui voit mes documents ?",
     answer:
-      "Futéo utilise uniquement les documents que vous choisissez d'ajouter pour construire votre parcours. Ils ne sont pas affichés publiquement, ni revendus. Les accès techniques dépendent des prestataires réellement connectés au service, qui doivent être listés dans la politique de confidentialité avant lancement."
+      "Futéo utilise uniquement les documents que vous choisissez d'ajouter pour construire votre parcours. Ils ne sont pas affichés publiquement, ni revendus. Les prestataires nécessaires au fonctionnement du service sont décrits dans la politique de confidentialité."
   },
   {
     question: "Quels types de contrats sont pris en charge ?",

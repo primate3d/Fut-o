@@ -32,9 +32,18 @@ import type { MockAnalysis } from "@/types";
 import {
   getStoredAnalysisServer,
   getStoredMockAnalysis,
+  hasUsableAnalysis,
   isAnalysisForDocuments,
   storeMockAnalysis
 } from "./storage";
+
+const DEBUG_FLOW = process.env.NODE_ENV !== "production";
+
+function debugFlow(message: string, metadata?: Record<string, unknown>) {
+  if (DEBUG_FLOW) {
+    console.debug(`[Futéo flow] Résultats - ${message}`, metadata ?? {});
+  }
+}
 
 export function ResultsPanel() {
   const [analysis, setAnalysis] = useState<MockAnalysis | null>(null);
@@ -69,7 +78,7 @@ export function ResultsPanel() {
     } catch {
       setAlternatives([]);
       setServiceMessage(
-        "Les alternatives détaillées seront affichées quand le service de comparaison sera connecté."
+        "Les alternatives détaillées ne sont pas disponibles pour le moment. Vous pouvez continuer avec les pistes déjà identifiées."
       );
     } finally {
       setIsLoadingAlternatives(false);
@@ -79,7 +88,16 @@ export function ResultsPanel() {
   useEffect(() => {
     const storedAnalysis = getStoredMockAnalysis();
     const documents = getStoredUploadedDocuments();
-    const hasCurrentAnalysis = isAnalysisForDocuments(storedAnalysis, documents);
+    const hasCurrentAnalysis =
+      isAnalysisForDocuments(storedAnalysis, documents) &&
+      hasUsableAnalysis(storedAnalysis);
+
+    debugFlow("état local", {
+      documentCount: documents.length,
+      documentIds: documents.map((document) => document.id),
+      hasStoredAnalysis: Boolean(storedAnalysis),
+      hasCurrentAnalysis
+    });
 
     setAnalysis(hasCurrentAnalysis ? storedAnalysis : null);
 
@@ -90,8 +108,24 @@ export function ResultsPanel() {
     async function loadServerState() {
       const serverDocuments = await getStoredUploadedDocumentsServer();
       const serverAnalysis = await getStoredAnalysisServer();
+      const hasServerAnalysis =
+        isAnalysisForDocuments(serverAnalysis, serverDocuments) &&
+        hasUsableAnalysis(serverAnalysis);
 
-      if (isAnalysisForDocuments(serverAnalysis, serverDocuments) && serverAnalysis) {
+      debugFlow("état serveur/local après sync", {
+        documentCount: serverDocuments.length,
+        documentIds: serverDocuments.map((document) => document.id),
+        hasServerAnalysis: Boolean(serverAnalysis),
+        hasCurrentServerAnalysis: hasServerAnalysis
+      });
+
+      if (serverDocuments.length === 0) {
+        setAnalysis(null);
+        setAlternatives([]);
+        return;
+      }
+
+      if (hasServerAnalysis && serverAnalysis) {
         storeMockAnalysis(serverAnalysis);
         setAnalysis(serverAnalysis);
         void loadAlternatives(serverAnalysis);

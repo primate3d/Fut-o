@@ -7,15 +7,15 @@ import { siteConfig } from "@/config/site";
 export function Header() {
   return (
     <header className="sticky top-0 z-40 border-b border-navy-100/80 bg-white/90 backdrop-blur-xl">
-      <div className="mx-auto flex h-24 max-w-7xl items-center justify-between px-4 sm:px-6 lg:px-8">
-        <Link className="flex flex-col items-start gap-1" href="/">
+      <div className="mx-auto flex h-24 max-w-7xl items-center justify-between gap-4 px-4 sm:px-6 lg:px-8">
+        <Link className="flex min-w-0 flex-col items-start gap-1" href="/">
           <Logo className="h-10 sm:h-12" />
           <span className="rounded-full bg-sage-50 px-2.5 py-0.5 text-[10px] font-semibold leading-none text-navy-800 sm:text-[11px]">
             On analyse. On compare. On vous aide à{" "}
             <span className="text-sage-700">agir.</span>
           </span>
         </Link>
-        <nav className="hidden items-center gap-2 rounded-full border border-navy-100 bg-navy-50/70 p-1 md:flex">
+        <nav className="hidden shrink-0 items-center gap-2 rounded-full border border-navy-100 bg-navy-50/70 p-1 md:flex">
           {siteConfig.mainNav.map((item) => (
             <Link
               className="rounded-full px-4 py-2 text-sm font-semibold text-slate-600 transition hover:bg-white hover:text-navy-900 hover:shadow-sm"

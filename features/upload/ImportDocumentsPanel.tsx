@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import {
   generateMockAnalysisFromDocuments,
+  hasUsableAnalysis,
   MOCK_ANALYSIS_STORAGE_KEY,
   storeMockAnalysis
 } from "@/features/analysis";
@@ -48,6 +49,7 @@ function inferProviderFromFileName(fileName: string) {
     "orange",
     "sfr",
     "free",
+    "nrj mobile",
     "bouygues",
     "netflix",
     "canal",
@@ -76,6 +78,9 @@ function inferProviderFromFileName(fileName: string) {
 
 function clearStoredAnalysis() {
   window.localStorage.removeItem(MOCK_ANALYSIS_STORAGE_KEY);
+  if (process.env.NODE_ENV !== "production") {
+    console.debug("[Futéo flow] Analyse locale réinitialisée");
+  }
 }
 
 function hasAcceptedFileType(file: File) {
@@ -165,7 +170,7 @@ export function ImportDocumentsPanel() {
     }
 
     setStatusMessage(
-      "Documents ajoutés. Si la synchronisation serveur n'est pas disponible, ils restent utilisés localement pour tester le parcours."
+      "Documents ajoutés. Vous pouvez lancer l'analyse lorsque les fichiers utiles sont prêts."
     );
     clearStoredAnalysis();
   }
@@ -214,10 +219,18 @@ export function ImportDocumentsPanel() {
       return;
     }
 
+    clearStoredAnalysis();
     setIsAnalyzing(true);
 
     try {
       const activeKey = getStoredAccessKey();
+      if (process.env.NODE_ENV !== "production") {
+        console.debug("[Futéo flow] Lancement analyse", {
+          keyCode: activeKey?.code,
+          documentCount: usableDocuments.length,
+          documentIds: usableDocuments.map((document) => document.id)
+        });
+      }
       const response = await fetch("/api/analyse", {
         method: "POST",
         headers: {
@@ -225,12 +238,13 @@ export function ImportDocumentsPanel() {
         },
         body: JSON.stringify({
           documents: usableDocuments,
-          code: activeKey?.code
+          code: activeKey?.code,
+          force: true
         })
       });
       const payload = (await response.json()) as { analysis?: MockAnalysis };
 
-      if (!response.ok || !payload.analysis) {
+      if (!response.ok || !payload.analysis || !hasUsableAnalysis(payload.analysis)) {
         throw new Error("Service d'analyse serveur indisponible.");
       }
 
@@ -240,7 +254,7 @@ export function ImportDocumentsPanel() {
       const localAnalysis = generateMockAnalysisFromDocuments(usableDocuments);
       storeMockAnalysis(localAnalysis);
       setStatusMessage(
-        "Analyse locale préparée à partir des documents ajoutés. Les services OCR et IA seront connectés ensuite."
+        "Analyse préparée avec les données disponibles. Vérifiez les montants et les informations affichées avant d'utiliser les démarches."
       );
       router.push("/analyse");
     } finally {

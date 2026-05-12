@@ -14,6 +14,7 @@ import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { 
+  hasUsableAnalysis,
   isAnalysisForDocuments,
   getStoredAnalysisServer,
   getStoredMockAnalysis
@@ -45,14 +46,19 @@ export default function DashboardPage() {
       const localAnalysis = getStoredMockAnalysis();
       setDocuments(localDocuments);
       setAnalysis(
-        isAnalysisForDocuments(localAnalysis, localDocuments) ? localAnalysis : null
+        isAnalysisForDocuments(localAnalysis, localDocuments) &&
+          hasUsableAnalysis(localAnalysis)
+          ? localAnalysis
+          : null
       );
 
       const serverDocuments = await getStoredUploadedDocumentsServer();
       const serverAnalysis = await getStoredAnalysisServer();
-      const nextAnalysis = isAnalysisForDocuments(serverAnalysis, serverDocuments)
+      const nextAnalysis = isAnalysisForDocuments(serverAnalysis, serverDocuments) &&
+        hasUsableAnalysis(serverAnalysis)
         ? serverAnalysis
-        : isAnalysisForDocuments(localAnalysis, serverDocuments)
+        : isAnalysisForDocuments(localAnalysis, serverDocuments) &&
+            hasUsableAnalysis(localAnalysis)
           ? localAnalysis
           : null;
 

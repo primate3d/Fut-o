@@ -174,6 +174,8 @@ export type LetterPersonalization = {
   address: string;
   customerNumber: string;
   email: string;
+  provider?: string;
+  providerAddress?: string;
 };
 
 export type GeneratedLetter = {

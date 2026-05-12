@@ -4,6 +4,7 @@ out
 dist
 .env*
 !.env.example
+server-data/
 npm-debug.log*
 pnpm-debug.log*
 yarn-debug.log*

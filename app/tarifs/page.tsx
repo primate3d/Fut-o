@@ -24,9 +24,9 @@ const faqItems = [
       "Le plan Simple donne une première lecture. L'Audit foyer ajoute des pistes de comparaison. Le Premium inclut le rapport complet et les courriers prêts à adapter."
   },
   {
-    question: "Le paiement réel est-il déjà connecté ?",
+    question: "Comment fonctionne l'accès ?",
     answer:
-      "Pas encore sur cette version de test. Stripe sera branché avant la vente publique. Pour l'instant, les boutons génèrent une clé temporaire locale afin de tester le parcours."
+      "Vous choisissez une formule, puis vous utilisez votre clé personnelle pour ouvrir l'espace Futéo correspondant. L'accès est ponctuel, sans abonnement ni prélèvement mensuel."
   }
 ];
 
@@ -125,8 +125,8 @@ export default function PricingPage() {
             Choisissez une clé et ouvrez votre espace.
           </h2>
           <p className="mt-3 text-sm leading-7 text-white/70">
-            La version actuelle permet de tester le parcours avec une clé temporaire.
-            Le paiement réel sera connecté avant la vente publique.
+            Votre accès vous permet de regrouper vos documents, lire les postes
+            importants, préparer vos démarches et conserver la main à chaque étape.
           </p>
           <Button className="mt-7" href="#plans" variant="secondary">
             Voir les plans <ArrowRight size={18} />

@@ -7,6 +7,7 @@ import { siteConfig } from "@/config/site";
 import {
   getStoredAnalysisServer,
   getStoredMockAnalysis,
+  hasUsableAnalysis,
   isAnalysisForDocuments,
   storeMockAnalysis
 } from "@/features/analysis";
@@ -33,7 +34,7 @@ export function JourneyProgress() {
     analysis: ReturnType<typeof getStoredMockAnalysis>
   ) => {
     const hasUsableDocuments = documents.some((document) => document.status !== "error");
-    const hasAnalysis = isAnalysisForDocuments(analysis, documents);
+    const hasAnalysis = isAnalysisForDocuments(analysis, documents) && hasUsableAnalysis(analysis);
 
     if (!hasUsableDocuments) {
       setCompletedStep(0);
@@ -56,12 +57,15 @@ export function JourneyProgress() {
     async function loadServerState() {
       const serverDocuments = await getStoredUploadedDocumentsServer();
       const serverAnalysis = await getStoredAnalysisServer();
+      const hasServerAnalysis =
+        isAnalysisForDocuments(serverAnalysis, serverDocuments) &&
+        hasUsableAnalysis(serverAnalysis);
 
-      if (serverAnalysis) {
+      if (serverAnalysis && hasServerAnalysis) {
         storeMockAnalysis(serverAnalysis);
       }
 
-      applyProgress(serverDocuments, serverAnalysis ?? analysis);
+      applyProgress(serverDocuments, hasServerAnalysis ? serverAnalysis : analysis);
     }
 
     void loadServerState();

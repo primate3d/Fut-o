@@ -10,6 +10,7 @@ import { StatCard } from "@/components/ui/StatCard";
 import {
   getStoredAnalysisServer,
   getStoredMockAnalysis,
+  hasUsableAnalysis,
   isAnalysisForDocuments,
   storeMockAnalysis
 } from "@/features/analysis";
@@ -50,6 +51,35 @@ function getScoreBadge(score: number) {
   return { label: "Prioritaire", tone: "neutral" as const };
 }
 
+const DEBUG_FLOW = process.env.NODE_ENV !== "production";
+
+function debugFlow(message: string, metadata?: Record<string, unknown>) {
+  if (DEBUG_FLOW) {
+    console.debug(`[Futéo flow] Rapport - ${message}`, metadata ?? {});
+  }
+}
+
+function hasReportContent(analysis: MockAnalysis | null) {
+  return Boolean(
+    analysis &&
+      (analysis.expenses.length > 0 ||
+        analysis.recommendations.length > 0 ||
+        analysis.anomalies.length > 0)
+  );
+}
+
+function sharesCurrentDocument(
+  analysis: MockAnalysis | null,
+  documents: ReturnType<typeof getStoredUploadedDocuments>
+) {
+  if (!analysis || documents.length === 0) {
+    return false;
+  }
+
+  const currentDocumentIds = new Set(documents.map((document) => document.id));
+  return analysis.documents.some((document) => currentDocumentIds.has(document.id));
+}
+
 const actionPlan = [
   "Comparer les contrats les plus chers",
   "Préparer une négociation quand c'est pertinent",
@@ -67,20 +97,60 @@ export function ReportPanel() {
   useEffect(() => {
     const storedAnalysis = getStoredMockAnalysis();
     const documents = getStoredUploadedDocuments();
-    const hasCurrentAnalysis = isAnalysisForDocuments(storedAnalysis, documents);
+    const hasCurrentAnalysis =
+      isAnalysisForDocuments(storedAnalysis, documents) &&
+      hasUsableAnalysis(storedAnalysis);
+    const hasUsableStoredAnalysis =
+      hasCurrentAnalysis ||
+      (hasReportContent(storedAnalysis) && sharesCurrentDocument(storedAnalysis, documents));
 
-    setAnalysis(hasCurrentAnalysis ? storedAnalysis : null);
+    debugFlow("état local", {
+      documentCount: documents.length,
+      documentIds: documents.map((document) => document.id),
+      hasStoredAnalysis: Boolean(storedAnalysis),
+      hasCurrentAnalysis,
+      hasUsableStoredAnalysis
+    });
 
-    if (!storedAnalysis || !hasCurrentAnalysis) {
+    setAnalysis(hasUsableStoredAnalysis ? storedAnalysis : null);
+
+    if (!storedAnalysis || !hasUsableStoredAnalysis) {
       async function loadServerState() {
         const serverDocuments = await getStoredUploadedDocumentsServer();
         const serverAnalysis = await getStoredAnalysisServer();
+        const hasCurrentServerAnalysis =
+          isAnalysisForDocuments(serverAnalysis, serverDocuments) &&
+          hasUsableAnalysis(serverAnalysis);
+        const hasUsableServerAnalysis =
+          hasCurrentServerAnalysis ||
+          (hasReportContent(serverAnalysis) &&
+            sharesCurrentDocument(serverAnalysis, serverDocuments));
 
-        if (isAnalysisForDocuments(serverAnalysis, serverDocuments) && serverAnalysis) {
+        debugFlow("état serveur/local après sync", {
+          documentCount: serverDocuments.length,
+          documentIds: serverDocuments.map((document) => document.id),
+          hasServerAnalysis: Boolean(serverAnalysis),
+          hasCurrentServerAnalysis,
+          hasUsableServerAnalysis
+        });
+
+        if (serverDocuments.length === 0) {
+          setAnalysis(null);
+          setAlternatives([]);
+          setRecommendedLetters([]);
+          return;
+        }
+
+        if (hasUsableServerAnalysis && serverAnalysis) {
           storeMockAnalysis(serverAnalysis);
           setAnalysis(serverAnalysis);
           setAlternatives(findAlternativeOffers(serverAnalysis.expenses).slice(0, 5));
           setRecommendedLetters(generateLettersFromAnalysis(serverAnalysis).slice(0, 5));
+          if (!hasCurrentServerAnalysis) {
+            setServiceMessage(
+              "Rapport préparé avec les données disponibles. Certaines informations peuvent être incomplètes."
+            );
+          }
         }
       }
 
@@ -126,7 +196,7 @@ export function ReportPanel() {
         setAlternatives(findAlternativeOffers(analysisToLoad.expenses).slice(0, 5));
         setRecommendedLetters(generateLettersFromAnalysis(analysisToLoad).slice(0, 5));
         setServiceMessage(
-          "Rapport préparé localement. Les services externes de comparaison, d'email et de stockage seront connectés ensuite."
+          "Rapport préparé avec les données disponibles. Certaines informations peuvent être incomplètes."
         );
       }
     }
@@ -164,6 +234,18 @@ export function ReportPanel() {
         description="Ajoutez les documents que vous souhaitez comparer pour obtenir votre rapport."
         icon={<FileSearch size={24} />}
         title="Votre rapport sera prêt après l'analyse"
+      />
+    );
+  }
+
+  if (analysis.expenses.length === 0) {
+    return (
+      <EmptyState
+        actionHref="/analyse"
+        actionLabel="Relancer l'analyse"
+        description="Une analyse existe, mais elle ne contient aucun poste exploitable pour générer un rapport fiable."
+        icon={<FileSearch size={24} />}
+        title="Rapport incomplet"
       />
     );
   }
@@ -381,3 +463,4 @@ export function ReportPanel() {
     </section>
   );
 }
+

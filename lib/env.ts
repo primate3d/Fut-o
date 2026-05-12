@@ -7,6 +7,7 @@ const envSchema = z.object({
     .url("DATABASE_URL doit être une URL PostgreSQL valide")
     .default("postgresql://futeo:futeo@localhost:5432/futeo"),
   OPENAI_API_KEY: z.string().default(""),
+  FUTEO_LOCAL_E2E: z.string().optional(),
   STRIPE_SECRET_KEY: z.string().default("sk_test_placeholder"),
   STRIPE_WEBHOOK_SECRET: z.string().default("whsec_placeholder"),
   RESEND_API_KEY: z.string().optional(),

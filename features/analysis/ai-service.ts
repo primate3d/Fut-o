@@ -28,6 +28,98 @@ type AiAnalysisPayload = {
   anomalies?: AiAnomaly[];
 };
 
+function getLocalPotentialSaving(category: Expense["category"], monthlyAmount: number) {
+  if (category === "TELECOM") return Math.min(120, Math.max(48, Math.round(monthlyAmount * 4.8)));
+  if (category === "ENERGY") return Math.min(220, Math.max(80, Math.round(monthlyAmount * 1.4)));
+  if (category === "INSURANCE") return Math.min(180, Math.max(60, Math.round(monthlyAmount * 2.2)));
+  if (category === "BANKING") return Math.min(120, Math.max(48, Math.round(monthlyAmount * 5)));
+  return Math.min(100, Math.max(36, Math.round(monthlyAmount * 3)));
+}
+
+function getLocalRecommendationTitle(category: Expense["category"]) {
+  if (category === "TELECOM") return "Comparer le forfait ou l'offre télécom";
+  if (category === "ENERGY") return "Comparer le fournisseur d'énergie";
+  if (category === "INSURANCE") return "Revoir le contrat d'assurance";
+  if (category === "BANKING") return "Vérifier les frais bancaires";
+  return "Vérifier l'abonnement";
+}
+
+export function analyzeDocumentsLocally(
+  documents: ExtractedDocument[],
+  keyCode: string
+): Analysis {
+  const documentProfiles = buildDocumentPartyProfiles(documents);
+  const expenses: Expense[] = Object.values(documentProfiles).map((profile, index) => {
+    const monthlyAmount = profile.invoiceAmount ?? 0;
+    const category = inferExpenseCategoryFromDocumentType(profile.documentType);
+    const subcategory = inferExpenseSubcategoryFromDocumentType(profile.documentType);
+
+    return {
+      id: `exp_${keyCode}_${index}`,
+      label: profile.subscriptionType ?? "Contrat",
+      provider: profile.providerName ?? "Fournisseur",
+      category,
+      subcategory,
+      isRecurring: true,
+      monthlyAmount,
+      yearlyAmount: monthlyAmount * 12,
+      documentType: profile.documentType,
+      sourceDocumentId: profile.documentId,
+      sourceDocumentName: profile.fileName,
+      customerNumber: profile.customer?.customerNumber,
+      contractNumber: profile.customer?.contractNumber,
+      invoiceNumber: profile.customer?.invoiceNumber,
+      phone: profile.customer?.phone,
+      recurrence: "monthly"
+    };
+  });
+
+  const recommendations: Recommendation[] = expenses
+    .filter((expense) => expense.monthlyAmount > 0)
+    .map((expense, index) => ({
+      id: `rec_${keyCode}_${index}`,
+      title: getLocalRecommendationTitle(expense.category),
+      description:
+        "Les éléments détectés permettent de comparer ce poste avec des offres actuelles ou de préparer une demande d'évolution.",
+      category: expense.category,
+      potentialSaving: getLocalPotentialSaving(expense.category, expense.monthlyAmount),
+      priority: expense.monthlyAmount >= 30 ? "high" : "medium"
+    }));
+
+  const anomalies: AnalysisAnomaly[] = Object.values(documentProfiles)
+    .filter((profile) => !profile.invoiceAmount)
+    .map((profile, index) => ({
+      id: `anom_${keyCode}_${index}`,
+      title: "Montant à vérifier",
+      description:
+        `Le document ${profile.fileName ?? "importé"} ne contient pas de montant mensuel exploitable avec suffisamment de confiance.`,
+      severity: "medium",
+      category: inferExpenseCategoryFromDocumentType(profile.documentType)
+    }));
+
+  const totalMonthlyAmount = expenses.reduce(
+    (sum, expense) => sum + expense.monthlyAmount,
+    0
+  );
+  const yearlyPotentialSavings = recommendations.reduce(
+    (sum, recommendation) => sum + recommendation.potentialSaving,
+    0
+  );
+
+  return {
+    id: `analysis_${keyCode}_${Date.now()}`,
+    generatedAt: new Date().toISOString(),
+    documents,
+    detectedParties: mergeDetectedParties(undefined, documentProfiles),
+    expenses,
+    recommendations,
+    anomalies,
+    totalMonthlyAmount,
+    totalYearlyAmount: totalMonthlyAmount * 12,
+    yearlyPotentialSavings
+  };
+}
+
 function getOpenAI() {
   if (!_openai) {
     if (!process.env.OPENAI_API_KEY) {

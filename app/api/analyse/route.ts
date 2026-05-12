@@ -1,15 +1,19 @@
 import { NextResponse } from "next/server";
 import { findKeyByCode, getAnalysisByKey, saveAnalysis, saveKey } from "@/lib/server/db";
-import { analyzeDocumentsWithAI } from "@/features/analysis/ai-service";
+import {
+  analyzeDocumentsLocally,
+  analyzeDocumentsWithAI
+} from "@/features/analysis/ai-service";
 import { logger, withLatency } from "@/lib/server/logger";
 import { extractTextFromDocument } from "@/lib/server/ocr";
 import type { UploadedDocument } from "@/types";
 
 export async function POST(request: Request) {
   try {
-    const { documents, code } = (await request.json()) as { 
+    const { documents, code, force } = (await request.json()) as { 
       documents?: UploadedDocument[];
       code?: string;
+      force?: boolean;
     };
 
     if (!code) {
@@ -31,7 +35,7 @@ export async function POST(request: Request) {
     }
 
     // 2. Vérification du cache
-    const existingAnalysis = await getAnalysisByKey(code);
+    const existingAnalysis = force ? null : await getAnalysisByKey(code);
     if (existingAnalysis?.detectedParties?.documents) {
       return NextResponse.json({ analysis: existingAnalysis, cached: true });
     }
@@ -49,6 +53,10 @@ export async function POST(request: Request) {
           return { ...doc, extractedText: text };
         })
       );
+
+      if (process.env.FUTEO_LOCAL_E2E === "1") {
+        return analyzeDocumentsLocally(documentsWithContent, code);
+      }
 
       return analyzeDocumentsWithAI(documentsWithContent, code);
     });

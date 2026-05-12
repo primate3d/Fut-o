@@ -39,13 +39,11 @@ export function PricingAccessKeys() {
         <div className="flex items-start gap-3">
           <Info className="mt-0.5 shrink-0 text-sage-700" size={20} />
           <div>
-            <p className="font-semibold text-[#12243d]">
-              Paiement réel bientôt connecté
-            </p>
+            <p className="font-semibold text-[#12243d]">Accès Futéo</p>
             <p className="mt-1 text-sm leading-6 text-slate-600">
-              Stripe n'est pas encore activé sur cette version. Pour tester le
-              parcours complet, choisissez un plan : une clé temporaire sera générée
-              localement, sans paiement réel.
+              Choisissez une formule pour lancer votre analyse et préparer vos
+              démarches. Chaque accès est personnel, valable 14 jours et sans
+              abonnement.
             </p>
           </div>
         </div>
@@ -66,7 +64,7 @@ export function PricingAccessKeys() {
           <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
             <div>
               <p className="text-sm font-semibold uppercase tracking-wide text-sage-700">
-                Clé temporaire générée
+                Accès personnel prêt
               </p>
               <h2 className="mt-2 text-2xl font-bold text-[#12243d]">
                 Votre clé personnelle est prête
@@ -220,7 +218,7 @@ function PricingPlanCard({
           type="button"
           variant="secondary"
         >
-          Générer une clé temporaire
+          Obtenir mon accès
         </Button>
       </div>
     </div>

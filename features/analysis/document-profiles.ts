@@ -40,20 +40,31 @@ function parseAmount(value?: string) {
 }
 
 function detectProvider(document: ExtractedDocument) {
-  const text = normalize(`${document.provider ?? ""} ${document.fileName} ${document.extractedText}`);
-  const providers = [
-    "SFR",
-    "Orange",
-    "Free",
-    "Bouygues Telecom",
-    "B&You",
-    "Sosh",
-    "RED by SFR",
-    "EDF",
-    "Engie"
+  const extractedText = normalize(document.extractedText);
+  const fallbackText = normalize(`${document.provider ?? ""} ${document.fileName}`);
+  const providers: Array<{ name: string; aliases: string[] }> = [
+    { name: "NRJ Mobile", aliases: ["nrj mobile", "nrjmobile"] },
+    { name: "RED by SFR", aliases: ["red by sfr", "red sfr"] },
+    { name: "B&You", aliases: ["b&you", "b and you", "bandyou"] },
+    { name: "Bouygues Telecom", aliases: ["bouygues telecom", "bouygues"] },
+    { name: "Sosh", aliases: ["sosh"] },
+    { name: "Orange", aliases: ["orange"] },
+    { name: "SFR", aliases: ["sfr"] },
+    { name: "Free Mobile", aliases: ["free mobile"] },
+    { name: "Free", aliases: ["free"] },
+    { name: "EDF", aliases: ["edf"] },
+    { name: "Engie", aliases: ["engie"] }
   ];
 
-  return providers.find((provider) => text.includes(normalize(provider))) ?? document.provider;
+  return (
+    providers.find((provider) =>
+      provider.aliases.some((alias) => extractedText.includes(normalize(alias)))
+    )?.name ??
+    providers.find((provider) =>
+      provider.aliases.some((alias) => fallbackText.includes(normalize(alias)))
+    )?.name ??
+    document.provider
+  );
 }
 
 function getSubscriptionType(documentType: UploadedDocumentType) {

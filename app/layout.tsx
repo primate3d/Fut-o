@@ -1,11 +1,9 @@
 import type { Metadata } from "next";
-import { Inter } from "next/font/google";
 import { Footer } from "@/components/layout/Footer";
 import { Header } from "@/components/layout/Header";
 import { LifecycleManager } from "@/components/layout/LifecycleManager";
 import "./globals.css";
 
-const inter = Inter({ subsets: ["latin"] });
 const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || "https://futeo.fr";
 
 export const metadata: Metadata = {
@@ -46,7 +44,7 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return (
     <html lang="fr">
-      <body className={inter.className}>
+      <body>
         <Header />
         <LifecycleManager />
         {children}

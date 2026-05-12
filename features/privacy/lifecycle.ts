@@ -2,6 +2,16 @@ import { ACCESS_KEY_STORAGE_KEY, getStoredAccessKey } from "@/features/billing/a
 import { MOCK_ANALYSIS_STORAGE_KEY } from "@/features/analysis/storage";
 import { UPLOADED_DOCUMENTS_STORAGE_KEY } from "@/features/upload/storage";
 
+const UPLOADED_DOCUMENTS_OWNER_KEY = "futeo.uploadedDocumentsOwner";
+
+function markEmptyDocumentSession() {
+  const activeKey = getStoredAccessKey();
+  window.localStorage.setItem(UPLOADED_DOCUMENTS_STORAGE_KEY, "[]");
+  if (activeKey?.code) {
+    window.localStorage.setItem(UPLOADED_DOCUMENTS_OWNER_KEY, activeKey.code);
+  }
+}
+
 /**
  * Supprime uniquement les fichiers sources importés.
  * L'analyse et les courriers restent disponibles.
@@ -22,7 +32,7 @@ export async function purgeSourceDocuments() {
     }
   }
 
-  window.localStorage.removeItem(UPLOADED_DOCUMENTS_STORAGE_KEY);
+  markEmptyDocumentSession();
   
   // On nettoie aussi la reference dans l'analyse pour la coherence
   const storedAnalysis = window.localStorage.getItem(MOCK_ANALYSIS_STORAGE_KEY);
@@ -42,7 +52,7 @@ export async function purgeSourceDocuments() {
  */
 export function purgeFullAudit() {
   if (typeof window === "undefined") return;
-  window.localStorage.removeItem(UPLOADED_DOCUMENTS_STORAGE_KEY);
+  markEmptyDocumentSession();
   window.localStorage.removeItem(MOCK_ANALYSIS_STORAGE_KEY);
 }
 
@@ -53,4 +63,5 @@ export function purgeAllSessionData() {
   if (typeof window === "undefined") return;
   purgeFullAudit();
   window.localStorage.removeItem(ACCESS_KEY_STORAGE_KEY);
+  window.localStorage.removeItem(UPLOADED_DOCUMENTS_OWNER_KEY);
 }
