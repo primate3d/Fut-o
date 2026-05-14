@@ -84,6 +84,7 @@ export function PricingAccessKeys() {
     setPurchaseMessage(null);
 
     if (plan.plan === "decouverte") {
+      console.log("free access clicked");
       setShowFreeForm(true);
       return;
     }
@@ -107,34 +108,42 @@ export function PricingAccessKeys() {
       </Card>
 
       {showFreeForm ? (
-        <Card className="border-sage-200 bg-sage-50/80">
-          <form className="space-y-4" onSubmit={handleFreeSubmit}>
-            <div>
-              <p className="font-semibold text-[#12243d]">Recevoir mon accès gratuit</p>
-              <p className="mt-1 text-sm leading-6 text-slate-600">
-                Indiquez votre email pour recevoir votre clé gratuite. Une seule clé gratuite
-                peut être demandée par email.
-              </p>
-            </div>
-            <div className="grid gap-3 sm:grid-cols-[1fr_auto]">
-              <label className="sr-only" htmlFor="free-access-email">
-                Email
-              </label>
-              <input
-                className="min-h-12 rounded-xl border border-sage-200 bg-white px-4 text-sm text-[#12243d] outline-none transition focus:border-sage-500 focus:ring-2 focus:ring-sage-100"
-                id="free-access-email"
-                inputMode="email"
-                onChange={(event) => setFreeEmail(event.target.value)}
-                placeholder="votre@email.fr"
-                type="email"
-                value={freeEmail}
-              />
-              <Button disabled={pendingPlan === "decouverte"} type="submit">
-                {pendingPlan === "decouverte" ? "Envoi..." : "Recevoir ma clé"}
-              </Button>
-            </div>
-          </form>
-        </Card>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#12243d]/45 px-4 py-8">
+          <Card className="w-full max-w-lg border-sage-200 bg-white shadow-xl">
+            <form className="space-y-4" onSubmit={handleFreeSubmit}>
+              <div>
+                <p className="font-semibold text-[#12243d]">Recevoir mon accès gratuit</p>
+                <p className="mt-1 text-sm leading-6 text-slate-600">
+                  Indiquez votre email pour recevoir votre clé gratuite. Une seule clé gratuite
+                  peut être demandée par email.
+                </p>
+              </div>
+              <div className="space-y-3">
+                <label className="sr-only" htmlFor="free-access-email">
+                  Email
+                </label>
+                <input
+                  autoFocus
+                  className="min-h-12 w-full rounded-xl border border-sage-200 bg-white px-4 text-sm text-[#12243d] outline-none transition focus:border-sage-500 focus:ring-2 focus:ring-sage-100"
+                  id="free-access-email"
+                  inputMode="email"
+                  onChange={(event) => setFreeEmail(event.target.value)}
+                  placeholder="votre@email.fr"
+                  type="email"
+                  value={freeEmail}
+                />
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <Button disabled={pendingPlan === "decouverte"} type="submit">
+                    {pendingPlan === "decouverte" ? "Envoi..." : "Recevoir ma clé"}
+                  </Button>
+                  <Button onClick={() => setShowFreeForm(false)} type="button" variant="ghost">
+                    Annuler
+                  </Button>
+                </div>
+              </div>
+            </form>
+          </Card>
+        </div>
       ) : null}
 
       {purchaseMessage ? (
@@ -354,7 +363,11 @@ function PlanAddons({
                   <span className={highlighted ? "text-white/70" : "text-slate-600"}>
                     {addon.label}
                   </span>
-                  <span className={`shrink-0 font-semibold ${highlighted ? "text-white" : "text-slate-700"}`}>
+                  <span
+                    className={`shrink-0 font-semibold ${
+                      highlighted ? "text-white" : "text-slate-700"
+                    }`}
+                  >
                     {addon.price}
                   </span>
                 </li>
