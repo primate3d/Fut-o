@@ -22,9 +22,10 @@ export function AccessKeyActivator() {
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    const devKeys = process.env.NODE_ENV === "production" ? [] : mockAccessKeys;
 
     const accessKey = validateAccessKey(code, [
-      ...mockAccessKeys,
+      ...devKeys,
       ...getPurchasedAccessKeys()
     ]);
 

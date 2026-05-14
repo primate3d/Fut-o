@@ -8,14 +8,19 @@ const envSchema = z.object({
     .default("postgresql://futeo:futeo@localhost:5432/futeo"),
   OPENAI_API_KEY: z.string().default(""),
   FUTEO_LOCAL_E2E: z.string().optional(),
-  STRIPE_SECRET_KEY: z.string().default("sk_test_placeholder"),
-  STRIPE_WEBHOOK_SECRET: z.string().default("whsec_placeholder"),
+  STRIPE_SECRET_KEY: z.string().optional(),
+  STRIPE_WEBHOOK_SECRET: z.string().optional(),
+  NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY: z.string().optional(),
+  STRIPE_PRICE_AUDIT_FOYER: z.string().optional(),
+  STRIPE_PRICE_AUDIT_FAMILLE: z.string().optional(),
   RESEND_API_KEY: z.string().optional(),
   NEXT_PUBLIC_BASE_URL: z
     .string()
     .url("NEXT_PUBLIC_BASE_URL doit être une URL valide")
     .default("http://localhost:3000"),
-  UPLOADS_DIR: z.string().default("./server-data/uploads")
+  NEXT_PUBLIC_APP_URL: z.string().url("NEXT_PUBLIC_APP_URL doit être une URL valide").optional(),
+  UPLOADS_DIR: z.string().default("./server-data/uploads"),
+  CRON_SECRET: z.string().optional()
 });
 
 const parsedEnv = envSchema.safeParse(process.env);
@@ -26,3 +31,30 @@ if (!parsedEnv.success) {
 }
 
 export const env = parsedEnv.success ? parsedEnv.data : envSchema.parse({});
+
+const placeholderValues = new Set([
+  "",
+  "sk_test_placeholder",
+  "whsec_placeholder",
+  "placeholder",
+  "changeme",
+  "change_me"
+]);
+
+export function isPlaceholderEnvValue(value?: string | null) {
+  return placeholderValues.has((value ?? "").trim());
+}
+
+export function requireServerEnv(name: keyof typeof env) {
+  const value = process.env[name];
+
+  if (isPlaceholderEnvValue(value)) {
+    throw new Error(`${name} manquante ou placeholder`);
+  }
+
+  return value as string;
+}
+
+export function allowDevOnlyMocks() {
+  return process.env.NODE_ENV !== "production" || process.env.FUTEO_LOCAL_E2E === "1";
+}
