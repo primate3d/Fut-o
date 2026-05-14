@@ -13,7 +13,9 @@ const envSchema = z.object({
   NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY: z.string().optional(),
   STRIPE_PRICE_AUDIT_FOYER: z.string().optional(),
   STRIPE_PRICE_AUDIT_FAMILLE: z.string().optional(),
-  RESEND_API_KEY: z.string().optional(),
+  BREVO_API_KEY: z.string().optional(),
+  BREVO_FROM_EMAIL: z.string().email().optional(),
+  BREVO_FROM_NAME: z.string().optional(),
   NEXT_PUBLIC_BASE_URL: z
     .string()
     .url("NEXT_PUBLIC_BASE_URL doit être une URL valide")

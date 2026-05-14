@@ -25,7 +25,6 @@
     "postgres": "^3.4.9",
     "react": "19.0.0",
     "react-dom": "19.0.0",
-    "resend": "^4.8.0",
     "stripe": "^17.7.0",
     "tailwind-merge": "^2.6.0",
     "zod": "^3.25.76"

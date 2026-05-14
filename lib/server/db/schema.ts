@@ -23,6 +23,14 @@ export const orders = pgTable("orders", {
   createdAt: text("created_at"),
 });
 
+export const freeTrials = pgTable("free_trials", {
+  id: text("id").primaryKey(),
+  email: text("email").notNull().unique(),
+  keyCode: text("key_code").notNull(),
+  usedAt: text("used_at").notNull(),
+  createdAt: text("created_at").notNull(),
+});
+
 export const documents = pgTable("documents", {
   id: text("id").primaryKey(),
   keyCode: text("key_code").notNull(),

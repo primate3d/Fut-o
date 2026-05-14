@@ -11,6 +11,13 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Plan ID manquant" }, { status: 400 });
     }
 
+    if (planId === "decouverte") {
+      return NextResponse.json(
+        { error: "L'accès gratuit doit passer par le formulaire email." },
+        { status: 400 }
+      );
+    }
+
     const ip = request.headers.get("x-forwarded-for") || "unknown";
     if (!checkoutRateLimiter.check(ip)) {
       return NextResponse.json({ error: "Trop de requêtes, veuillez patienter." }, { status: 429 });

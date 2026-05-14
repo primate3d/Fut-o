@@ -2,7 +2,7 @@ import fs from "fs";
 import path from "path";
 import { and, eq, inArray, lt, or } from "drizzle-orm";
 import { db } from "./db/index";
-import { accessKeys, analyses, documents, orders } from "./db/schema";
+import { accessKeys, analyses, documents, freeTrials, orders } from "./db/schema";
 import { ExpenseCategory } from "@/types";
 import type {
   AccessKey,
@@ -38,6 +38,14 @@ type OrderData = {
 
 type OrderRecord = OrderData & {
   id: string;
+};
+
+export type FreeTrialRecord = {
+  id: string;
+  email: string;
+  keyCode: string;
+  usedAt: string;
+  createdAt: string;
 };
 
 if (!fs.existsSync(UPLOADS_DIR)) {
@@ -90,6 +98,23 @@ export async function findKeyByCode(code: string): Promise<AccessKey | undefined
     plan: record.plan as AccessKey["plan"],
     expiresAt: record.expiresAt || ""
   };
+}
+
+export async function findFreeTrialByEmail(email: string): Promise<FreeTrialRecord | undefined> {
+  const normalizedEmail = email.trim().toLowerCase();
+  const records = await db
+    .select()
+    .from(freeTrials)
+    .where(eq(freeTrials.email, normalizedEmail));
+
+  return records[0];
+}
+
+export async function saveFreeTrial(record: FreeTrialRecord): Promise<void> {
+  await db.insert(freeTrials).values({
+    ...record,
+    email: record.email.trim().toLowerCase()
+  });
 }
 
 export async function getDocumentsByKey(keyCode: string): Promise<UploadedDocument[]> {

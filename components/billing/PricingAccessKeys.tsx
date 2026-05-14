@@ -1,29 +1,24 @@
 "use client";
 
-import { useState } from "react";
+import { type FormEvent, useState } from "react";
 import { Check, Info, KeyRound, Plus, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import {
   accessKeyPlans,
-  hasUsedFreeTrial,
-  markFreeTrialUsed,
-  storeAccessKey,
   type AccessKeyPlanDefinition,
   type PlanAddon
 } from "@/features/billing";
-import type { AccessKey } from "@/types";
 
 export function PricingAccessKeys() {
   const [purchaseMessage, setPurchaseMessage] = useState<string | null>(null);
+  const [showFreeForm, setShowFreeForm] = useState(false);
+  const [freeEmail, setFreeEmail] = useState("");
+  const [pendingPlan, setPendingPlan] = useState<string | null>(null);
 
-  async function handleAccess(plan: AccessKeyPlanDefinition) {
+  async function requestPaidAccess(plan: AccessKeyPlanDefinition) {
     setPurchaseMessage(null);
-
-    if (plan.plan === "decouverte" && hasUsedFreeTrial()) {
-      setPurchaseMessage("L'accès découverte a déjà été utilisé sur ce compte.");
-      return;
-    }
+    setPendingPlan(plan.plan);
 
     try {
       const response = await fetch("/api/checkout", {
@@ -33,18 +28,12 @@ export function PricingAccessKeys() {
       });
       const payload = (await response.json()) as {
         error?: string;
-        key?: AccessKey;
         url?: string;
       };
 
       if (!response.ok) {
         setPurchaseMessage(payload.error ?? "Impossible de préparer cet accès pour le moment.");
         return;
-      }
-
-      if (payload.key) {
-        await storeAccessKey(payload.key);
-        markFreeTrialUsed();
       }
 
       if (payload.url) {
@@ -55,7 +44,51 @@ export function PricingAccessKeys() {
       setPurchaseMessage("Impossible de préparer cet accès pour le moment.");
     } catch {
       setPurchaseMessage("Impossible de préparer cet accès pour le moment.");
+    } finally {
+      setPendingPlan(null);
     }
+  }
+
+  async function handleFreeSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setPurchaseMessage(null);
+    setPendingPlan("decouverte");
+
+    try {
+      const response = await fetch("/api/free-access", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: freeEmail })
+      });
+      const payload = (await response.json()) as {
+        error?: string;
+        message?: string;
+      };
+
+      if (!response.ok) {
+        setPurchaseMessage(payload.error ?? "Impossible d'envoyer la clé gratuite.");
+        return;
+      }
+
+      setShowFreeForm(false);
+      setFreeEmail("");
+      setPurchaseMessage(payload.message ?? "Votre clé gratuite a été envoyée par email.");
+    } catch {
+      setPurchaseMessage("Impossible d'envoyer la clé gratuite.");
+    } finally {
+      setPendingPlan(null);
+    }
+  }
+
+  function handleAccess(plan: AccessKeyPlanDefinition) {
+    setPurchaseMessage(null);
+
+    if (plan.plan === "decouverte") {
+      setShowFreeForm(true);
+      return;
+    }
+
+    void requestPaidAccess(plan);
   }
 
   return (
@@ -73,6 +106,37 @@ export function PricingAccessKeys() {
         </div>
       </Card>
 
+      {showFreeForm ? (
+        <Card className="border-sage-200 bg-sage-50/80">
+          <form className="space-y-4" onSubmit={handleFreeSubmit}>
+            <div>
+              <p className="font-semibold text-[#12243d]">Recevoir mon accès gratuit</p>
+              <p className="mt-1 text-sm leading-6 text-slate-600">
+                Indiquez votre email pour recevoir votre clé gratuite. Une seule clé gratuite
+                peut être demandée par email.
+              </p>
+            </div>
+            <div className="grid gap-3 sm:grid-cols-[1fr_auto]">
+              <label className="sr-only" htmlFor="free-access-email">
+                Email
+              </label>
+              <input
+                className="min-h-12 rounded-xl border border-sage-200 bg-white px-4 text-sm text-[#12243d] outline-none transition focus:border-sage-500 focus:ring-2 focus:ring-sage-100"
+                id="free-access-email"
+                inputMode="email"
+                onChange={(event) => setFreeEmail(event.target.value)}
+                placeholder="votre@email.fr"
+                type="email"
+                value={freeEmail}
+              />
+              <Button disabled={pendingPlan === "decouverte"} type="submit">
+                {pendingPlan === "decouverte" ? "Envoi..." : "Recevoir ma clé"}
+              </Button>
+            </div>
+          </form>
+        </Card>
+      ) : null}
+
       {purchaseMessage ? (
         <Card className="border-amber-200 bg-amber-50 text-sm font-medium text-amber-900">
           {purchaseMessage}
@@ -82,8 +146,9 @@ export function PricingAccessKeys() {
       <div className="grid gap-5 lg:grid-cols-3">
         {accessKeyPlans.map((plan) => (
           <PricingPlanCard
+            isPending={pendingPlan === plan.plan}
             key={plan.plan}
-            onPurchase={() => void handleAccess(plan)}
+            onPurchase={() => handleAccess(plan)}
             plan={plan}
           />
         ))}
@@ -93,9 +158,11 @@ export function PricingAccessKeys() {
 }
 
 function PricingPlanCard({
+  isPending,
   plan,
   onPurchase
 }: {
+  isPending: boolean;
   plan: AccessKeyPlanDefinition;
   onPurchase: () => void;
 }) {
@@ -213,11 +280,16 @@ function PricingPlanCard({
           className={`mt-6 w-full justify-center ${
             plan.highlighted ? "bg-white text-[#12243d] hover:bg-white/90" : ""
           }`}
+          disabled={isPending}
           onClick={onPurchase}
           type="button"
           variant="secondary"
         >
-          {plan.plan === "decouverte" ? "Découvrir gratuitement" : "Obtenir mon accès"}
+          {isPending
+            ? "Préparation..."
+            : plan.plan === "decouverte"
+              ? "Accès gratuit"
+              : "Obtenir mon accès"}
         </Button>
         {plan.ctaHelper ? (
           <p
