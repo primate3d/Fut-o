@@ -2,6 +2,36 @@ type EmailResult =
   | { success: true; data?: unknown; simulated?: boolean }
   | { success: false; error: unknown };
 
+function getBrevoConfig() {
+  const apiKey = process.env.BREVO_API_KEY?.trim();
+  const fromEmail = process.env.BREVO_FROM_EMAIL?.trim();
+  const fromName = process.env.BREVO_FROM_NAME?.trim() || "Futéo";
+
+  return {
+    apiKey,
+    fromEmail,
+    fromName,
+    hasApiKey: Boolean(apiKey),
+    hasFromEmail: Boolean(fromEmail)
+  };
+}
+
+function isValidEmail(value?: string) {
+  return Boolean(value && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value));
+}
+
+function parseBrevoResponse(text: string) {
+  if (!text) {
+    return null;
+  }
+
+  try {
+    return JSON.parse(text) as unknown;
+  } catch {
+    return text;
+  }
+}
+
 function buildAccessKeyEmail(keyCode: string, planName: string) {
   return `
     <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #eadfce; border-radius: 16px; background-color: #fffaf2;">
@@ -33,9 +63,15 @@ export async function sendAccessKeyEmail(
   keyCode: string,
   planName: string
 ): Promise<EmailResult> {
-  const apiKey = process.env.BREVO_API_KEY;
-  const fromEmail = process.env.BREVO_FROM_EMAIL;
-  const fromName = process.env.BREVO_FROM_NAME || "Futéo";
+  const { apiKey, fromEmail, fromName, hasApiKey, hasFromEmail } = getBrevoConfig();
+
+  console.info("Configuration Brevo détectée:", {
+    hasApiKey,
+    hasFromEmail,
+    fromEmail,
+    fromName,
+    nodeEnv: process.env.NODE_ENV
+  });
 
   if (!apiKey || !fromEmail) {
     const error = "Configuration Brevo manquante : BREVO_API_KEY et BREVO_FROM_EMAIL sont requis.";
@@ -45,7 +81,19 @@ export async function sendAccessKeyEmail(
       return { success: true, simulated: true };
     }
 
-    console.error("Echec envoi Brevo:", { error, to, planName });
+    console.error("Echec configuration Brevo:", {
+      error,
+      hasApiKey,
+      hasFromEmail,
+      fromEmail,
+      planName
+    });
+    return { success: false, error };
+  }
+
+  if (!isValidEmail(fromEmail)) {
+    const error = "Configuration Brevo invalide : BREVO_FROM_EMAIL doit être une adresse email valide.";
+    console.error("Echec configuration Brevo:", { error, fromEmail, planName });
     return { success: false, error };
   }
 
@@ -68,12 +116,15 @@ export async function sendAccessKeyEmail(
       })
     });
 
-    const responseBody = await response.json().catch(() => null);
+    const responseText = await response.text();
+    const responseBody = parseBrevoResponse(responseText);
 
     if (!response.ok) {
       console.error("Echec envoi Brevo:", {
         status: response.status,
+        statusText: response.statusText,
         response: responseBody,
+        fromEmail,
         to,
         planName
       });
@@ -82,7 +133,7 @@ export async function sendAccessKeyEmail(
 
     return { success: true, data: responseBody };
   } catch (error) {
-    console.error("Erreur appel Brevo:", { error, to, planName });
+    console.error("Erreur appel Brevo:", { error, fromEmail, to, planName });
     return { success: false, error };
   }
 }

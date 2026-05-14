@@ -108,8 +108,16 @@ export function PricingAccessKeys() {
       </Card>
 
       {showFreeForm ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#12243d]/45 px-4 py-8">
-          <Card className="w-full max-w-lg border-sage-200 bg-white shadow-xl">
+        <div
+          aria-modal="true"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-[#12243d]/45 px-4 py-8"
+          onClick={() => setShowFreeForm(false)}
+          role="dialog"
+        >
+          <Card
+            className="w-full max-w-lg border-sage-200 bg-white shadow-xl"
+            onClick={(event) => event.stopPropagation()}
+          >
             <form className="space-y-4" onSubmit={handleFreeSubmit}>
               <div>
                 <p className="font-semibold text-[#12243d]">Recevoir mon accès gratuit</p>

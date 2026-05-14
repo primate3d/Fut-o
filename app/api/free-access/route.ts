@@ -40,13 +40,14 @@ export async function POST(request: Request) {
     const key = generateAccessKey("decouverte");
     await saveKey(key);
 
-    const emailResult = await sendAccessKeyEmail(
-      normalizedEmail,
-      key.code,
-      "Accès gratuit Futéo"
-    );
+    const emailResult = await sendAccessKeyEmail(normalizedEmail, key.code, "Accès gratuit Futéo");
 
     if (!emailResult.success) {
+      console.error("Echec envoi clé gratuite:", {
+        email: normalizedEmail,
+        keyCode: key.code,
+        error: emailResult.error
+      });
       return NextResponse.json(
         { error: "Impossible d'envoyer la clé gratuite pour le moment." },
         { status: 500 }
@@ -66,8 +67,10 @@ export async function POST(request: Request) {
       message: "Votre clé gratuite a été envoyée par email."
     });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Erreur serveur";
     console.error("Erreur accès gratuit:", error);
-    return NextResponse.json({ error: message }, { status: 500 });
+    return NextResponse.json(
+      { error: "Impossible d'envoyer la clé gratuite pour le moment." },
+      { status: 500 }
+    );
   }
 }
