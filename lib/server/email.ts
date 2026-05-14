@@ -7,7 +7,7 @@ export async function sendAccessKeyEmail(
 ) {
   if (!process.env.RESEND_API_KEY) {
     console.warn("RESEND_API_KEY manquante. Envoi de mail simule.");
-    console.log(`[MAIL LOCAL] Vers: ${to}, Cle: ${keyCode}, Plan: ${planName}`);
+    console.log(`[MAIL LOCAL] Vers: ${to}, Clé: ${keyCode}, Plan: ${planName}`);
     return { success: true, simulated: true };
   }
 
@@ -22,7 +22,7 @@ export async function sendAccessKeyEmail(
         <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #eadfce; border-radius: 16px; background-color: #fffaf2;">
           <h1 style="color: #12243d; font-size: 24px;">Votre accès Futéo est prêt</h1>
           <p style="color: #4a5568; font-size: 16px; line-height: 1.6;">
-            Votre paiement pour le plan <strong>${planName}</strong> a été confirmé.
+            Votre accès <strong>${planName}</strong> est prêt.
             Vous pouvez utiliser la clé ci-dessous pour ouvrir votre espace.
           </p>
 
@@ -35,9 +35,9 @@ export async function sendAccessKeyEmail(
             Ajoutez uniquement les documents utiles à votre audit. Vous gardez la main sur les éléments transmis et les démarches à lancer.
           </p>
 
-          <a href="${process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"}/tableau-de-bord"
+          <a href="${process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"}/activer-cle"
              style="display: block; background-color: #12243d; color: #ffffff; text-align: center; padding: 16px; border-radius: 12px; text-decoration: none; font-weight: bold; font-size: 16px;">
-            Accéder à mon espace
+            Activer ma clé
           </a>
         </div>
       `

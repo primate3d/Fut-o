@@ -1,23 +1,63 @@
 import { getStripe } from "@/lib/server/stripe";
-import { accessKeyPlans, type PublicAccessKeyPlan } from "./access-keys";
-import { saveOrder } from "@/lib/server/db";
+import { accessKeyPlans, generateAccessKey, type PublicAccessKeyPlan } from "./access-keys";
+import { findFreeTrialByEmail, saveFreeTrial, saveKey, saveOrder } from "@/lib/server/db";
+import { sendAccessKeyEmail } from "@/lib/server/email";
 import { requireServerEnv } from "@/lib/env";
 
-export async function createCheckoutSession(planId: string, baseUrl: string): Promise<string | null> {
+function normalizeTrialEmail(email?: string | null) {
+  return email?.trim().toLowerCase() ?? "";
+}
+
+function isValidEmail(email: string) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+}
+
+export async function createCheckoutSession(
+  planId: string,
+  baseUrl: string,
+  customerEmail?: string | null
+): Promise<string | null> {
   const plan = accessKeyPlans.find(p => p.plan === planId);
   if (!plan) {
     throw new Error("Plan invalide");
   }
 
   if (plan.plan === "decouverte") {
-    return null;
+    const email = normalizeTrialEmail(customerEmail);
+    if (!email || !isValidEmail(email)) {
+      throw new Error("Email obligatoire pour l'accès découverte");
+    }
+
+    const existingTrial = await findFreeTrialByEmail(email);
+    if (existingTrial) {
+      throw new Error("L'accès découverte a déjà été utilisé avec cet email.");
+    }
+
+    const key = generateAccessKey("decouverte");
+    await saveKey(key);
+
+    const emailResult = await sendAccessKeyEmail(email, key.code, "Découverte Futéo");
+    if (!emailResult.success) {
+      throw new Error("Impossible d'envoyer la clé découverte pour le moment.");
+    }
+
+    await saveFreeTrial({
+      id: `trial_${Date.now()}`,
+      email,
+      keyCode: key.code,
+      usedAt: new Date().toISOString(),
+      createdAt: new Date().toISOString()
+    });
+
+    return `${baseUrl}/activer-cle`;
   }
 
-  const stripePriceByPlan: Partial<Record<PublicAccessKeyPlan, string | undefined>> = {
-    foyer: requireServerEnv("STRIPE_PRICE_AUDIT_FOYER"),
-    famille: requireServerEnv("STRIPE_PRICE_AUDIT_FAMILLE")
+  const stripePriceEnvByPlan: Partial<Record<PublicAccessKeyPlan, "STRIPE_PRICE_AUDIT_FOYER" | "STRIPE_PRICE_AUDIT_FAMILLE">> = {
+    foyer: "STRIPE_PRICE_AUDIT_FOYER",
+    famille: "STRIPE_PRICE_AUDIT_FAMILLE"
   };
-  const configuredPrice = stripePriceByPlan[plan.plan];
+  const priceEnvName = stripePriceEnvByPlan[plan.plan];
+  const configuredPrice = priceEnvName ? requireServerEnv(priceEnvName) : undefined;
   const stripe = getStripe();
 
   try {

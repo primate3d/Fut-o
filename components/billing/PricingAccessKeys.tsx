@@ -1,48 +1,89 @@
 "use client";
 
-import { useState } from "react";
+import { type FormEvent, useState } from "react";
+import Link from "next/link";
 import { Check, Info, KeyRound, Plus, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import {
   accessKeyPlans,
-  hasUsedFreeTrial,
   type AccessKeyPlanDefinition,
   type PlanAddon
 } from "@/features/billing";
 
 export function PricingAccessKeys() {
   const [purchaseMessage, setPurchaseMessage] = useState<string | null>(null);
+  const [showDiscoveryForm, setShowDiscoveryForm] = useState(false);
+  const [discoveryEmail, setDiscoveryEmail] = useState("");
+  const [pendingPlan, setPendingPlan] = useState<string | null>(null);
 
-  async function handleAccess(plan: AccessKeyPlanDefinition) {
+  async function requestAccess(plan: AccessKeyPlanDefinition, email?: string) {
     setPurchaseMessage(null);
+    setPendingPlan(plan.plan);
 
-    if (plan.plan === "decouverte" && hasUsedFreeTrial()) {
-      setPurchaseMessage("L'accès découverte a déjà été utilisé sur ce compte.");
+    if (plan.plan === "decouverte" && !email?.trim()) {
+      setPurchaseMessage("L'email est obligatoire pour recevoir l'accès découverte.");
+      setPendingPlan(null);
       return;
     }
 
-    if (plan.plan !== "decouverte") {
-      try {
-        const response = await fetch("/api/checkout", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ planId: plan.plan })
-        });
-        const payload = (await response.json()) as { url?: string };
+    try {
+      const response = await fetch("/api/checkout", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email, planId: plan.plan })
+      });
+      const payload = (await response.json()) as {
+        error?: string;
+        url?: string;
+      };
 
-        if (response.ok && payload.url) {
-          window.location.assign(payload.url);
-          return;
-        }
-      } catch {
-        // Stripe reste la source prévue pour les accès payants.
+      if (!response.ok) {
+        setPurchaseMessage(payload.error ?? "Impossible de préparer cet accès pour le moment.");
+        return;
       }
+
+      if (payload.url && plan.plan === "decouverte") {
+        setShowDiscoveryForm(false);
+        setDiscoveryEmail("");
+        setPurchaseMessage(
+          "Votre accès découverte a été créé. Votre clé est envoyée par email ; utilisez ensuite « J'ai déjà une clé » pour l'activer."
+        );
+        return;
+      }
+
+      if (payload.url) {
+        window.location.assign(payload.url);
+        return;
+      }
+
+      setPurchaseMessage("Impossible de préparer cet accès pour le moment.");
+    } catch {
+      setPurchaseMessage("Impossible de préparer cet accès pour le moment.");
+    } finally {
+      setPendingPlan(null);
+    }
+  }
+
+  function handleAccess(plan: AccessKeyPlanDefinition) {
+    if (plan.plan === "decouverte") {
+      setPurchaseMessage(null);
+      setShowDiscoveryForm(true);
+      return;
     }
 
-    setPurchaseMessage(
-      "Activez votre clé personnelle pour ouvrir l'espace correspondant."
-    );
+    void requestAccess(plan);
+  }
+
+  function handleDiscoverySubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const plan = accessKeyPlans.find((item) => item.plan === "decouverte");
+    if (!plan) {
+      setPurchaseMessage("Impossible de préparer cet accès pour le moment.");
+      return;
+    }
+
+    void requestAccess(plan, discoveryEmail);
   }
 
   return (
@@ -60,6 +101,43 @@ export function PricingAccessKeys() {
         </div>
       </Card>
 
+      {showDiscoveryForm ? (
+        <Card className="border-sage-200 bg-sage-50/80">
+          <form className="space-y-4" onSubmit={handleDiscoverySubmit}>
+            <div>
+              <p className="font-semibold text-[#12243d]">Recevoir mon accès découverte</p>
+              <p className="mt-1 text-sm leading-6 text-slate-600">
+                Indiquez votre email pour créer votre accès découverte limité. Un seul accès
+                découverte est disponible par email.
+              </p>
+            </div>
+            <div className="grid gap-3 sm:grid-cols-[1fr_auto]">
+              <label className="sr-only" htmlFor="discovery-email">
+                Email
+              </label>
+              <input
+                className="min-h-12 rounded-xl border border-sage-200 bg-white px-4 text-sm text-[#12243d] outline-none transition focus:border-sage-500 focus:ring-2 focus:ring-sage-100"
+                id="discovery-email"
+                inputMode="email"
+                onChange={(event) => setDiscoveryEmail(event.target.value)}
+                placeholder="votre@email.fr"
+                type="email"
+                value={discoveryEmail}
+              />
+              <Button disabled={pendingPlan === "decouverte"} type="submit">
+                {pendingPlan === "decouverte" ? "Préparation..." : "Recevoir l'accès"}
+              </Button>
+            </div>
+            <Link
+              className="inline-flex text-sm font-semibold text-slate-500 transition hover:text-[#12243d]"
+              href="/activer-cle"
+            >
+              J'ai déjà une clé
+            </Link>
+          </form>
+        </Card>
+      ) : null}
+
       {purchaseMessage ? (
         <Card className="border-amber-200 bg-amber-50 text-sm font-medium text-amber-900">
           {purchaseMessage}
@@ -69,21 +147,23 @@ export function PricingAccessKeys() {
       <div className="grid gap-5 lg:grid-cols-3">
         {accessKeyPlans.map((plan) => (
           <PricingPlanCard
+            isPending={pendingPlan === plan.plan}
             key={plan.plan}
-            onPurchase={() => void handleAccess(plan)}
+            onPurchase={() => handleAccess(plan)}
             plan={plan}
           />
         ))}
       </div>
-
     </div>
   );
 }
 
 function PricingPlanCard({
+  isPending,
   plan,
   onPurchase
 }: {
+  isPending: boolean;
   plan: AccessKeyPlanDefinition;
   onPurchase: () => void;
 }) {
@@ -201,11 +281,16 @@ function PricingPlanCard({
           className={`mt-6 w-full justify-center ${
             plan.highlighted ? "bg-white text-[#12243d] hover:bg-white/90" : ""
           }`}
+          disabled={isPending}
           onClick={onPurchase}
           type="button"
           variant="secondary"
         >
-          {plan.plan === "decouverte" ? "Découvrir gratuitement" : "Obtenir mon accès"}
+          {isPending
+            ? "Préparation..."
+            : plan.plan === "decouverte"
+              ? "Recevoir mon accès découverte"
+              : "Payer et recevoir ma clé"}
         </Button>
         {plan.ctaHelper ? (
           <p

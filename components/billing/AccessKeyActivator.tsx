@@ -5,12 +5,8 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { CheckCircle2, KeyRound, ShoppingCart } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
-import { mockAccessKeys } from "@/data/mock";
-import {
-  getPurchasedAccessKeys,
-  storeAccessKey,
-  validateAccessKey
-} from "@/features/billing";
+import { storeAccessKey } from "@/features/billing";
+import type { AccessKey } from "@/types";
 
 export function AccessKeyActivator() {
   const router = useRouter();
@@ -22,20 +18,24 @@ export function AccessKeyActivator() {
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const devKeys = process.env.NODE_ENV === "production" ? [] : mockAccessKeys;
 
-    const accessKey = validateAccessKey(code, [
-      ...devKeys,
-      ...getPurchasedAccessKeys()
-    ]);
+    const normalizedCode = code.trim();
+    const response = await fetch("/api/keys/activate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ code: normalizedCode })
+    });
 
-    if (!accessKey) {
+    if (!response.ok) {
+      const payload = (await response.json().catch(() => ({}))) as { error?: string };
       setStatus("error");
-      setMessage("Cette clé ne semble pas correspondre. Vérifiez le code saisi.");
+      setMessage(payload.error ?? "Cette clé ne semble pas correspondre. Vérifiez le code saisi.");
       return;
     }
 
-    await storeAccessKey(accessKey);
+    const { key } = (await response.json()) as { key: AccessKey };
+
+    await storeAccessKey(key, { activate: false });
     setStatus("success");
     setMessage("Clé activée. Votre espace s'ouvre dans un instant.");
     window.setTimeout(() => router.replace(redirectPath), 650);
