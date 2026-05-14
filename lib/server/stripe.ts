@@ -1,4 +1,10 @@
 import "server-only";
 import Stripe from "stripe";
+import { requireServerEnv } from "@/lib/env";
 
-export const stripe = new Stripe(process.env.STRIPE_SECRET_KEY || "sk_test_placeholder");
+let stripeClient: Stripe | null = null;
+
+export function getStripe() {
+  stripeClient ??= new Stripe(requireServerEnv("STRIPE_SECRET_KEY"));
+  return stripeClient;
+}

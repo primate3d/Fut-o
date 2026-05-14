@@ -3,13 +3,17 @@ import Stripe from "stripe";
 import { getOrderBySessionId, saveKey, saveOrder } from "@/lib/server/db";
 import { sendAccessKeyEmail } from "@/lib/server/email";
 import { logger, withLatency } from "@/lib/server/logger";
+import { getStripe } from "@/lib/server/stripe";
+import { requireServerEnv } from "@/lib/env";
+import { getAccessDurationDays, normalizeAccessKeyPlan } from "@/features/billing/access-keys";
 import type { AccessKey } from "@/types";
 
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY || "sk_test_placeholder");
-const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
-
 function normalizePlan(planId: unknown): AccessKey["plan"] {
-  return planId === "foyer" || planId === "premium" ? planId : "simple";
+  return planId === "famille" || planId === "premium"
+    ? "famille"
+    : planId === "foyer" || planId === "simple"
+      ? "foyer"
+      : "foyer";
 }
 
 export async function POST(request: Request) {
@@ -19,10 +23,12 @@ export async function POST(request: Request) {
   let event: Stripe.Event;
 
   try {
-    if (!webhookSecret || !signature) {
-      throw new Error("Signature ou secret manquant");
+    if (!signature) {
+      throw new Error("Signature Stripe manquante");
     }
 
+    const webhookSecret = requireServerEnv("STRIPE_WEBHOOK_SECRET");
+    const stripe = getStripe();
     const { result, latencyMs } = await withLatency(async () =>
       stripe.webhooks.constructEvent(payload, signature, webhookSecret)
     );
@@ -55,13 +61,17 @@ export async function POST(request: Request) {
         .substring(2, 8)
         .toUpperCase()}-${Math.random().toString(36).substring(2, 5).toUpperCase()}`;
       const plan = normalizePlan(order.planId);
+      const normalizedPlan = normalizeAccessKeyPlan(plan);
+      const expiresAt = new Date(
+        Date.now() + getAccessDurationDays(normalizedPlan) * 24 * 60 * 60 * 1000
+      ).toISOString();
 
       const newKey: AccessKey = {
         id: `key_${Date.now()}`,
         code: keyCode,
-        plan,
-        usesRemaining: plan === "premium" ? 50 : 10,
-        expiresAt: "2026-12-31",
+        plan: normalizedPlan,
+        usesRemaining: normalizedPlan === "famille" ? 50 : 10,
+        expiresAt,
         isActive: true,
         createdAt: new Date().toISOString()
       };

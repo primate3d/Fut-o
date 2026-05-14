@@ -9,12 +9,14 @@ export type User = {
 export type AccessKey = {
   id: string;
   code: string;
-  plan: "simple" | "foyer" | "premium";
+  plan: "decouverte" | "foyer" | "famille" | "simple" | "premium";
   usesRemaining: number;
   expiresAt: string;
   isActive: boolean;
   createdAt: string;
   activatedAt?: string;
+  hasUsedFreeTrial?: boolean;
+  freeTrialUsedAt?: string;
 };
 
 export type Household = {

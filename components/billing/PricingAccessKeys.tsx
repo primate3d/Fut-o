@@ -1,36 +1,48 @@
 "use client";
 
 import { useState } from "react";
-import { Check, Copy, Info, KeyRound, Plus, Sparkles } from "lucide-react";
+import { Check, Info, KeyRound, Plus, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import {
   accessKeyPlans,
-  generateMockAccessKey,
-  storePurchasedAccessKey,
+  hasUsedFreeTrial,
   type AccessKeyPlanDefinition,
   type PlanAddon
 } from "@/features/billing";
-import type { AccessKey } from "@/types";
 
 export function PricingAccessKeys() {
-  const [generatedKey, setGeneratedKey] = useState<AccessKey | null>(null);
-  const [copied, setCopied] = useState(false);
+  const [purchaseMessage, setPurchaseMessage] = useState<string | null>(null);
 
-  function handleTemporaryKey(plan: AccessKeyPlanDefinition) {
-    const newKey = generateMockAccessKey(plan.plan);
-    setGeneratedKey(newKey);
-    storePurchasedAccessKey(newKey);
-    setCopied(false);
-    window.setTimeout(() => {
-      document.getElementById("generated-key")?.scrollIntoView({ behavior: "smooth" });
-    }, 50);
-  }
+  async function handleAccess(plan: AccessKeyPlanDefinition) {
+    setPurchaseMessage(null);
 
-  async function copyKey(code: string) {
-    await navigator.clipboard?.writeText(code);
-    setCopied(true);
-    window.setTimeout(() => setCopied(false), 2000);
+    if (plan.plan === "decouverte" && hasUsedFreeTrial()) {
+      setPurchaseMessage("L'accès découverte a déjà été utilisé sur ce compte.");
+      return;
+    }
+
+    if (plan.plan !== "decouverte") {
+      try {
+        const response = await fetch("/api/checkout", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ planId: plan.plan })
+        });
+        const payload = (await response.json()) as { url?: string };
+
+        if (response.ok && payload.url) {
+          window.location.assign(payload.url);
+          return;
+        }
+      } catch {
+        // Stripe reste la source prévue pour les accès payants.
+      }
+    }
+
+    setPurchaseMessage(
+      "Activez votre clé personnelle pour ouvrir l'espace correspondant."
+    );
   }
 
   return (
@@ -39,58 +51,31 @@ export function PricingAccessKeys() {
         <div className="flex items-start gap-3">
           <Info className="mt-0.5 shrink-0 text-sage-700" size={20} />
           <div>
-            <p className="font-semibold text-[#12243d]">
-              Paiement réel bientôt connecté
-            </p>
+            <p className="font-semibold text-[#12243d]">Accès Futéo</p>
             <p className="mt-1 text-sm leading-6 text-slate-600">
-              Stripe n'est pas encore activé sur cette version. Pour tester le
-              parcours complet, choisissez un plan : une clé temporaire sera générée
-              localement, sans paiement réel.
+              Choisissez une formule pour lancer votre analyse et préparer vos démarches.
+              Chaque accès est personnel, limité dans le temps et sans abonnement.
             </p>
           </div>
         </div>
       </Card>
 
+      {purchaseMessage ? (
+        <Card className="border-amber-200 bg-amber-50 text-sm font-medium text-amber-900">
+          {purchaseMessage}
+        </Card>
+      ) : null}
+
       <div className="grid gap-5 lg:grid-cols-3">
         {accessKeyPlans.map((plan) => (
           <PricingPlanCard
             key={plan.plan}
-            onPurchase={() => handleTemporaryKey(plan)}
+            onPurchase={() => void handleAccess(plan)}
             plan={plan}
           />
         ))}
       </div>
 
-      {generatedKey ? (
-        <Card className="border-sage-300 bg-sage-50" id="generated-key">
-          <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-            <div>
-              <p className="text-sm font-semibold uppercase tracking-wide text-sage-700">
-                Clé temporaire générée
-              </p>
-              <h2 className="mt-2 text-2xl font-bold text-[#12243d]">
-                Votre clé personnelle est prête
-              </h2>
-              <p className="mt-1 text-sm text-slate-600">
-                Plan {generatedKey.plan} - valable 14 jours après activation.
-                Usage personnel, non transférable.
-              </p>
-            </div>
-            <div className="rounded-xl border border-sage-200 bg-white px-5 py-3 font-mono text-lg font-bold text-[#12243d] shadow-sm">
-              {generatedKey.code}
-            </div>
-          </div>
-          <div className="mt-5 flex flex-col gap-3 sm:flex-row">
-            <Button onClick={() => copyKey(generatedKey.code)} type="button" variant="secondary">
-              <Copy size={16} />
-              {copied ? "Copiée" : "Copier la clé"}
-            </Button>
-            <Button href="/activer-cle" variant="ghost">
-              Activer maintenant
-            </Button>
-          </div>
-        </Card>
-      ) : null}
     </div>
   );
 }
@@ -157,7 +142,7 @@ function PricingPlanCard({
               plan.highlighted ? "bg-white/15 text-[#9bd7b5]" : "bg-sage-100 text-sage-700"
             }`}
           >
-            Paiement unique - Sans abonnement
+            {plan.plan === "decouverte" ? "Découverte limitée" : "Paiement unique - Sans abonnement"}
           </div>
 
           <ul className="mt-6 space-y-2.5">
@@ -220,8 +205,17 @@ function PricingPlanCard({
           type="button"
           variant="secondary"
         >
-          Générer une clé temporaire
+          {plan.plan === "decouverte" ? "Découvrir gratuitement" : "Obtenir mon accès"}
         </Button>
+        {plan.ctaHelper ? (
+          <p
+            className={`mt-3 text-xs leading-5 ${
+              plan.highlighted ? "text-white/65" : "text-slate-500"
+            }`}
+          >
+            {plan.ctaHelper}
+          </p>
+        ) : null}
       </div>
     </div>
   );

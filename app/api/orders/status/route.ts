@@ -1,11 +1,13 @@
 import { NextResponse } from "next/server";
-import { stripe } from "@/lib/server/stripe";
+import { getStripe } from "@/lib/server/stripe";
 import { getOrderBySessionId, saveOrder, saveKey } from "@/lib/server/db";
-import { generateMockAccessKey, type AccessKeyPlan } from "@/features/billing/access-keys";
+import { generateAccessKey, type AccessKeyPlan } from "@/features/billing/access-keys";
 
 function normalizePlan(planId: unknown): AccessKeyPlan {
-  return planId === "simple" || planId === "foyer" || planId === "premium"
-    ? planId
+  return planId === "famille" || planId === "premium"
+    ? "famille"
+    : planId === "foyer" || planId === "simple"
+      ? "foyer"
     : "foyer";
 }
 
@@ -29,14 +31,15 @@ export async function GET(request: Request) {
     }
 
     // 2. Sinon, vérifier auprès de Stripe
+    const stripe = getStripe();
     const session = await stripe.checkout.sessions.retrieve(sessionId);
 
     if (session.payment_status === "paid") {
       const planId = normalizePlan(session.metadata?.planId);
       const planName = session.metadata?.planName || "Audit Foyer";
       
-      // Générer une vraie clé d'accès (serveur)
-      const newKey = generateMockAccessKey(planId);
+      // Générer une clé d'accès serveur après paiement confirmé.
+      const newKey = generateAccessKey(planId);
       
       // Sauvegarder la clé et la commande
       await saveKey(newKey);
