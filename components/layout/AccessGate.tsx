@@ -5,7 +5,11 @@ import { KeyRound, ShieldCheck } from "lucide-react";
 import { usePathname } from "next/navigation";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
-import { getStoredAccessKey } from "@/features/billing";
+import {
+  ACCESS_KEY_STORAGE_KEY,
+  getStoredAccessKey,
+  validateAccessKeyServer
+} from "@/features/billing";
 
 export function AccessGate({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
@@ -13,10 +17,40 @@ export function AccessGate({ children }: { children: React.ReactNode }) {
   const [hasCheckedAccess, setHasCheckedAccess] = useState(false);
 
   useEffect(() => {
-    const accessKey = getStoredAccessKey();
+    let isMounted = true;
 
-    setIsAllowed(Boolean(accessKey));
-    setHasCheckedAccess(true);
+    async function checkAccess() {
+      const accessKey = getStoredAccessKey();
+
+      if (!accessKey) {
+        if (!isMounted) return;
+        setIsAllowed(false);
+        setHasCheckedAccess(true);
+        return;
+      }
+
+      const serverKey = await validateAccessKeyServer(accessKey.code);
+
+      if (!isMounted) return;
+
+      if (!serverKey) {
+        window.localStorage.removeItem(ACCESS_KEY_STORAGE_KEY);
+        setIsAllowed(false);
+        setHasCheckedAccess(true);
+        return;
+      }
+
+      window.localStorage.setItem(ACCESS_KEY_STORAGE_KEY, JSON.stringify(serverKey));
+      setIsAllowed(true);
+      setHasCheckedAccess(true);
+    }
+
+    setHasCheckedAccess(false);
+    void checkAccess();
+
+    return () => {
+      isMounted = false;
+    };
   }, [pathname]);
 
   if (!hasCheckedAccess) {

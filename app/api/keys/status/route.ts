@@ -15,6 +15,10 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: "Clé inconnue ou non activée" }, { status: 404 });
   }
 
+  if (!key.isActive || key.usesRemaining <= 0) {
+    return NextResponse.json({ error: "Clé inactive ou quota épuisé" }, { status: 403 });
+  }
+
   const now = new Date();
   if (key.expiresAt && new Date(key.expiresAt) < now) {
     return NextResponse.json({ error: "Clé expirée", expired: true }, { status: 403 });

@@ -1,6 +1,6 @@
 import { getStripe } from "@/lib/server/stripe";
-import { accessKeyPlans, type PublicAccessKeyPlan } from "./access-keys";
-import { saveOrder } from "@/lib/server/db";
+import { accessKeyPlans, generateAccessKey, type PublicAccessKeyPlan } from "./access-keys";
+import { saveKey, saveOrder } from "@/lib/server/db";
 import { requireServerEnv } from "@/lib/env";
 
 export async function createCheckoutSession(planId: string, baseUrl: string): Promise<string | null> {
@@ -10,14 +10,17 @@ export async function createCheckoutSession(planId: string, baseUrl: string): Pr
   }
 
   if (plan.plan === "decouverte") {
-    return null;
+    const key = generateAccessKey("decouverte");
+    await saveKey(key);
+    return `${baseUrl}/activer-cle?code=${encodeURIComponent(key.code)}`;
   }
 
-  const stripePriceByPlan: Partial<Record<PublicAccessKeyPlan, string | undefined>> = {
-    foyer: requireServerEnv("STRIPE_PRICE_AUDIT_FOYER"),
-    famille: requireServerEnv("STRIPE_PRICE_AUDIT_FAMILLE")
+  const stripePriceEnvByPlan: Partial<Record<PublicAccessKeyPlan, "STRIPE_PRICE_AUDIT_FOYER" | "STRIPE_PRICE_AUDIT_FAMILLE">> = {
+    foyer: "STRIPE_PRICE_AUDIT_FOYER",
+    famille: "STRIPE_PRICE_AUDIT_FAMILLE"
   };
-  const configuredPrice = stripePriceByPlan[plan.plan];
+  const priceEnvName = stripePriceEnvByPlan[plan.plan];
+  const configuredPrice = priceEnvName ? requireServerEnv(priceEnvName) : undefined;
   const stripe = getStripe();
 
   try {

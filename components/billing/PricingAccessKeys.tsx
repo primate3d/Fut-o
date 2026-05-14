@@ -7,9 +7,12 @@ import { Card } from "@/components/ui/Card";
 import {
   accessKeyPlans,
   hasUsedFreeTrial,
+  markFreeTrialUsed,
+  storeAccessKey,
   type AccessKeyPlanDefinition,
   type PlanAddon
 } from "@/features/billing";
+import type { AccessKey } from "@/types";
 
 export function PricingAccessKeys() {
   const [purchaseMessage, setPurchaseMessage] = useState<string | null>(null);
@@ -22,27 +25,37 @@ export function PricingAccessKeys() {
       return;
     }
 
-    if (plan.plan !== "decouverte") {
-      try {
-        const response = await fetch("/api/checkout", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ planId: plan.plan })
-        });
-        const payload = (await response.json()) as { url?: string };
+    try {
+      const response = await fetch("/api/checkout", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ planId: plan.plan })
+      });
+      const payload = (await response.json()) as {
+        error?: string;
+        key?: AccessKey;
+        url?: string;
+      };
 
-        if (response.ok && payload.url) {
-          window.location.assign(payload.url);
-          return;
-        }
-      } catch {
-        // Stripe reste la source prévue pour les accès payants.
+      if (!response.ok) {
+        setPurchaseMessage(payload.error ?? "Impossible de préparer cet accès pour le moment.");
+        return;
       }
-    }
 
-    setPurchaseMessage(
-      "Activez votre clé personnelle pour ouvrir l'espace correspondant."
-    );
+      if (payload.key) {
+        await storeAccessKey(payload.key);
+        markFreeTrialUsed();
+      }
+
+      if (payload.url) {
+        window.location.assign(payload.url);
+        return;
+      }
+
+      setPurchaseMessage("Impossible de préparer cet accès pour le moment.");
+    } catch {
+      setPurchaseMessage("Impossible de préparer cet accès pour le moment.");
+    }
   }
 
   return (
@@ -75,7 +88,6 @@ export function PricingAccessKeys() {
           />
         ))}
       </div>
-
     </div>
   );
 }

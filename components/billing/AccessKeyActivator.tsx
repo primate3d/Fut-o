@@ -5,37 +5,35 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { CheckCircle2, KeyRound, ShoppingCart } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
-import { mockAccessKeys } from "@/data/mock";
-import {
-  getPurchasedAccessKeys,
-  storeAccessKey,
-  validateAccessKey
-} from "@/features/billing";
+import { storeAccessKey } from "@/features/billing";
+import type { AccessKey } from "@/types";
 
 export function AccessKeyActivator() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const redirectPath = searchParams.get("redirect") ?? "/tableau-de-bord";
-  const [code, setCode] = useState("");
+  const [code, setCode] = useState(searchParams.get("code") ?? "");
   const [message, setMessage] = useState<string | null>(null);
   const [status, setStatus] = useState<"idle" | "success" | "error">("idle");
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const devKeys = process.env.NODE_ENV === "production" ? [] : mockAccessKeys;
 
-    const accessKey = validateAccessKey(code, [
-      ...devKeys,
-      ...getPurchasedAccessKeys()
-    ]);
+    const response = await fetch("/api/keys/activate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ code })
+    });
 
-    if (!accessKey) {
+    if (!response.ok) {
       setStatus("error");
       setMessage("Cette clé ne semble pas correspondre. Vérifiez le code saisi.");
       return;
     }
 
-    await storeAccessKey(accessKey);
+    const { key } = (await response.json()) as { key: AccessKey };
+
+    await storeAccessKey(key);
     setStatus("success");
     setMessage("Clé activée. Votre espace s'ouvre dans un instant.");
     window.setTimeout(() => router.replace(redirectPath), 650);
@@ -58,8 +56,7 @@ export function AccessKeyActivator() {
         </div>
         <div className="flex items-center gap-2">
           <ShoppingCart className="text-sage-700" size={17} />
-          Pas encore de clé ? La page tarifs permet de générer une clé temporaire
-          pendant la phase de test.
+          Pas encore de clé ? La page tarifs présente les accès disponibles.
         </div>
       </div>
       <form className="mt-6 space-y-4" onSubmit={handleSubmit}>

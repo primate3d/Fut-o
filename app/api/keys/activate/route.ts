@@ -52,7 +52,7 @@ export async function POST(request: Request) {
       activatedAt: now.toISOString(),
       expiresAt: expiration.toISOString(),
       isActive: true,
-      usesRemaining: key.usesRemaining - 1,
+      usesRemaining: key.usesRemaining,
       hasUsedFreeTrial: isDiscoveryPlan(plan) ? true : key.hasUsedFreeTrial,
       freeTrialUsedAt: isDiscoveryPlan(plan) ? now.toISOString() : key.freeTrialUsedAt
     };
