@@ -1,10 +1,13 @@
 import path from "path";
+import { createRequire } from "module";
+import { pathToFileURL } from "url";
 import { PDFParse } from "pdf-parse";
 import { OpenAI } from "openai";
 import { storage } from "@/lib/server/storage";
 import type { UploadedDocument } from "@/types";
 
 let _openai: OpenAI | null = null;
+let isPdfWorkerConfigured = false;
 
 type StoredUploadedDocument = UploadedDocument & {
   physicalFileName?: string;
@@ -22,9 +25,20 @@ function getOpenAI() {
   return _openai;
 }
 
+function configurePdfWorkerForNode() {
+  if (isPdfWorkerConfigured) return;
+
+  const require = createRequire(import.meta.url);
+  const workerPath = require.resolve("pdfjs-dist/legacy/build/pdf.worker.mjs");
+  PDFParse.setWorker(pathToFileURL(workerPath).href);
+  isPdfWorkerConfigured = true;
+}
+
 async function extractTextFromPDF(physicalFileName: string): Promise<string> {
   const dataBuffer = await storage.get(physicalFileName);
   if (!dataBuffer) return "";
+
+  configurePdfWorkerForNode();
 
   const parser = new PDFParse({ data: dataBuffer });
 
