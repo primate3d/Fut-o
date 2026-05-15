@@ -1,6 +1,7 @@
 import crypto from "crypto";
 import path from "path";
 import { NextResponse } from "next/server";
+import { createAdminAccessKey, isAdminAccessCode } from "@/features/billing/access-keys";
 import { findKeyByCode, getDocumentsByKey, saveDocuments } from "@/lib/server/db";
 import { storage } from "@/lib/server/storage";
 import type { UploadedDocument } from "@/types";
@@ -17,7 +18,7 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: "Code clé manquant" }, { status: 400 });
   }
 
-  const key = await findKeyByCode(code);
+  const key = (await findKeyByCode(code)) ?? (isAdminAccessCode(code) ? createAdminAccessKey() : undefined);
   if (!key) {
     return NextResponse.json({ error: "Clé invalide" }, { status: 403 });
   }
@@ -43,7 +44,7 @@ export async function POST(request: Request) {
 
     const document = JSON.parse(documentJson) as UploadedDocument;
 
-    const key = await findKeyByCode(code);
+    const key = (await findKeyByCode(code)) ?? (isAdminAccessCode(code) ? createAdminAccessKey() : undefined);
     if (!key) {
       return NextResponse.json({ error: "Clé invalide" }, { status: 403 });
     }
@@ -104,7 +105,7 @@ export async function DELETE(request: Request) {
       return NextResponse.json({ error: "Code manquant" }, { status: 400 });
     }
 
-    const key = await findKeyByCode(code);
+    const key = (await findKeyByCode(code)) ?? (isAdminAccessCode(code) ? createAdminAccessKey() : undefined);
     if (!key) {
       return NextResponse.json({ error: "Clé invalide" }, { status: 403 });
     }

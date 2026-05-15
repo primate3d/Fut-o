@@ -1,8 +1,14 @@
 import { NextResponse } from "next/server";
-import { findKeyByCode, saveKey } from "@/lib/server/db";
+import {
+  createAdminAccessKey,
+  getAccessDurationDays,
+  isAdminAccessCode,
+  isDiscoveryPlan,
+  normalizeAccessKeyPlan
+} from "@/features/billing/access-keys";
 import { mockAccessKeys } from "@/data/mock";
-import { getAccessDurationDays, isDiscoveryPlan, normalizeAccessKeyPlan } from "@/features/billing/access-keys";
 import { allowDevOnlyMocks } from "@/lib/env";
+import { findKeyByCode, saveKey } from "@/lib/server/db";
 
 export async function POST(request: Request) {
   try {
@@ -12,10 +18,8 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Code manquant" }, { status: 400 });
     }
 
-    // On cherche d'abord dans notre DB serveur
-    let key = await findKeyByCode(code);
+    let key = (await findKeyByCode(code)) ?? (isAdminAccessCode(code) ? createAdminAccessKey() : undefined);
 
-    // Les clés mockées sont réservées au développement local.
     if (!key && allowDevOnlyMocks()) {
       const mockKey = mockAccessKeys.find((k) => k.code.toUpperCase() === code.toUpperCase());
       if (mockKey) {
@@ -27,6 +31,10 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Clé invalide" }, { status: 404 });
     }
 
+    if (key.activatedAt) {
+      return NextResponse.json({ key });
+    }
+
     if (isDiscoveryPlan(key.plan) && key.hasUsedFreeTrial) {
       return NextResponse.json(
         { error: "L'accès découverte a déjà été utilisé sur ce compte." },
@@ -34,12 +42,6 @@ export async function POST(request: Request) {
       );
     }
 
-    // Si la clé est déjà activée, on renvoie son état actuel
-    if (key.activatedAt) {
-      return NextResponse.json({ key });
-    }
-
-    // Activation réelle côté serveur
     const now = new Date();
     const plan = normalizeAccessKeyPlan(key.plan);
     const expiration = new Date(
@@ -50,14 +52,16 @@ export async function POST(request: Request) {
       ...key,
       plan,
       activatedAt: now.toISOString(),
-      expiresAt: expiration.toISOString(),
+      expiresAt: isAdminAccessCode(key.code) ? key.expiresAt : expiration.toISOString(),
       isActive: true,
       usesRemaining: key.usesRemaining,
       hasUsedFreeTrial: isDiscoveryPlan(plan) ? true : key.hasUsedFreeTrial,
       freeTrialUsedAt: isDiscoveryPlan(plan) ? now.toISOString() : key.freeTrialUsedAt
     };
 
-    await saveKey(activatedKey);
+    if (!isAdminAccessCode(activatedKey.code)) {
+      await saveKey(activatedKey);
+    }
 
     return NextResponse.json({ key: activatedKey });
   } catch (error) {
