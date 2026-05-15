@@ -87,7 +87,6 @@ export function PricingAccessKeys() {
     setPurchaseMessage(null);
 
     if (plan.plan === "decouverte") {
-      console.log("free access clicked");
       setShowFreeForm(true);
       return;
     }
