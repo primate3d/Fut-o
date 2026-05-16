@@ -32,6 +32,10 @@ function parseBrevoResponse(text: string) {
   }
 }
 
+function maskKeyForLog(keyCode: string) {
+  return `****${keyCode.slice(-4)}`;
+}
+
 function buildAccessKeyEmail(keyCode: string, planName: string) {
   return `
     <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #eadfce; border-radius: 16px; background-color: #fffaf2;">
@@ -77,7 +81,7 @@ export async function sendAccessKeyEmail(
     const error = "Configuration Brevo manquante : BREVO_API_KEY et BREVO_FROM_EMAIL sont requis.";
     if (process.env.NODE_ENV !== "production") {
       console.warn(error);
-      console.log(`[MAIL LOCAL] Vers: ${to}, Cle: ${keyCode}, Plan: ${planName}`);
+      console.log(`[MAIL LOCAL] Vers: ${to}, Cle: ${maskKeyForLog(keyCode)}, Plan: ${planName}`);
       return { success: true, simulated: true };
     }
 

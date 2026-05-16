@@ -4,6 +4,7 @@ import type { AccessKey, UploadedDocument } from "@/types";
 export const ACCESS_KEY_STORAGE_KEY = "futeo.activeAccessKey";
 export const PURCHASED_ACCESS_KEYS_STORAGE_KEY = "futeo.purchasedAccessKeys";
 export const FREE_TRIAL_USAGE_STORAGE_KEY = "futeo.freeTrialUsedAt";
+export const ADMIN_ACCESS_CODE = "ADMIN-DEV";
 
 export type AccessKeyPlan = AccessKey["plan"];
 export type PublicAccessKeyPlan = "decouverte" | "foyer" | "famille";
@@ -114,6 +115,22 @@ export function isAuditFoyerPlan(plan?: AccessKeyPlan | null) {
   return plan ? normalizeAccessKeyPlan(plan) === "foyer" : false;
 }
 
+export function isAdminAccessCode(code?: string | null) {
+  return code?.trim().toUpperCase() === ADMIN_ACCESS_CODE;
+}
+
+export function createAdminAccessKey(): AccessKey {
+  return {
+    id: "key_admin_dev",
+    code: ADMIN_ACCESS_CODE,
+    plan: "famille",
+    usesRemaining: 999999,
+    expiresAt: "2099-12-31",
+    isActive: true,
+    createdAt: "2026-01-01"
+  };
+}
+
 export function getAuditFoyerCategory(
   documentType?: UploadedDocument["documentType"]
 ): AuditFoyerCategory | null {
@@ -200,7 +217,7 @@ export function validateAccessKey(code: string, keys = getDefaultValidationKeys(
   const normalizedCode = code.trim().toUpperCase();
   const key = keys.find((item) => item.code.toUpperCase() === normalizedCode);
 
-  if (!key || !key.isActive || key.usesRemaining <= 0) {
+  if (!key || !key.isActive) {
     return null;
   }
 

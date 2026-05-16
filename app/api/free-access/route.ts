@@ -12,6 +12,10 @@ function isValidEmail(email: string) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
 }
 
+function maskKeyForLog(keyCode: string) {
+  return `****${keyCode.slice(-4)}`;
+}
+
 export async function POST(request: Request) {
   try {
     const { email } = (await request.json()) as { email?: string };
@@ -38,14 +42,12 @@ export async function POST(request: Request) {
     }
 
     const key = generateAccessKey("decouverte");
-    await saveKey(key);
-
     const emailResult = await sendAccessKeyEmail(normalizedEmail, key.code, "Accès gratuit Futéo");
 
     if (!emailResult.success) {
       console.error("Echec envoi clé gratuite:", {
         email: normalizedEmail,
-        keyCode: key.code,
+        keySuffix: maskKeyForLog(key.code),
         error: emailResult.error
       });
       return NextResponse.json(
@@ -54,6 +56,7 @@ export async function POST(request: Request) {
       );
     }
 
+    await saveKey(key);
     await saveFreeTrial({
       id: `free_${Date.now()}`,
       email: normalizedEmail,

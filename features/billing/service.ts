@@ -1,6 +1,6 @@
 import { getStripe } from "@/lib/server/stripe";
-import { accessKeyPlans, generateAccessKey, type PublicAccessKeyPlan } from "./access-keys";
-import { saveKey, saveOrder } from "@/lib/server/db";
+import { accessKeyPlans, type PublicAccessKeyPlan } from "./access-keys";
+import { saveOrder } from "@/lib/server/db";
 import { requireServerEnv } from "@/lib/env";
 
 export async function createCheckoutSession(planId: string, baseUrl: string): Promise<string | null> {
@@ -10,9 +10,7 @@ export async function createCheckoutSession(planId: string, baseUrl: string): Pr
   }
 
   if (plan.plan === "decouverte") {
-    const key = generateAccessKey("decouverte");
-    await saveKey(key);
-    return `${baseUrl}/activer-cle?code=${encodeURIComponent(key.code)}`;
+    throw new Error("L'accès gratuit doit passer par /api/free-access.");
   }
 
   const stripePriceEnvByPlan: Partial<Record<PublicAccessKeyPlan, "STRIPE_PRICE_AUDIT_FOYER" | "STRIPE_PRICE_AUDIT_FAMILLE">> = {

@@ -16,6 +16,10 @@ function normalizePlan(planId: unknown): AccessKey["plan"] {
       : "foyer";
 }
 
+function maskKeyForLog(keyCode: string) {
+  return `****${keyCode.slice(-4)}`;
+}
+
 export async function POST(request: Request) {
   const payload = await request.text();
   const signature = request.headers.get("stripe-signature");
@@ -91,8 +95,7 @@ export async function POST(request: Request) {
         service: "Stripe",
         action: "payment_complete",
         sessionId: session.id,
-        keyCode,
-        metadata: { plan, email: session.customer_details?.email }
+        metadata: { plan, email: session.customer_details?.email, keySuffix: maskKeyForLog(keyCode) }
       });
 
       if (session.customer_details?.email) {
@@ -113,7 +116,7 @@ export async function POST(request: Request) {
             service: "Email",
             action: "delivery_success",
             sessionId: session.id,
-            keyCode,
+            metadata: { keySuffix: maskKeyForLog(keyCode) },
             latencyMs: Math.round(performance.now() - startTime)
           });
         } else {
