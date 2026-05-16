@@ -69,12 +69,22 @@ Contenu extrait :\n${document.extractedText || "Contenu illisible ou vide."}`
           role: "system",
           content: `Tu aides Futeo a preparer une lecture claire de contrats du foyer.
 Reponds uniquement en JSON avec quatre cles : detectedParties, expenses, recommendations, anomalies.
-detectedParties.customer doit contenir uniquement les informations client visibles dans les documents : firstName, lastName, fullName, address, email, phone, customerNumber.
+
+detectedParties.customer doit contenir les informations du titulaire du contrat visibles dans les documents.
+Le nom du client apparait souvent en haut de la facture sous forme "Monsieur/Madame Prenom NOM" ou dans un bloc adresse destinataire.
+Champs attendus : firstName, lastName, fullName, address, email, phone, customerNumber.
+Exemple : si le document contient "Monsieur Yannick TEJOU / 1 ALLEE DE LARTIGOT / 64100 BAYONNE", extraire firstName:"Yannick", lastName:"TEJOU", fullName:"Yannick TEJOU", address:"1 ALLEE DE LARTIGOT, 64100 BAYONNE".
+
 detectedParties.providers doit etre un objet indexe par nom fournisseur et contenir name, address, email, phone, customerServiceUrl si ces informations sont visibles.
+
 detectedParties.documents doit etre un objet indexe par Document ID. Chaque entree doit contenir documentId, fileName, documentType, providerName, subscriptionType, invoiceAmount, customer et provider quand ces donnees sont visibles.
+
 Chaque expense doit contenir sourceDocumentId avec le Document ID exact du document source, documentType, provider, category, subcategory, monthlyAmount et les references visibles utiles : customerNumber, contractNumber, invoiceNumber, phone.
-Ne melange jamais les informations de documents differents : une depense mobile doit utiliser uniquement les donnees de la facture mobile correspondante.
-N'invente pas de coordonnees client ou fournisseur. N'invente pas de garantie d'economie. Signale les limites quand le texte extrait est insuffisant.`
+
+Ne melange jamais les informations de documents differents.
+N'invente pas de coordonnees client ou fournisseur.
+N'invente pas de garantie d'economie.
+Signale les limites quand le texte extrait est insuffisant.`
         },
         {
           role: "user",
@@ -93,22 +103,22 @@ N'invente pas de coordonnees client ou fournisseur. N'invente pas de garantie d'
       aiExpenses.length > 0
         ? []
         : Object.values(documentProfiles)
-            .filter((profile) => profile.invoiceAmount)
-            .map((profile) => ({
-              label: profile.subscriptionType ?? "Contrat",
-              provider: profile.providerName ?? "Fournisseur",
-              category: inferExpenseCategoryFromDocumentType(profile.documentType),
-              subcategory: inferExpenseSubcategoryFromDocumentType(profile.documentType),
-              isRecurring: true,
-              monthlyAmount: profile.invoiceAmount ?? 0,
-              documentType: profile.documentType,
-              sourceDocumentId: profile.documentId,
-              sourceDocumentName: profile.fileName,
-              customerNumber: profile.customer?.customerNumber,
-              contractNumber: profile.customer?.contractNumber,
-              invoiceNumber: profile.customer?.invoiceNumber,
-              phone: profile.customer?.phone
-            }));
+          .filter((profile) => profile.invoiceAmount)
+          .map((profile) => ({
+            label: profile.subscriptionType ?? "Contrat",
+            provider: profile.providerName ?? "Fournisseur",
+            category: inferExpenseCategoryFromDocumentType(profile.documentType),
+            subcategory: inferExpenseSubcategoryFromDocumentType(profile.documentType),
+            isRecurring: true,
+            monthlyAmount: profile.invoiceAmount ?? 0,
+            documentType: profile.documentType,
+            sourceDocumentId: profile.documentId,
+            sourceDocumentName: profile.fileName,
+            customerNumber: profile.customer?.customerNumber,
+            contractNumber: profile.customer?.contractNumber,
+            invoiceNumber: profile.customer?.invoiceNumber,
+            phone: profile.customer?.phone
+          }));
 
     const expenses: Expense[] = [...aiExpenses, ...fallbackExpenses].map(
       (expense, index) =>
