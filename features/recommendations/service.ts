@@ -175,7 +175,7 @@ export function findAlternativeOffers(expenses: Expense[]): AlternativeOffer[] {
         };
       });
     })
-    .filter((offer) => offer.estimatedYearlySaving > 0)
+
     .sort((a, b) => b.estimatedYearlySaving - a.estimatedYearlySaving)
     .slice(0, 8);
 }
