@@ -3,7 +3,69 @@ import { findKeyByCode, getAnalysisByKey, saveAnalysis, saveKey } from "@/lib/se
 import { analyzeDocumentsWithAI } from "@/features/analysis/ai-service";
 import { logger, withLatency } from "@/lib/server/logger";
 import { extractTextFromDocument } from "@/lib/server/ocr";
-import type { UploadedDocument } from "@/types";
+import { storage } from "@/lib/server/storage";
+import { env } from "@/lib/env";
+import type { MockAnalysis, UploadedDocument } from "@/types";
+
+type StoredUploadedDocument = UploadedDocument & {
+  physicalFileName?: string;
+  extractedText?: string;
+};
+
+type ExtractedUploadedDocument = StoredUploadedDocument & {
+  extractedText: string;
+};
+
+function isAnalysisForDocuments(analysis: MockAnalysis, documents: UploadedDocument[]) {
+  const currentDocumentIds = documents
+    .filter((document) => document.status !== "error")
+    .map((document) => document.id)
+    .sort();
+  const analysisDocumentIds = analysis.documents
+    .map((document) => document.id)
+    .sort();
+
+  return (
+    currentDocumentIds.length > 0 &&
+    currentDocumentIds.length === analysisDocumentIds.length &&
+    currentDocumentIds.every((documentId, index) => documentId === analysisDocumentIds[index])
+  );
+}
+
+function isNonEmptyAnalysis(analysis: MockAnalysis | null) {
+  if (!analysis) {
+    return false;
+  }
+
+  const hasExtractedText = analysis.documents.some((document) => {
+    const extractedText = "extractedText" in document ? document.extractedText : undefined;
+    return typeof extractedText === "string" && extractedText.trim().length > 0;
+  });
+  const hasExpenses = analysis.expenses.length > 0;
+  const hasMonthlyAmount = analysis.totalMonthlyAmount > 0;
+  const hasUsefulDetectedDocument = Object.values(analysis.detectedParties?.documents ?? {}).some(
+    (document) => Boolean(document.invoiceAmount || document.customer)
+  );
+
+  return hasExtractedText || hasExpenses || hasMonthlyAmount || hasUsefulDetectedDocument;
+}
+
+function getPhysicalFileName(keyCode: string, document: UploadedDocument) {
+  const storedDocument = document as StoredUploadedDocument;
+  return storedDocument.physicalFileName || `${keyCode}_${document.id}_${document.fileName}`;
+}
+
+type ExtractionDiagnostic = {
+  id: string;
+  name: string;
+  physicalFileName: string;
+  fullPath: string;
+  mimeType: string;
+  fileExists: boolean;
+  fileSizeBytes: number;
+  textLength: number;
+  first500: string;
+};
 
 export async function POST(request: Request) {
   try {
@@ -32,7 +94,12 @@ export async function POST(request: Request) {
 
     // 2. Vérification du cache
     const existingAnalysis = await getAnalysisByKey(code);
-    if (existingAnalysis?.detectedParties?.documents) {
+    if (
+      existingAnalysis &&
+      documents &&
+      isNonEmptyAnalysis(existingAnalysis) &&
+      isAnalysisForDocuments(existingAnalysis, documents)
+    ) {
       return NextResponse.json({ analysis: existingAnalysis, cached: true });
     }
 
@@ -41,17 +108,124 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Aucun document à analyser" }, { status: 400 });
     }
 
-    const { result: analysis, latencyMs } = await withLatency(async () => {
-      // Extraction du texte de chaque document
-      const documentsWithContent = await Promise.all(
-        documents.map(async (doc) => {
-          const text = await extractTextFromDocument(code, doc);
-          return { ...doc, extractedText: text };
-        })
-      );
+    const documentsWithContent: ExtractedUploadedDocument[] = [];
+    const extractionDiagnostics: ExtractionDiagnostic[] = [];
+    for (const doc of documents) {
+      const physicalFileName = getPhysicalFileName(code, doc);
+      const buffer = await storage.get(physicalFileName);
+      const diagnostic: ExtractionDiagnostic = {
+        id: doc.id,
+        name: doc.fileName,
+        physicalFileName,
+        fullPath: `${env.UPLOADS_DIR}/${physicalFileName}`,
+        mimeType: doc.mimeType,
+        fileExists: Boolean(buffer),
+        fileSizeBytes: buffer?.length ?? 0,
+        textLength: 0,
+        first500: ""
+      };
 
+      logger.info("Diagnostic document avant extraction", {
+        service: "Analysis",
+        action: "document_before_extraction",
+        keyCode: code,
+        metadata: diagnostic
+      });
+
+      let text = "";
+      try {
+        text = await extractTextFromDocument(code, doc);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Erreur extraction inconnue";
+        logger.error("Exception pendant extractTextFromDocument", {
+          service: "Analysis",
+          action: "document_extraction_exception",
+          keyCode: code,
+          metadata: { id: doc.id, physicalFileName, error: message }
+        });
+        return NextResponse.json(
+          { error: "Extraction texte impossible", details: message },
+          { status: 422 }
+        );
+      }
+
+      diagnostic.textLength = text.length;
+      diagnostic.first500 = text.slice(0, 500);
+      extractionDiagnostics.push(diagnostic);
+
+      logger.info("Diagnostic document après extraction", {
+        service: "Analysis",
+        action: "document_after_extraction",
+        keyCode: code,
+        metadata: diagnostic
+      });
+
+      documentsWithContent.push({ ...doc, physicalFileName, extractedText: text });
+    }
+
+    const hasExtractedText = documentsWithContent.some(
+      (doc) => doc.extractedText?.trim()
+    );
+
+    if (!hasExtractedText) {
+      logger.error("Analyse stoppée: extraction texte vide", {
+        service: "Analysis",
+        action: "empty_extraction_blocked",
+        keyCode: code,
+        metadata: {
+          documents: documentsWithContent.map((doc) => ({
+            id: doc.id,
+            name: doc.fileName,
+            physicalFileName: doc.physicalFileName,
+            mimeType: doc.mimeType,
+            textLength: doc.extractedText?.length ?? 0
+          }))
+        }
+      });
+      return NextResponse.json(
+        {
+          error: "Extraction texte vide: analyse IA non lancée et aucune sauvegarde effectuée",
+          diagnostics: extractionDiagnostics
+        },
+        { status: 422 }
+      );
+    }
+
+    logger.info("Texte transmis à l'IA", {
+      service: "Analysis",
+      action: "ai_input_ready",
+      keyCode: code,
+      metadata: {
+        documents: documentsWithContent.map((doc) => ({
+          id: doc.id,
+          textLength: doc.extractedText?.length ?? 0
+        }))
+      }
+    });
+
+    const { result: analysis, latencyMs } = await withLatency(async () => {
       return analyzeDocumentsWithAI(documentsWithContent, code);
     });
+
+    if (!isNonEmptyAnalysis(analysis)) {
+      logger.error("Analyse vide non sauvegardée", {
+        service: "Analysis",
+        action: "empty_analysis_blocked",
+        keyCode: code,
+        metadata: {
+          expensesLength: analysis.expenses.length,
+          totalMonthlyAmount: analysis.totalMonthlyAmount,
+          documentTextLengths: analysis.documents.map((doc) => {
+            const extractedText = "extractedText" in doc ? doc.extractedText : undefined;
+            return typeof extractedText === "string" ? extractedText.length : 0;
+          })
+        }
+      });
+      return NextResponse.json(
+        { error: "Analyse vide: sauvegarde refusée" },
+        { status: 422 }
+      );
+    }
 
     // 4. Persistance serveur
     await saveAnalysis(code, analysis);

@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { KeyRound, ShieldCheck } from "lucide-react";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import {
@@ -13,6 +13,7 @@ import {
 
 export function AccessGate({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
+  const router = useRouter();
   const [isAllowed, setIsAllowed] = useState(false);
   const [hasCheckedAccess, setHasCheckedAccess] = useState(false);
 
@@ -26,6 +27,7 @@ export function AccessGate({ children }: { children: React.ReactNode }) {
         if (!isMounted) return;
         setIsAllowed(false);
         setHasCheckedAccess(true);
+        router.replace(`/activer-cle?redirect=${encodeURIComponent(pathname)}`);
         return;
       }
 
@@ -37,6 +39,7 @@ export function AccessGate({ children }: { children: React.ReactNode }) {
         window.localStorage.removeItem(ACCESS_KEY_STORAGE_KEY);
         setIsAllowed(false);
         setHasCheckedAccess(true);
+        router.replace(`/activer-cle?redirect=${encodeURIComponent(pathname)}`);
         return;
       }
 
@@ -51,7 +54,7 @@ export function AccessGate({ children }: { children: React.ReactNode }) {
     return () => {
       isMounted = false;
     };
-  }, [pathname]);
+  }, [pathname, router]);
 
   if (!hasCheckedAccess) {
     return (

@@ -39,9 +39,30 @@ function parseAmount(value?: string) {
   return Number.isFinite(amount) ? amount : undefined;
 }
 
+function extractInlinePostalAddress(text: string) {
+  const compactText = clean(text);
+  const match = compactText?.match(
+    /(?:m\.|mme|madame|monsieur)\s+[A-Z\u00C0-\u0178][A-Za-z\u00C0-\u017F' -]{2,}\s+[A-Z\u00C0-\u0178][A-Za-z\u00C0-\u017F' -]{2,}\s+(.+?\b\d{5}\s+[A-Z\u00C0-\u0178][A-Za-z\u00C0-\u017F' -]{2,})(?=\s+(?:Facture|TVA|Utilisateur|Montant|N[\u00B0o]|$))/i
+  );
+
+  return clean(match?.[1]);
+}
+
+function extractProviderAddress(text: string) {
+  const compactText = clean(text);
+  const match = compactText?.match(
+    /(Bouygues Telecom)\s*-\s*(13-15,?\s*avenue du Mar[ée]chal Juin\s*-\s*92360\s*Meudon-la-For[êe]t)/i
+  );
+
+  const providerName = clean(match?.[1]);
+  const providerAddress = clean(match?.[2])?.replace(/\s+-\s+/g, "\n");
+  return [providerName, providerAddress].filter(Boolean).join("\n") || undefined;
+}
+
 function detectProvider(document: ExtractedDocument) {
   const text = normalize(`${document.provider ?? ""} ${document.fileName} ${document.extractedText}`);
   const providers = [
+    "NRJ Mobile",
     "SFR",
     "Orange",
     "Free",
@@ -89,6 +110,9 @@ function splitFullName(fullName?: string): CustomerProfile {
 }
 
 function extractPostalAddress(text: string) {
+  const inlineAddress = extractInlinePostalAddress(text);
+  if (inlineAddress) return inlineAddress;
+
   const lines = text
     .split(/\r?\n/)
     .map((line) => clean(line))
@@ -111,6 +135,7 @@ function extractPostalAddress(text: string) {
 
 export function extractDocumentPartyProfile(document: ExtractedDocument): DocumentPartyProfile {
   const text = document.extractedText ?? "";
+  const compactText = clean(text) ?? "";
   const providerName = detectProvider(document);
   const fullName = firstMatch(text, [
     /(?:titulaire|client|factur[ée]\s*à|destinataire)\s*:?\s*([A-ZÀ-Ÿ][A-Za-zÀ-ÿ' -]{2,}\s+[A-ZÀ-Ÿ][A-Za-zÀ-ÿ' -]{2,})/i,
@@ -142,15 +167,39 @@ export function extractDocumentPartyProfile(document: ExtractedDocument): Docume
     ])
   );
 
+  const reversePhone = firstMatch(compactText, [
+    /\b((?:\+33|0)\s*[1-9](?:[\s.-]*\d{2}){4})\s*N[\u00B0o]\s*de\s*T[ée]l[ée]phone\b/i
+  ]);
+  const reverseCustomerNumber = firstMatch(compactText, [
+    /\b(\d{8,})\s*Compte client\b/i,
+    /\b([A-Z0-9][A-Z0-9 -]{4,})\s*Compte client\b/i
+  ]);
+  const reverseContractNumber = firstMatch(compactText, [
+    /\b(CT\d{6,})\s*N[\u00B0o]\s*de\s*contrat\b/i,
+    /\b([A-Z0-9][A-Z0-9 -]{4,})\s*N[\u00B0o]\s*de\s*contrat\b/i
+  ]);
+  const reverseInvoiceNumber = firstMatch(compactText, [
+    /\b(FM\d{6,})\s*N[\u00B0o]\s*de\s*facture\b/i,
+    /\b([A-Z0-9][A-Z0-9 -]{4,})\s*N[\u00B0o]\s*de\s*facture\b/i
+  ]);
+  const reverseInvoiceAmount = parseAmount(
+    firstMatch(compactText, [
+      /montant\s+net\s+[àa]\s+payer\s*:?\s*([0-9][0-9\s.,]*)\s*€/i,
+      /montant\s+de\s+votre\s+facture\s+[0-9][0-9\s.,]*\s+([0-9][0-9\s.,]*)/i
+    ])
+  );
+  const providerAddress = extractProviderAddress(compactText);
+
   customer.address = extractPostalAddress(text);
-  customer.phone = phone;
-  customer.customerNumber = customerNumber;
-  customer.contractNumber = contractNumber;
-  customer.invoiceNumber = invoiceNumber;
+  customer.phone = reversePhone ?? phone;
+  customer.customerNumber = reverseCustomerNumber ?? customerNumber;
+  customer.contractNumber = reverseContractNumber ?? contractNumber;
+  customer.invoiceNumber = reverseInvoiceNumber ?? invoiceNumber;
 
   const provider: ProviderProfile | undefined = providerName
     ? {
         name: providerName,
+        address: providerAddress,
         phone: firstMatch(text, [
           /(?:service client|assistance|contact)\s*:?\s*((?:\+33|0)\s*[1-9](?:[\s.-]*\d{2}){4})/i
         ])
@@ -163,7 +212,7 @@ export function extractDocumentPartyProfile(document: ExtractedDocument): Docume
     documentType: document.documentType,
     providerName,
     subscriptionType: getSubscriptionType(document.documentType),
-    invoiceAmount,
+    invoiceAmount: reverseInvoiceAmount ?? invoiceAmount,
     customer: Object.values(customer).some(Boolean) ? customer : undefined,
     provider
   };

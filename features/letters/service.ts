@@ -55,9 +55,9 @@ function getDocumentCustomerProfile(
     ...documentProfile?.customer,
     customerNumber:
       expense.customerNumber ||
-      expense.contractNumber ||
       documentProfile?.customer?.customerNumber ||
-      analysis.detectedParties?.customer?.customerNumber,
+      analysis.detectedParties?.customer?.customerNumber ||
+      expense.contractNumber,
     contractNumber:
       expense.contractNumber ||
       documentProfile?.customer?.contractNumber ||
@@ -79,6 +79,7 @@ const providerAddresses: Record<string, string> = {
   Orange: "Orange Service Clients\nTSA 10001\n59878 LILLE CEDEX 9",
   SFR: "SFR Service Client\nTSA 10101\n69947 LYON CEDEX 20",
   Free: "Free Service Abonne\n75371 PARIS CEDEX 08",
+  "NRJ Mobile": "Bouygues Telecom\n13-15 avenue du Marechal Juin\n92360 Meudon-la-Foret",
   "Bouygues Telecom": "Bouygues Telecom\nService Clients\n60436 NOAILLES CEDEX",
   Netflix: "Netflix International B.V.\nKarperstraat 8-10\n1075 KZ Amsterdam\nPays-Bas",
   "Banque Populaire": "Service Relation Clientele\nBP 1234\n75001 PARIS",
@@ -246,6 +247,9 @@ function buildBodyTemplate(params: {
     "",
     "Objet : {{subject}}",
     "Reference client : {{customerNumber}}",
+    "Numero de contrat : {{contractNumber}}",
+    "Numero de facture : {{invoiceNumber}}",
+    "Telephone : {{phone}}",
     "",
     "Madame, Monsieur,",
     "",
@@ -586,6 +590,9 @@ export function renderLetter(
     address: letter.customerProfile?.address,
     customerNumber:
       letter.customerProfile?.customerNumber || letter.customerProfile?.contractNumber,
+    contractNumber: letter.customerProfile?.contractNumber,
+    invoiceNumber: letter.customerProfile?.invoiceNumber,
+    phone: letter.customerProfile?.phone,
     email: letter.customerProfile?.email,
     ...Object.fromEntries(
       Object.entries(personalization).filter(([, value]) => Boolean(value))
@@ -600,6 +607,9 @@ export function renderLetter(
       "{{customerNumber}}",
       values.customerNumber || defaultPersonalization.customerNumber
     )
+    .replaceAll("{{contractNumber}}", values.contractNumber || "[Numero de contrat]")
+    .replaceAll("{{invoiceNumber}}", values.invoiceNumber || "[Numero de facture]")
+    .replaceAll("{{phone}}", values.phone || "[Telephone]")
     .replaceAll("{{email}}", values.email || defaultPersonalization.email)
     .replaceAll("{{subject}}", letter.subject);
 }

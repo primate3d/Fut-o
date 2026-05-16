@@ -1,6 +1,6 @@
 import fs from "fs";
 import path from "path";
-import { and, eq, inArray, lt, or } from "drizzle-orm";
+import { and, eq, inArray, lt } from "drizzle-orm";
 import { db } from "./db/index";
 import { accessKeys, analyses, documents, freeTrials, orders } from "./db/schema";
 import { ExpenseCategory } from "@/types";
@@ -282,17 +282,17 @@ export async function getOrderBySessionId(sessionId: string): Promise<OrderRecor
     createdAt: record.createdAt || undefined,
     key: record.generatedKey
       ? {
-          id: `key_${record.id}`,
-          code: record.generatedKey,
-          plan:
-            record.planId === "simple" || record.planId === "premium"
-              ? record.planId
-              : "foyer",
-          usesRemaining: 1,
-          expiresAt: "",
-          isActive: true,
-          createdAt: record.createdAt || new Date().toISOString()
-        }
+        id: `key_${record.id}`,
+        code: record.generatedKey,
+        plan:
+          record.planId === "simple" || record.planId === "premium"
+            ? record.planId
+            : "foyer",
+        usesRemaining: 1,
+        expiresAt: "",
+        isActive: true,
+        createdAt: record.createdAt || new Date().toISOString()
+      }
       : undefined
   };
 }
@@ -306,10 +306,12 @@ export function deleteDocumentFile(physicalFileName: string) {
 
 export async function purgeExpiredData(): Promise<void> {
   const now = new Date().toISOString();
+
+  // ✅ Corrigé : or() supprimé — la condition est simplement lt() seule
   const expiredKeys = await db
     .select()
     .from(accessKeys)
-    .where(and(or(lt(accessKeys.expiresAt, now)), eq(accessKeys.isActive, true)));
+    .where(and(lt(accessKeys.expiresAt, now), eq(accessKeys.isActive, true)));
 
   for (const key of expiredKeys) {
     const docs = (await getDocumentsByKey(key.code)) as StoredUploadedDocument[];

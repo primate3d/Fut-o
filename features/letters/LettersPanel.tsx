@@ -44,10 +44,10 @@ const initialPersonalization: LetterPersonalization = {
 };
 
 const fieldLabels: Record<keyof LetterPersonalization, string> = {
-  firstName: "PrÃ©nom",
+  firstName: "Prénom",
   lastName: "Nom",
   address: "Adresse",
-  customerNumber: "NumÃ©ro client",
+  customerNumber: "Numéro client",
   email: "Email"
 };
 
@@ -97,8 +97,8 @@ function mergeDetectedPersonalization(
 
 function getLetterTypeLabel(type: GeneratedLetter["type"]) {
   const labels: Record<GeneratedLetter["type"], string> = {
-    subscription_cancellation: "RÃ©siliation",
-    price_negotiation: "NÃ©gociation",
+    subscription_cancellation: "Résiliation",
+    price_negotiation: "Négociation",
     provider_followup: "Relance",
     offer_change: "Changement d'offre",
     comparison_report: "Comparaison"
@@ -126,7 +126,7 @@ function generatePDF(fileName: string, title: string, content: string) {
   doc.text(splitText, 20, 40);
   doc.setFontSize(8);
   doc.setTextColor(150, 150, 150);
-  doc.text("Document prÃ©parÃ© avec FutÃ©o", 20, 285);
+  doc.text("Document préparé avec Futéo", 20, 285);
   doc.save(fileName);
 }
 
@@ -232,7 +232,7 @@ export function LettersPanel() {
       } catch {
         setLetters(generateLettersFromAnalysis(analysisToLoad));
         setServiceMessage(
-          "GÃ©nÃ©ration locale des dÃ©marches activÃ©e. L'envoi email automatique sera connectÃ© ensuite."
+          "Génération locale des démarches activée. L'envoi email automatique sera connecté ensuite."
         );
       }
     }
@@ -250,7 +250,11 @@ export function LettersPanel() {
   const renderedLetter = selectedLetter
     ? renderLetter(selectedLetter, personalization)
     : "";
-  const detectedCustomer = analysis?.detectedParties?.customer;
+  const detectedCustomer =
+    analysis?.detectedParties?.customer ??
+    Object.values(analysis?.detectedParties?.documents ?? {}).find(
+      (documentProfile) => documentProfile.customer
+    )?.customer;
   const hasDetectedCustomer =
     Boolean(detectedCustomer) && Object.values(detectedCustomer ?? {}).some(Boolean);
 
@@ -267,7 +271,7 @@ export function LettersPanel() {
   async function copyLetter(letter: GeneratedLetter) {
     const content = renderLetter(letter, personalization);
     await navigator.clipboard?.writeText(content);
-    setCopyMessage("DÃ©marche copiÃ©e dans le presse-papiers.");
+    setCopyMessage("Démarche copiée dans le presse-papiers.");
     window.setTimeout(() => setCopyMessage(null), 1800);
   }
 
@@ -276,9 +280,9 @@ export function LettersPanel() {
       <EmptyState
         actionHref="/importer"
         actionLabel="Ajouter mes documents"
-        description="Ajoutez les documents utiles pour prÃ©parer vos dÃ©marches."
+        description="Ajoutez les documents utiles pour préparer vos démarches."
         icon={<FileSearch size={24} />}
-        title="Vos dÃ©marches seront prÃ©parÃ©es ici"
+        title="Vos démarches seront préparées ici"
       />
     );
   }
@@ -287,9 +291,9 @@ export function LettersPanel() {
     <section className="space-y-6">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div>
-          <h1 className="text-3xl font-bold text-navy-900">DÃ©marches adaptÃ©es</h1>
+          <h1 className="text-3xl font-bold text-navy-900">Démarches adaptées</h1>
           <p className="mt-2 text-slate-600">
-            Des actions proposÃ©es selon les documents analysÃ©s, prÃªtes Ã 
+            Des actions proposées selon les documents analysés, prêtes à
             personnaliser et relire tranquillement avant envoi.
           </p>
         </div>
@@ -304,17 +308,17 @@ export function LettersPanel() {
 
       {!hasDetectedCustomer ? (
         <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm leading-6 text-amber-900">
-          Aucune coordonnÃ©e client n'a Ã©tÃ© dÃ©tectÃ©e dans l'analyse actuelle. Relancez
-          l'analyse depuis la page Importer avec la facture d'origine pour prÃ©remplir
-          le nom, l'adresse, l'email et le numÃ©ro client quand ils sont lisibles.
+          Aucune coordonnée client n'a été détectée dans l'analyse actuelle. Relancez
+          l'analyse depuis la page Importer avec la facture d'origine pour préremplir
+          le nom, l'adresse, l'email et le numéro client quand ils sont lisibles.
         </div>
       ) : null}
 
       <div className="grid gap-4 md:grid-cols-3">
         {[
-          ["1", "Choisissez une dÃ©marche", "SÃ©lectionnez la demande adaptÃ©e."],
-          ["2", "Ajoutez vos coordonnÃ©es", "Renseignez uniquement ce que vous voulez voir apparaÃ®tre."],
-          ["3", "Copiez ou tÃ©lÃ©chargez", "Relisez, adaptez, puis envoyez avec votre outil habituel."]
+          ["1", "Choisissez une démarche", "Sélectionnez la demande adaptée."],
+          ["2", "Ajoutez vos coordonnées", "Renseignez uniquement ce que vous voulez voir apparaître."],
+          ["3", "Copiez ou téléchargez", "Relisez, adaptez, puis envoyez avec votre outil habituel."]
         ].map(([step, title, description]) => (
           <div className="rounded-2xl border border-sage-200 bg-sage-50/50 p-4" key={step}>
             <p className="flex h-7 w-7 items-center justify-center rounded-full bg-sage-500 text-xs font-bold text-white">
@@ -371,7 +375,7 @@ export function LettersPanel() {
                   type="button"
                   variant="secondary"
                 >
-                  Voir la dÃ©marche
+                  Voir la démarche
                 </Button>
                 <Button onClick={() => copyLetter(letter)} type="button" variant="ghost">
                   <Copy className="mr-2" size={17} />
@@ -420,7 +424,7 @@ export function LettersPanel() {
               Champs de personnalisation
             </h2>
             <p className="mt-1 text-sm text-slate-500">
-              Les champs remplis seront intÃ©grÃ©s dans la dÃ©marche. Vous pouvez les laisser vides.
+              Les champs remplis seront intégrés dans la démarche. Vous pouvez les laisser vides.
             </p>
             <div className="mt-5 grid gap-4 md:grid-cols-2">
               {(Object.keys(fieldLabels) as Array<keyof LetterPersonalization>).map(
@@ -454,7 +458,7 @@ export function LettersPanel() {
               <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                 <div>
                   <p className="text-sm font-semibold uppercase tracking-wide text-sage-700">
-                    AperÃ§u de la dÃ©marche : {selectedLetter.title}
+                    Aperçu de la démarche : {selectedLetter.title}
                   </p>
                   <h2 className="mt-2 text-2xl font-bold text-navy-900">
                     Objet : {selectedLetter.subject}

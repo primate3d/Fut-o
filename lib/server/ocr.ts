@@ -1,5 +1,4 @@
 import path from "path";
-import { PDFParse } from "pdf-parse";
 import { OpenAI } from "openai";
 import { storage } from "@/lib/server/storage";
 import type { UploadedDocument } from "@/types";
@@ -16,7 +15,7 @@ function getOpenAI() {
       throw new Error("OPENAI_API_KEY manquante");
     }
     _openai = new OpenAI({
-      apiKey: process.env.OPENAI_API_KEY
+      apiKey: process.env.OPENAI_API_KEY,
     });
   }
   return _openai;
@@ -26,16 +25,19 @@ async function extractTextFromPDF(physicalFileName: string): Promise<string> {
   const dataBuffer = await storage.get(physicalFileName);
   if (!dataBuffer) return "";
 
-  const parser = new PDFParse({ data: dataBuffer });
-
   try {
-    const result = await parser.getText();
-    return result.text.trim();
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const pdfParse = require("pdf-parse") as (
+      buffer: Buffer,
+      options?: Record<string, unknown>
+    ) => Promise<{ text: string; numpages: number }>;
+
+    const data = await pdfParse(dataBuffer);
+    return data.text.trim();
   } catch (error) {
-    console.error("Erreur extraction texte PDF:", error);
-    return "";
-  } finally {
-    await parser.destroy();
+    const message = error instanceof Error ? error.message : String(error);
+    console.error(`Erreur extraction texte PDF pour ${physicalFileName}:`, message, error);
+    throw error;
   }
 }
 
@@ -63,25 +65,24 @@ async function extractTextFromImage(physicalFileName: string): Promise<string> {
       messages: [
         {
           role: "system",
-          content:
-            "Tu extrais uniquement le texte visible dans l'image, sans commentaire."
+          content: "Tu extrais uniquement le texte visible dans l'image, sans commentaire.",
         },
         {
           role: "user",
           content: [
             {
               type: "text",
-              text: "Extrait tout le texte de cette image."
+              text: "Extrait tout le texte de cette image.",
             },
             {
               type: "image_url",
               image_url: {
-                url: `data:${mimeType};base64,${base64Image}`
-              }
-            }
-          ]
-        }
-      ]
+                url: `data:${mimeType};base64,${base64Image}`,
+              },
+            },
+          ],
+        },
+      ],
     });
 
     return response.choices[0].message.content || "";
@@ -114,7 +115,7 @@ export async function extractTextFromDocument(
     }
 
     console.warn(
-      `Extraction texte PDF native insuffisante pour ${physicalFileName}. Fallback OCR requis si le PDF est scanne.`
+      `Extraction texte PDF native insuffisante pour ${physicalFileName}. Fallback OCR requis si le PDF est scanné.`
     );
     return nativeText;
   }
