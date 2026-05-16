@@ -8,7 +8,7 @@ import { UPLOADED_DOCUMENTS_STORAGE_KEY } from "@/features/upload/storage";
  */
 export async function purgeSourceDocuments() {
   if (typeof window === "undefined") return;
-  
+
   const activeKey = getStoredAccessKey();
   if (activeKey) {
     try {
@@ -23,13 +23,13 @@ export async function purgeSourceDocuments() {
   }
 
   window.localStorage.removeItem(UPLOADED_DOCUMENTS_STORAGE_KEY);
-  
-  // On nettoie aussi la reference dans l'analyse pour la coherence
+
+  // On nettoie aussi la référence dans l'analyse pour la cohérence
   const storedAnalysis = window.localStorage.getItem(MOCK_ANALYSIS_STORAGE_KEY);
   if (storedAnalysis) {
     try {
       const analysis = JSON.parse(storedAnalysis);
-      analysis.documents = []; // On vide la liste des documents sources
+      analysis.documents = [];
       window.localStorage.setItem(MOCK_ANALYSIS_STORAGE_KEY, JSON.stringify(analysis));
     } catch (e) {
       console.error("Erreur lors de la purge des documents dans l'analyse", e);
@@ -38,10 +38,23 @@ export async function purgeSourceDocuments() {
 }
 
 /**
- * Supprime l'intégralité des données du dossier (documents, analyse, courriers).
+ * Supprime l'intégralité des données du dossier (documents, analyse, courriers)
+ * côté localStorage ET côté serveur (DB).
  */
-export function purgeFullAudit() {
+export async function purgeFullAudit() {
   if (typeof window === "undefined") return;
+
+  const activeKey = getStoredAccessKey();
+  if (activeKey) {
+    try {
+      await fetch(`/api/analyse?code=${encodeURIComponent(activeKey.code)}`, {
+        method: "DELETE"
+      });
+    } catch (error) {
+      console.error("Erreur suppression analyse serveur:", error);
+    }
+  }
+
   window.localStorage.removeItem(UPLOADED_DOCUMENTS_STORAGE_KEY);
   window.localStorage.removeItem(MOCK_ANALYSIS_STORAGE_KEY);
 }
@@ -49,8 +62,8 @@ export function purgeFullAudit() {
 /**
  * Supprime tout, y compris la clé d'accès.
  */
-export function purgeAllSessionData() {
+export async function purgeAllSessionData() {
   if (typeof window === "undefined") return;
-  purgeFullAudit();
+  await purgeFullAudit();
   window.localStorage.removeItem(ACCESS_KEY_STORAGE_KEY);
 }

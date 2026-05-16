@@ -307,7 +307,6 @@ export function deleteDocumentFile(physicalFileName: string) {
 export async function purgeExpiredData(): Promise<void> {
   const now = new Date().toISOString();
 
-  // ✅ Corrigé : or() supprimé — la condition est simplement lt() seule
   const expiredKeys = await db
     .select()
     .from(accessKeys)
@@ -323,4 +322,8 @@ export async function purgeExpiredData(): Promise<void> {
     await db.delete(analyses).where(eq(analyses.keyCode, key.code));
     await db.update(accessKeys).set({ isActive: false }).where(eq(accessKeys.code, key.code));
   }
+}
+
+export async function deleteAnalysisByKey(keyCode: string): Promise<void> {
+  await db.delete(analyses).where(eq(analyses.keyCode, keyCode));
 }
