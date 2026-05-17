@@ -27,11 +27,12 @@ const providerDomains: Record<string, string> = {
   "Banque Populaire": "banquepopulaire.fr"
 };
 
-export function getProviderBranding(provider: string): ProviderBranding {
-  const domain = providerDomains[provider];
+export function getProviderBranding(provider?: string): ProviderBranding {
+  const name = provider || "Inconnu";
+  const domain = provider ? providerDomains[provider] : undefined;
 
   return {
-    name: provider,
+    name,
     domain,
     logoUrl: domain ? `https://icons.duckduckgo.com/ip3/${domain}.ico` : undefined
   };

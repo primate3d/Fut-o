@@ -105,3 +105,17 @@ export async function refreshStoredAnalysisServer(
   const { analysis } = (await response.json()) as { analysis?: MockAnalysis };
   return analysis ?? null;
 }
+
+export async function deleteStoredAnalysisServer(): Promise<boolean> {
+  const activeKey = getStoredAccessKey();
+  if (!activeKey) return false;
+
+  try {
+    const response = await fetch(`/api/analyse?code=${activeKey.code}`, {
+      method: "DELETE"
+    });
+    return response.ok;
+  } catch {
+    return false;
+  }
+}

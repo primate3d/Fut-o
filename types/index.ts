@@ -120,14 +120,19 @@ export type CustomerProfile = {
   customerNumber?: string;
   contractNumber?: string;
   invoiceNumber?: string;
+  confidence?: number;
 };
 
 export type ProviderProfile = {
   name: string;
+  service?: string;
   address?: string;
+  postalCode?: string;
+  city?: string;
   email?: string;
   phone?: string;
   customerServiceUrl?: string;
+  confidence?: number;
 };
 
 export type DetectedParties = {
@@ -176,6 +181,9 @@ export type LetterPersonalization = {
   address: string;
   customerNumber: string;
   email: string;
+  contractNumber?: string;
+  invoiceNumber?: string;
+  phone?: string;
 };
 
 export type GeneratedLetter = {

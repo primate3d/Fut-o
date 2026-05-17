@@ -42,7 +42,7 @@ export async function getStoredUploadedDocumentsServer(): Promise<UploadedDocume
       documents?: UploadedDocument[];
     };
 
-    return Array.isArray(documents) && documents.length > 0
+    return Array.isArray(documents)
       ? documents
       : localDocuments;
   } catch {

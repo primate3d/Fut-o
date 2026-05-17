@@ -49,27 +49,22 @@ function extractInlinePostalAddress(text: string) {
 }
 
 function extractProviderAddress(text: string) {
-  const compactText = clean(text);
-  const match = compactText?.match(
-    /(Bouygues Telecom)\s*-\s*(13-15,?\s*avenue du Mar[ée]chal Juin\s*-\s*92360\s*Meudon-la-For[êe]t)/i
-  );
-
-  const providerName = clean(match?.[1]);
-  const providerAddress = clean(match?.[2])?.replace(/\s+-\s+/g, "\n");
-  return [providerName, providerAddress].filter(Boolean).join("\n") || undefined;
+  // We prefer the highly accurate predefined service client addresses (e.g. CEDEX addresses)
+  // rather than the legal/corporate headquarters footers from invoices.
+  return undefined;
 }
 
 function detectProvider(document: ExtractedDocument) {
   const text = normalize(`${document.provider ?? ""} ${document.fileName} ${document.extractedText}`);
   const providers = [
     "NRJ Mobile",
+    "B&You",
+    "Sosh",
+    "RED by SFR",
     "SFR",
     "Orange",
     "Free",
     "Bouygues Telecom",
-    "B&You",
-    "Sosh",
-    "RED by SFR",
     "EDF",
     "Engie"
   ];
@@ -229,16 +224,22 @@ export function mergeDetectedParties(
   detectedParties: DetectedParties | undefined,
   documentProfiles: Record<string, DocumentPartyProfile>
 ): DetectedParties {
-  const firstCustomer = Object.values(documentProfiles).find(
+  // On récupère le premier profil client trouvé localement comme base de secours
+  const firstLocalCustomer = Object.values(documentProfiles).find(
     (profile) => profile.customer
   )?.customer;
+
+  // Fusion des fournisseurs : Priorité à l'IA (detectedParties), complété par le local (documentProfiles)
   const providers = Object.values(documentProfiles).reduce<NonNullable<DetectedParties["providers"]>>(
     (accumulator, profile) => {
       const provider = profile.provider;
       if (!provider?.name) return accumulator;
+      
+      const aiProvider = detectedParties?.providers?.[provider.name];
+      
       accumulator[provider.name] = {
-        ...provider,
-        ...detectedParties?.providers?.[provider.name]
+        ...provider,         // Données locales (nom, adresse extraite par regex)
+        ...aiProvider,       // Écrase/Complète avec les données IA (service, postalCode, city, confidence)
       };
       return accumulator;
     },
@@ -247,7 +248,7 @@ export function mergeDetectedParties(
 
   return {
     ...detectedParties,
-    customer: detectedParties?.customer ?? firstCustomer,
+    customer: detectedParties?.customer ?? firstLocalCustomer,
     providers,
     documents: {
       ...documentProfiles,
@@ -302,6 +303,23 @@ export function inferExpenseSubcategoryFromDocumentType(documentType?: UploadedD
   return undefined;
 }
 
+function isGenericProvider(provider?: string) {
+  if (!provider) return true;
+  const genericProviders = [
+    "operateur mobile",
+    "assureur auto",
+    "assureur habitation",
+    "mutuelle sante",
+    "banque principale",
+    "services recurrents",
+    "service abonnement",
+    "organisme de credit",
+    "fournisseur inconnu",
+    "facture mobile"
+  ];
+  return genericProviders.includes(provider.toLowerCase());
+}
+
 export function attachDocumentProfileToExpense(
   expense: Expense,
   documentProfiles: Record<string, DocumentPartyProfile>
@@ -314,9 +332,13 @@ export function attachDocumentProfileToExpense(
 
   if (!profile) return expense;
 
+  const finalProvider = expense.provider && !isGenericProvider(expense.provider)
+    ? expense.provider
+    : (profile.providerName || expense.provider);
+
   return {
     ...expense,
-    provider: profile.providerName || expense.provider,
+    provider: finalProvider,
     documentType: expense.documentType ?? profile.documentType,
     sourceDocumentId: profile.documentId,
     sourceDocumentName: profile.fileName,

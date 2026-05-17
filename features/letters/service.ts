@@ -35,11 +35,14 @@ export async function generateLetterDraftStub(
 }
 
 const defaultPersonalization: LetterPersonalization = {
-  firstName: "[Prenom]",
-  lastName: "[Nom]",
-  address: "[Adresse]",
-  customerNumber: "[Numero client]",
-  email: "[Email]"
+  firstName: "",
+  lastName: "",
+  address: "",
+  customerNumber: "",
+  email: "",
+  contractNumber: "",
+  invoiceNumber: "",
+  phone: ""
 };
 
 function getDocumentCustomerProfile(
@@ -77,10 +80,13 @@ const providerAddresses: Record<string, string> = {
   EDF: "Service Client EDF\nTSA 21941\n62978 ARRAS CEDEX 9",
   Engie: "ENGIE Service Clients\nTSA 87 494\n76934 ROUEN CEDEX 09",
   Orange: "Orange Service Clients\nTSA 10001\n59878 LILLE CEDEX 9",
+  Sosh: "Sosh\nService Clients\n59878 LILLE CEDEX 9",
   SFR: "SFR Service Client\nTSA 10101\n69947 LYON CEDEX 20",
+  "RED by SFR": "SFR Service Client\nService RED\nTSA 10101\n69947 LYON CEDEX 20",
   Free: "Free Service Abonne\n75371 PARIS CEDEX 08",
-  "NRJ Mobile": "Bouygues Telecom\n13-15 avenue du Marechal Juin\n92360 Meudon-la-Foret",
+  "NRJ Mobile": "NRJ Mobile - Service Client\n53098 Laval Cedex 09",
   "Bouygues Telecom": "Bouygues Telecom\nService Clients\n60436 NOAILLES CEDEX",
+  "B&You": "Bouygues Telecom\nService Clients B&You\n60436 NOAILLES CEDEX",
   Netflix: "Netflix International B.V.\nKarperstraat 8-10\n1075 KZ Amsterdam\nPays-Bas",
   "Banque Populaire": "Service Relation Clientele\nBP 1234\n75001 PARIS",
   "Mutuelle Habitat": "Service Clients Assurance\n45 Avenue de la Republique\n69000 LYON"
@@ -89,7 +95,7 @@ const providerAddresses: Record<string, string> = {
 function getProviderAddress(provider: string) {
   return (
     providerAddresses[provider] ||
-    `Service Client ${provider}\n[Adresse du prestataire a completer]\n[Code Postal et Ville]`
+    `Service Client ${provider}\nAdresse du prestataire a completer`
   );
 }
 
@@ -246,32 +252,32 @@ function buildBodyTemplate(params: {
     `                                        Fait le ${today}`,
     "",
     "Objet : {{subject}}",
-    "Reference client : {{customerNumber}}",
-    "Numero de contrat : {{contractNumber}}",
-    "Numero de facture : {{invoiceNumber}}",
-    "Telephone : {{phone}}",
+    "Référence client : {{customerNumber}}",
+    "Numéro de contrat : {{contractNumber}}",
+    "Numéro de facture : {{invoiceNumber}}",
+    "Téléphone : {{phone}}",
     "",
     "Madame, Monsieur,",
     "",
-    `Client(e) chez vous sous la reference {{customerNumber}}, je vous contacte au sujet du contrat indique dans mes documents, dont le montant mensuel est estime a ${formatCurrency(
+    `Client(e) chez vous sous la référence {{customerNumber}}, je vous contacte au sujet du contrat indiqué dans mes documents, dont le montant mensuel est estimé à ${formatCurrency(
       params.monthlyAmount
     )}, soit environ ${formatCurrency(params.yearlyAmount)} par an.`,
     "",
     params.reason,
     "",
     params.offerName
-      ? `Offre reperee a comparer : ${params.offerName}${
+      ? `Offre repérée à comparer : ${params.offerName}${
           params.offerUrl ? ` (${params.offerUrl})` : ""
         }.`
       : "",
     params.offerName ? "" : "",
     params.request,
     "",
-    `La piste d'amelioration estimee a partir des elements fournis est de ${formatCurrency(
+    `La piste d'amélioration estimée à partir des éléments fournis est de ${formatCurrency(
       params.potentialSaving
     )} par an. Je vous remercie de me faire parvenir une proposition actualisee ou les modalites permettant de faire evoluer mon engagement.`,
     "",
-    "Dans l'attente de votre retour, je vous prie d'agreer, Madame, Monsieur, l'expression de mes salutations distinguees.",
+    "Dans l'attente de votre retour, je vous prie d'agréer, Madame, Monsieur, l'expression de mes salutations distinguées.",
     "",
     "{{firstName}} {{lastName}}",
     "",
@@ -328,36 +334,36 @@ const categoryPresets: Record<
 > = {
   mobile: {
     price_negotiation: {
-      title: "Negociation forfait mobile",
-      subject: "Demande de renegociation de mon forfait mobile",
+      title: "Négociation forfait mobile",
+      subject: "Demande de renégociation de mon forfait mobile",
       reason:
-        "La comparaison de mon forfait mobile fait apparaitre des offres mobiles plus adaptees a mon usage actuel.",
+        "La comparaison de mon forfait mobile fait apparaître des offres mobiles plus adaptées à mon usage actuel.",
       request:
-        "Je souhaite recevoir une proposition tarifaire actualisee pour conserver mon forfait dans de meilleures conditions."
+        "Je souhaite recevoir une proposition tarifaire actualisée pour conserver mon forfait dans de meilleures conditions."
     },
     offer_change: {
       title: "Changement d'offre mobile",
       subject: "Demande de changement d'offre mobile",
       reason:
-        "Mon forfait mobile actuel semble pouvoir etre remplace par une offre plus simple ou plus competitive.",
+        "Mon forfait mobile actuel semble pouvoir être remplacé par une offre plus simple ou plus compétitive.",
       request:
-        "Je souhaite connaitre les offres mobiles disponibles correspondant a mon usage et les modalites de changement."
+        "Je souhaite connaître les offres mobiles disponibles correspondant à mon usage et les modalités de changement."
     },
     subscription_cancellation: {
-      title: "Resiliation forfait mobile",
-      subject: "Demande de resiliation de mon forfait mobile",
+      title: "Résiliation forfait mobile",
+      subject: "Demande de résiliation de mon forfait mobile",
       reason:
-        "Apres comparaison de mon forfait mobile et de mes besoins, je souhaite mettre fin a cet abonnement.",
+        "Après comparaison de mon forfait mobile et de mes besoins, je souhaite mettre fin à cet abonnement.",
       request:
-        "Je vous demande de proceder a la resiliation de ma ligne mobile selon les conditions applicables."
+        "Je vous demande de procéder à la résiliation de ma ligne mobile selon les conditions applicables."
     },
     comparison_report: {
       title: "Comparaison forfait mobile",
       subject: "Comparaison de mon forfait mobile",
       reason:
-        "Je souhaite partager les elements de comparaison retrouves autour de mon forfait mobile actuel.",
+        "Je souhaite partager les éléments de comparaison retrouvés autour de mon forfait mobile actuel.",
       request:
-        "Cette comparaison sert de base pour etudier une negociation, un changement d'offre ou une resiliation."
+        "Cette comparaison sert de base pour étudier une négociation, un changement d'offre ou une résiliation."
     }
   },
   internet: {
@@ -599,17 +605,47 @@ export function renderLetter(
     )
   };
 
-  return letter.bodyTemplate
-    .replaceAll("{{firstName}}", values.firstName || defaultPersonalization.firstName)
-    .replaceAll("{{lastName}}", values.lastName || defaultPersonalization.lastName)
-    .replaceAll("{{address}}", values.address || defaultPersonalization.address)
-    .replaceAll(
-      "{{customerNumber}}",
-      values.customerNumber || defaultPersonalization.customerNumber
-    )
-    .replaceAll("{{contractNumber}}", values.contractNumber || "[Numero de contrat]")
-    .replaceAll("{{invoiceNumber}}", values.invoiceNumber || "[Numero de facture]")
-    .replaceAll("{{phone}}", values.phone || "[Telephone]")
-    .replaceAll("{{email}}", values.email || defaultPersonalization.email)
-    .replaceAll("{{subject}}", letter.subject);
+  // 1. Gestion du bloc expéditeur (toujours présent)
+  const senderInfo = [
+    `${values.firstName || ""} ${values.lastName || ""}`.trim(),
+    (values.address || "").replace(/(.*?)(?:,\s*|\s+)(\b\d{5}\b.*)/, "$1\n$2"),
+    values.email || ""
+  ].filter(line => line.length > 0);
+
+  const senderBlock = senderInfo.length > 0 ? senderInfo.join("\n") : "Coordonnées à compléter";
+
+  // 2. Traitement du template
+  let body = letter.bodyTemplate;
+
+  // On remplace d'abord le bloc expéditeur fixe (les 3 premières lignes)
+  body = body.replace("{{firstName}} {{lastName}}\n{{address}}\n{{email}}", senderBlock);
+
+  // Remplacement des champs standards
+  body = body
+    .replaceAll("{{subject}}", letter.subject)
+    .replaceAll("{{customerNumber}}", values.customerNumber || "")
+    .replaceAll("{{firstName}}", values.firstName || "") // Pour la signature en bas
+    .replaceAll("{{lastName}}", values.lastName || ""); // Pour la signature en bas
+
+  // 3. Traitement conditionnel des lignes de références
+  // On cherche le pattern complet pour supprimer la ligne si la donnée est absente
+  const refPatterns = [
+    { key: "{{contractNumber}}", label: "Numéro de contrat : ", value: values.contractNumber },
+    { key: "{{invoiceNumber}}", label: "Numéro de facture : ", value: values.invoiceNumber },
+    { key: "{{phone}}", label: "Téléphone : ", value: values.phone }
+  ];
+
+  refPatterns.forEach(ref => {
+    const fullLine = `${ref.label}${ref.key}`;
+    if (ref.value) {
+      body = body.replaceAll(fullLine, `${ref.label}${ref.value}`);
+    } else {
+      // Supprime la ligne et le saut de ligne suivant si possible
+      body = body.replaceAll(fullLine + "\n", "");
+      body = body.replaceAll(fullLine, "");
+    }
+  });
+
+  // Nettoyage final pour éviter les doubles sauts de lignes accidentels en haut du courrier
+  return body.trim();
 }

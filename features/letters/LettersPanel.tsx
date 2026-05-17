@@ -19,11 +19,11 @@ import { ProviderLogo } from "@/components/ui/ProviderLogo";
 import {
   getStoredAnalysisServer,
   getStoredMockAnalysis,
-  generateMockAnalysisFromDocuments,
   isAnalysisForDocuments,
-  isEnrichedAnalysisForDocuments,
   refreshStoredAnalysisServer,
-  storeMockAnalysis
+  storeMockAnalysis,
+  deleteStoredAnalysisServer,
+  hasDocumentProfiles
 } from "@/features/analysis";
 import {
   getStoredUploadedDocuments,
@@ -40,7 +40,10 @@ const initialPersonalization: LetterPersonalization = {
   lastName: "",
   address: "",
   customerNumber: "",
-  email: ""
+  email: "",
+  contractNumber: "",
+  invoiceNumber: "",
+  phone: ""
 };
 
 const fieldLabels: Record<keyof LetterPersonalization, string> = {
@@ -48,7 +51,10 @@ const fieldLabels: Record<keyof LetterPersonalization, string> = {
   lastName: "Nom",
   address: "Adresse",
   customerNumber: "Numéro client",
-  email: "Email"
+  email: "Email",
+  contractNumber: "Numéro de contrat",
+  invoiceNumber: "Numéro de facture",
+  phone: "Téléphone"
 };
 
 function splitFullName(fullName?: string) {
@@ -78,7 +84,10 @@ function getPersonalizationFromAnalysis(
     lastName: customer.lastName || nameParts.lastName || "",
     address: customer.address || "",
     customerNumber: customer.customerNumber || "",
-    email: customer.email || ""
+    email: customer.email || "",
+    contractNumber: customer.contractNumber || "",
+    invoiceNumber: customer.invoiceNumber || "",
+    phone: customer.phone || ""
   };
 }
 
@@ -93,6 +102,30 @@ function mergeDetectedPersonalization(
       Object.entries(currentValue).filter(([, value]) => Boolean(value))
     )
   };
+}
+
+function hasCustomerDataForLetters(analysis: MockAnalysis | null) {
+  const customer =
+    analysis?.detectedParties?.customer ??
+    Object.values(analysis?.detectedParties?.documents ?? {}).find(
+      (documentProfile) => documentProfile.customer
+    )?.customer;
+
+  return Boolean(
+    customer &&
+      Object.values(customer).some((value) =>
+        typeof value === "string" ? value.trim().length > 0 : Boolean(value)
+      )
+  );
+}
+
+function hasAnalysisDataForLetters(analysis: MockAnalysis | null) {
+  return Boolean(
+    analysis &&
+      (analysis.expenses.length > 0 ||
+        analysis.totalMonthlyAmount > 0 ||
+        hasCustomerDataForLetters(analysis))
+  );
 }
 
 function getLetterTypeLabel(type: GeneratedLetter["type"]) {
@@ -143,101 +176,96 @@ export function LettersPanel() {
   const [copyMessage, setCopyMessage] = useState<string | null>(null);
   const [letters, setLetters] = useState<GeneratedLetter[]>([]);
   const [serviceMessage, setServiceMessage] = useState<string | null>(null);
+  const [isReloading, setIsReloading] = useState(false);
+
+  async function handleForceAnalysis() {
+    setIsReloading(true);
+    setServiceMessage("Relance de l'analyse IA en cours...");
+    await deleteStoredAnalysisServer();
+    const serverDocuments = await getStoredUploadedDocumentsServer();
+    const readyServerDocuments = serverDocuments.filter(doc => doc.status === "ready");
+    if (readyServerDocuments.length > 0) {
+      const newAnalysis = await refreshStoredAnalysisServer(readyServerDocuments);
+      if (newAnalysis) {
+        storeMockAnalysis(newAnalysis);
+        setAnalysis(newAnalysis);
+        setPersonalization((currentValue) => ({
+          ...mergeDetectedPersonalization(
+            getPersonalizationFromAnalysis(newAnalysis),
+            currentValue
+          )
+        }));
+        setLetters(generateLettersFromAnalysis(newAnalysis));
+        setServiceMessage("Analyse IA terminée.");
+      } else {
+        setServiceMessage("Erreur lors de la relance de l'analyse.");
+      }
+    }
+    setIsReloading(false);
+  }
 
   useEffect(() => {
     const storedAnalysis = getStoredMockAnalysis();
     const documents = getStoredUploadedDocuments();
-    const hasCurrentAnalysis = isAnalysisForDocuments(storedAnalysis, documents);
-    const hasEnrichedAnalysis = isEnrichedAnalysisForDocuments(storedAnalysis, documents);
-    const readyDocuments = documents.filter((document) => document.status === "ready");
+    const hasUsableStoredAnalysis =
+      isAnalysisForDocuments(storedAnalysis, documents) &&
+      hasAnalysisDataForLetters(storedAnalysis);
 
-    setAnalysis(hasCurrentAnalysis ? storedAnalysis : null);
-
-    if (storedAnalysis && hasCurrentAnalysis) {
+    function applyAnalysis(nextAnalysis: MockAnalysis) {
+      setAnalysis(nextAnalysis);
       setPersonalization((currentValue) => ({
         ...mergeDetectedPersonalization(
-          getPersonalizationFromAnalysis(storedAnalysis),
+          getPersonalizationFromAnalysis(nextAnalysis),
           currentValue
         )
       }));
-      setLetters(generateLettersFromAnalysis(storedAnalysis));
+      setLetters(generateLettersFromAnalysis(nextAnalysis));
+    }
 
-      if (hasEnrichedAnalysis) {
+    if (storedAnalysis && hasUsableStoredAnalysis) {
+      applyAnalysis(storedAnalysis);
+    }
+
+    async function loadServerState() {
+      const serverDocuments = await getStoredUploadedDocumentsServer();
+      const readyServerDocuments = serverDocuments.filter(
+        (document) => document.status === "ready"
+      );
+      let serverAnalysis = await getStoredAnalysisServer();
+      const hasUsableServerAnalysis =
+        isAnalysisForDocuments(serverAnalysis, serverDocuments) &&
+        hasAnalysisDataForLetters(serverAnalysis);
+
+      if (!hasUsableServerAnalysis && readyServerDocuments.length > 0) {
+        setServiceMessage(
+          "Chargement des courriers depuis l'analyse."
+        );
+        serverAnalysis = await refreshStoredAnalysisServer(readyServerDocuments);
+      }
+
+      if (
+        serverAnalysis &&
+        isAnalysisForDocuments(serverAnalysis, serverDocuments) &&
+        hasAnalysisDataForLetters(serverAnalysis)
+      ) {
+        storeMockAnalysis(serverAnalysis);
+        applyAnalysis(serverAnalysis);
+        setServiceMessage(null);
         return;
       }
-    }
 
-    if (!hasCurrentAnalysis && readyDocuments.length > 0) {
-      const fallbackAnalysis = generateMockAnalysisFromDocuments(readyDocuments);
-      storeMockAnalysis(fallbackAnalysis);
-      setAnalysis(fallbackAnalysis);
-      setPersonalization((currentValue) => ({
-        ...mergeDetectedPersonalization(
-          getPersonalizationFromAnalysis(fallbackAnalysis),
-          currentValue
-        )
-      }));
-      setLetters(generateLettersFromAnalysis(fallbackAnalysis));
-      setServiceMessage(
-        "Démarches préparées localement à partir des documents présents. Relancez l'analyse pour enrichir les coordonnées détectées."
-      );
-    }
-
-    if (!storedAnalysis || !hasEnrichedAnalysis) {
-      async function loadServerState() {
-        const serverDocuments = await getStoredUploadedDocumentsServer();
-        let serverAnalysis = await getStoredAnalysisServer();
-
-        if (!isEnrichedAnalysisForDocuments(serverAnalysis, serverDocuments)) {
-          serverAnalysis = await refreshStoredAnalysisServer(
-            serverDocuments.filter((document) => document.status === "ready")
-          );
-        }
-
-        if (isEnrichedAnalysisForDocuments(serverAnalysis, serverDocuments) && serverAnalysis) {
-          storeMockAnalysis(serverAnalysis);
-          setAnalysis(serverAnalysis);
-          setPersonalization((currentValue) => ({
-            ...mergeDetectedPersonalization(
-              getPersonalizationFromAnalysis(serverAnalysis),
-              currentValue
-            )
-          }));
-          setLetters(generateLettersFromAnalysis(serverAnalysis));
-        }
-      }
-
-      void loadServerState();
-      return;
-    }
-
-    const analysisToLoad = storedAnalysis;
-
-    async function loadLetters() {
-      try {
-        const response = await fetch("/api/courriers", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json"
-          },
-          body: JSON.stringify({ analysis: analysisToLoad })
-        });
-
-        if (!response.ok) {
-          throw new Error("Service courriers indisponible.");
-        }
-
-        const payload = (await response.json()) as { letters?: GeneratedLetter[] };
-        setLetters(payload.letters ?? generateLettersFromAnalysis(analysisToLoad));
-      } catch {
-        setLetters(generateLettersFromAnalysis(analysisToLoad));
+      if (!hasUsableStoredAnalysis) {
+        setAnalysis(null);
+        setLetters([]);
         setServiceMessage(
-          "Génération locale des démarches activée. L'envoi email automatique sera connecté ensuite."
+          readyServerDocuments.length > 0
+            ? "Chargement des courriers depuis l'analyse."
+            : "Importez un document puis lancez l'analyse pour preparer les courriers."
         );
       }
     }
 
-    void loadLetters();
+    void loadServerState();
   }, []);
 
   useEffect(() => {
@@ -277,13 +305,20 @@ export function LettersPanel() {
 
   if (!analysis || letters.length === 0) {
     return (
-      <EmptyState
-        actionHref="/importer"
-        actionLabel="Ajouter mes documents"
-        description="Ajoutez les documents utiles pour préparer vos démarches."
-        icon={<FileSearch size={24} />}
-        title="Vos démarches seront préparées ici"
-      />
+      <section className="space-y-4">
+        {serviceMessage ? (
+          <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm leading-6 text-amber-900">
+            {serviceMessage}
+          </div>
+        ) : null}
+        <EmptyState
+          actionHref="/analyse"
+          actionLabel="Lancer l'analyse"
+          description="Lancez l'analyse pour generer les courriers a partir de vos documents."
+          icon={<FileSearch size={24} />}
+          title="Vos courriers seront prepares ici"
+        />
+      </section>
     );
   }
 
@@ -291,7 +326,14 @@ export function LettersPanel() {
     <section className="space-y-6">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div>
-          <h1 className="text-3xl font-bold text-navy-900">Démarches adaptées</h1>
+          <div className="flex items-center gap-3">
+            <h1 className="text-3xl font-bold text-navy-900">Démarches adaptées</h1>
+            {hasDocumentProfiles(analysis) ? (
+              <Badge tone="green">Analyse IA</Badge>
+            ) : (
+              <Badge tone="amber">Analyse Rapide</Badge>
+            )}
+          </div>
           <p className="mt-2 text-slate-600">
             Des actions proposées selon les documents analysés, prêtes à
             personnaliser et relire tranquillement avant envoi.
@@ -307,10 +349,24 @@ export function LettersPanel() {
       ) : null}
 
       {!hasDetectedCustomer ? (
-        <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm leading-6 text-amber-900">
-          Aucune coordonnée client n'a été détectée dans l'analyse actuelle. Relancez
-          l'analyse depuis la page Importer avec la facture d'origine pour préremplir
-          le nom, l'adresse, l'email et le numéro client quand ils sont lisibles.
+        <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm leading-6 text-amber-900 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <p>
+            Aucune coordonnée client n'a été détectée dans l'analyse actuelle. Relancez
+            l'analyse depuis la page Importer avec la facture d'origine pour préremplir
+            le nom, l'adresse, l'email et le numéro client quand ils sont lisibles.
+          </p>
+          <Button onClick={handleForceAnalysis} disabled={isReloading} type="button" variant="secondary" className="whitespace-nowrap shrink-0">
+            {isReloading ? "Analyse..." : "Relancer l'analyse (IA)"}
+          </Button>
+        </div>
+      ) : !hasDocumentProfiles(analysis) ? (
+        <div className="rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm leading-6 text-blue-900 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <p>
+            Les courriers actuels sont générés à partir d'une analyse rapide. Pour une personnalisation plus fine (coordonnées, détails des contrats), vous pouvez relancer une analyse IA complète.
+          </p>
+          <Button onClick={handleForceAnalysis} disabled={isReloading} type="button" variant="secondary" className="whitespace-nowrap shrink-0">
+            {isReloading ? "Analyse..." : "Relancer l'analyse (IA)"}
+          </Button>
         </div>
       ) : null}
 
@@ -526,7 +582,7 @@ export function LettersPanel() {
                   Voir l'offre retenue <ExternalLink size={16} />
                 </a>
               ) : null}
-              <pre className="mx-auto mt-6 max-w-3xl whitespace-pre-wrap rounded-xl border border-navy-100 bg-white px-6 py-7 text-sm leading-7 text-navy-900 shadow-sm sm:px-10">
+              <pre className="mx-auto mt-6 max-w-3xl whitespace-pre-wrap font-sans rounded-xl border border-navy-100 bg-white px-6 py-7 text-sm leading-7 text-navy-900 shadow-sm sm:px-10">
                 {renderedLetter}
               </pre>
             </Card>

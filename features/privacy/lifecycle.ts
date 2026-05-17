@@ -47,11 +47,19 @@ export async function purgeFullAudit() {
   const activeKey = getStoredAccessKey();
   if (activeKey) {
     try {
+      // 1. Suppression de l'analyse en DB
       await fetch(`/api/analyse?code=${encodeURIComponent(activeKey.code)}`, {
         method: "DELETE"
       });
+
+      // 2. Suppression des documents en DB et des fichiers physiques
+      await fetch("/api/documents", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ code: activeKey.code, purge: true })
+      });
     } catch (error) {
-      console.error("Erreur suppression analyse serveur:", error);
+      console.error("Erreur suppression complète serveur:", error);
     }
   }
 

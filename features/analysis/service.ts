@@ -259,6 +259,19 @@ const knownProviderProfiles: Record<string, ProviderProfile> = {
   }
 };
 
+function extractCustomerFromFileName(fileName: string) {
+  const nameParts = fileName.replace(/\.[^/.]+$/, "").split(/[_\s-]/).filter(p => p.length > 2);
+  const names = nameParts.filter(p => !/^(facture|invoice|edf|engie|free|sfr|orange|bouygues|abonnement|contrat)$/i.test(p));
+  if (names.length >= 2) {
+    return {
+      firstName: names[1],
+      lastName: names[0],
+      fullName: `${names[1]} ${names[0]}`
+    };
+  }
+  return undefined;
+}
+
 function buildDetectedParties(documents: UploadedDocument[]): DetectedParties {
   const providers = documents.reduce<NonNullable<DetectedParties["providers"]>>(
     (accumulator, document) => {
@@ -274,7 +287,12 @@ function buildDetectedParties(documents: UploadedDocument[]): DetectedParties {
     {}
   );
 
-  return Object.keys(providers).length > 0 ? { providers } : {};
+  const customer = documents.map(d => extractCustomerFromFileName(d.fileName)).find(Boolean);
+
+  const result: DetectedParties = {};
+  if (Object.keys(providers).length > 0) result.providers = providers;
+  if (customer) result.customer = customer;
+  return result;
 }
 
 function buildExpense(

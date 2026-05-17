@@ -4,12 +4,13 @@ import { useState } from "react";
 import { cn } from "@/lib/utils";
 
 type ProviderLogoProps = {
-  provider: string;
+  provider?: string;
   logoUrl?: string;
   className?: string;
 };
 
-function getInitials(provider: string) {
+function getInitials(provider?: string) {
+  if (!provider) return "?";
   return provider
     .split(/[\s&+-]+/)
     .filter(Boolean)

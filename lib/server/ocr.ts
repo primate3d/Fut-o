@@ -1,5 +1,6 @@
 import path from "path";
 import { OpenAI } from "openai";
+import PDFParser from "pdf2json";
 import { storage } from "@/lib/server/storage";
 import type { UploadedDocument } from "@/types";
 
@@ -8,6 +9,45 @@ let _openai: OpenAI | null = null;
 type StoredUploadedDocument = UploadedDocument & {
   physicalFileName?: string;
 };
+
+type Pdf2JsonRun = {
+  T?: string;
+};
+
+type Pdf2JsonText = {
+  R?: Pdf2JsonRun[];
+};
+
+type Pdf2JsonPage = {
+  Texts?: Pdf2JsonText[];
+};
+
+type Pdf2JsonData = {
+  Pages?: Pdf2JsonPage[];
+};
+
+function decodePdfText(value?: string) {
+  if (!value) return "";
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
+}
+
+function extractTextFromPdfData(pdfData: Pdf2JsonData) {
+  return (pdfData.Pages ?? [])
+    .map((page) =>
+      (page.Texts ?? [])
+        .map((item) =>
+          (item.R ?? []).map((run) => decodePdfText(run.T)).join("")
+        )
+        .join(" ")
+    )
+    .join("\n")
+    .replace(/\s+/g, " ")
+    .trim();
+}
 
 function getOpenAI() {
   if (!_openai) {
@@ -26,14 +66,17 @@ async function extractTextFromPDF(physicalFileName: string): Promise<string> {
   if (!dataBuffer) return "";
 
   try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const pdfParse = require("pdf-parse") as (
-      buffer: Buffer,
-      options?: Record<string, unknown>
-    ) => Promise<{ text: string; numpages: number }>;
+    return await new Promise<string>((resolve, reject) => {
+      const parser = new PDFParser(null, true);
 
-    const data = await pdfParse(dataBuffer);
-    return data.text.trim();
+      parser.on("pdfParser_dataError", (error: Error | { parserError: Error }) => {
+        reject("parserError" in error ? error.parserError : error);
+      });
+      parser.on("pdfParser_dataReady", (pdfData: Pdf2JsonData) => {
+        resolve(extractTextFromPdfData(pdfData));
+      });
+      parser.parseBuffer(dataBuffer);
+    });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     console.error(`Erreur extraction texte PDF pour ${physicalFileName}:`, message, error);

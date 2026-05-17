@@ -67,24 +67,50 @@ Contenu extrait :\n${document.extractedText || "Contenu illisible ou vide."}`
       messages: [
         {
           role: "system",
-          content: `Tu aides Futeo a preparer une lecture claire de contrats du foyer.
-Reponds uniquement en JSON avec quatre cles : detectedParties, expenses, recommendations, anomalies.
+          content: `Tu es un expert en analyse de documents administratifs (factures, contrats, abonnements). 
+Ton objectif est d'extraire les données avec une RIGUEUR ABSOLUE pour préparer des courriers officiels.
 
-detectedParties.customer doit contenir les informations du titulaire du contrat visibles dans les documents.
-Le nom du client apparait souvent en haut de la facture sous forme "Monsieur/Madame Prenom NOM" ou dans un bloc adresse destinataire.
-Champs attendus : firstName, lastName, fullName, address, email, phone, customerNumber.
-Exemple : si le document contient "Monsieur Yannick TEJOU / 1 ALLEE DE LARTIGOT / 64100 BAYONNE", extraire firstName:"Yannick", lastName:"TEJOU", fullName:"Yannick TEJOU", address:"1 ALLEE DE LARTIGOT, 64100 BAYONNE".
+PRIORITÉS D'EXTRACTION (dans cet ordre) :
+1. COORDONNÉES CLIENT (firstName, lastName, fullName, address, email, phone, customerNumber, contractNumber, invoiceNumber)
+2. COORDONNÉES FOURNISSEUR (name, service, address, postalCode, city, phone)
+3. DÉTAILS CONTRAT (provider, category, subcategory, monthlyAmount)
+4. RECOMMANDATIONS & ANOMALIES
 
-detectedParties.providers doit etre un objet indexe par nom fournisseur et contenir name, address, email, phone, customerServiceUrl si ces informations sont visibles.
+RÈGLES CRITIQUES :
+- NE JAMAIS INVENTER. Si une donnée n'est pas visible, retourne null ou laisse vide.
+- NE PAS HALLUCINER de noms, d'adresses ou de numéros.
+- Pour chaque bloc principal (customer, providers), inclus un score de confiance global "confidence" (0.0 à 1.0).
+- Le nom du client est prioritaire sur tout autre nom dans le document.
 
-detectedParties.documents doit etre un objet indexe par Document ID. Chaque entree doit contenir documentId, fileName, documentType, providerName, subscriptionType, invoiceAmount, customer et provider quand ces donnees sont visibles.
-
-Chaque expense doit contenir sourceDocumentId avec le Document ID exact du document source, documentType, provider, category, subcategory, monthlyAmount et les references visibles utiles : customerNumber, contractNumber, invoiceNumber, phone.
-
-Ne melange jamais les informations de documents differents.
-N'invente pas de coordonnees client ou fournisseur.
-N'invente pas de garantie d'economie.
-Signale les limites quand le texte extrait est insuffisant.`
+STRUCTURE JSON ATTENDUE :
+{
+  "detectedParties": {
+    "customer": {
+      "firstName": "...", "lastName": "...", "fullName": "...", 
+      "address": "...", "email": "...", "phone": "...", 
+      "customerNumber": "...", "contractNumber": "...", "invoiceNumber": "...",
+      "confidence": 0.95
+    },
+    "providers": {
+      "NomFournisseur": {
+        "name": "...", "service": "...", "address": "...", 
+        "postalCode": "...", "city": "...", "phone": "...",
+        "confidence": 0.9
+      }
+    },
+    "documents": {
+      "DocumentID": {
+        "documentId": "...", "fileName": "...", "documentType": "...", 
+        "providerName": "...", "subscriptionType": "...", "invoiceAmount": 0,
+        "customer": { ...même structure que ci-dessus... },
+        "provider": { ...même structure que ci-dessus... }
+      }
+    }
+  },
+  "expenses": [ ... ],
+  "recommendations": [ ... ],
+  "anomalies": [ ... ]
+}`
         },
         {
           role: "user",
