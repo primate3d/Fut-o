@@ -3,6 +3,7 @@ import {
   attachDocumentProfileToExpense,
   buildDocumentPartyProfiles,
   ensureDetectedDocumentsFromExpenses,
+  getEnergyBillingInfoFromProfile,
   inferExpenseCategoryFromDocumentType,
   inferExpenseSubcategoryFromDocumentType,
   mergeDetectedParties,
@@ -15,6 +16,7 @@ import type {
   MockAnalysis as Analysis,
   Recommendation
 } from "@/types";
+import { ExpenseCategory } from "@/types";
 
 let _openai: OpenAI | null = null;
 
@@ -229,6 +231,19 @@ RÈGLES IMPÉRATIVES :
         ...anomaly
       })
     );
+    const energyFrequencyAnomalies: AnalysisAnomaly[] = Object.values(documentProfiles)
+      .flatMap((profile, index): AnalysisAnomaly[] => {
+        const energyBilling = getEnergyBillingInfoFromProfile(profile);
+        if (!energyBilling?.confirmationPrompt) return [];
+
+        return [{
+          id: `anom_${keyCode}_energy_frequency_${index}`,
+          title: "Frequence energie a confirmer",
+          description: energyBilling.confirmationPrompt,
+          severity: "medium" as const,
+          category: ExpenseCategory.ENERGY
+        }];
+      });
 
     const totalMonthlyAmount = expenses.reduce(
       (sum, expense) => sum + expense.monthlyAmount,
@@ -251,7 +266,7 @@ RÈGLES IMPÉRATIVES :
       detectedParties,
       expenses,
       recommendations,
-      anomalies,
+      anomalies: [...anomalies, ...energyFrequencyAnomalies],
       totalMonthlyAmount,
       totalYearlyAmount: totalMonthlyAmount * 12,
       yearlyPotentialSavings

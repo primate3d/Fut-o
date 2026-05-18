@@ -12,6 +12,18 @@ import {
 
 export type ExtractedDocument = UploadedDocument & { extractedText: string };
 
+type EnergyBillingInfo = {
+  documentKind: "schedule" | "invoice" | "estimate" | "unknown";
+  recurrence: Expense["recurrence"];
+  frequencyConfidence: "high" | "medium" | "low";
+  amount?: number;
+  monthlyAmount?: number;
+  yearlyAmount?: number;
+  confirmationPrompt?: string;
+  hasElectricity?: boolean;
+  hasGas?: boolean;
+};
+
 function normalize(value?: string) {
   return (value ?? "")
     .toLowerCase()
@@ -50,6 +62,48 @@ function firstAmountNearLabel(text: string, labels: RegExp[]) {
   return undefined;
 }
 
+function extractAmounts(text?: string) {
+  return [...(text ?? "").matchAll(/([0-9][0-9\s.,]*[,.][0-9]{2})/g)]
+    .map((match) => parseAmount(match[1]))
+    .filter((amount): amount is number => typeof amount === "number");
+}
+
+function mostRepeatedAmount(amounts: number[]) {
+  const counts = amounts.reduce<Map<number, number>>((accumulator, amount) => {
+    const roundedAmount = Math.round(amount * 100) / 100;
+    accumulator.set(roundedAmount, (accumulator.get(roundedAmount) ?? 0) + 1);
+    return accumulator;
+  }, new Map());
+
+  const repeatedAmounts = [...counts.entries()]
+    .filter(([, count]) => count > 1)
+    .sort((a, b) => b[1] - a[1] || b[0] - a[0]);
+
+  return repeatedAmounts[0]?.[0];
+}
+
+function extractEnergyScheduleMonthlyAmount(normalizedText: string) {
+  const prelevementAmounts = [...normalizedText.matchAll(/\bprelevement\b/gi)].flatMap((match) => {
+    const startIndex = match.index ?? 0;
+    const segment = normalizedText.slice(startIndex, startIndex + 620);
+    const totalElectricityIndex = segment.search(/\btotal\s+electricite/i);
+    if (totalElectricityIndex < 0) return [];
+
+    return extractAmounts(segment.slice(0, totalElectricityIndex));
+  });
+  const dominantPrelevement = mostRepeatedAmount(prelevementAmounts);
+  if (dominantPrelevement) return dominantPrelevement;
+
+  const labelledMonthlyAmount = firstAmountNearLabel(normalizedText, [
+    /total\s+prelevement/,
+    /prelevement\s+mensuel/,
+    /montant\s+mensuel/,
+    /echeance\s+mensuelle/
+  ]);
+
+  return labelledMonthlyAmount;
+}
+
 function extractInvoiceAmount(text: string) {
   const compactText = clean(text) ?? "";
   const normalizedText = normalize(compactText);
@@ -74,6 +128,102 @@ function extractInvoiceAmount(text: string) {
   );
 
   return amount;
+}
+
+function extractEnergyBillingInfo(
+  text: string,
+  documentType?: UploadedDocumentType,
+  providerName?: string
+): EnergyBillingInfo | undefined {
+  if (!isEnergyDocument(documentType, providerName)) return undefined;
+
+  const compactText = clean(text) ?? "";
+  const normalizedText = normalize(compactText);
+  const invoiceAmount = extractInvoiceAmount(text);
+  const monthlyDebit = extractEnergyScheduleMonthlyAmount(normalizedText);
+  const annualEstimate = firstAmountNearLabel(normalizedText, [
+    /estimation\s+annuelle/,
+    /budget\s+annuel/,
+    /montant\s+annuel/,
+    /total\s+annuel/
+  ]);
+  const isSchedule = /\b(echeancier|mensualisation|mensualite|mensualites|prelevement\s+mensuel)\b/.test(
+    normalizedText
+  );
+  const isBimonthly = /\b(bimestriel|tous\s+les\s+deux\s+mois|tous\s+les\s+2\s+mois|deux\s+mois)\b/.test(
+    normalizedText
+  );
+  const isEstimate = /\b(estimation\s+annuelle|budget\s+annuel|montant\s+annuel)\b/.test(
+    normalizedText
+  );
+  const isInvoice = /\b(facture|a\s+payer|net\s+a\s+payer|montant\s+du)\b/.test(
+    normalizedText
+  );
+  const hasElectricity = /\b(electricite|enedis|linky|kwh)\b/.test(normalizedText);
+  const hasGas = /\b(gaz|grdf|kwh\s+pcs)\b/.test(normalizedText);
+
+  if (isSchedule && monthlyDebit) {
+    return {
+      documentKind: "schedule",
+      recurrence: "monthly",
+      frequencyConfidence: "high",
+      amount: monthlyDebit,
+      monthlyAmount: monthlyDebit,
+      yearlyAmount: monthlyDebit * 12,
+      hasElectricity,
+      hasGas
+    };
+  }
+
+  if (isEstimate && annualEstimate) {
+    return {
+      documentKind: "estimate",
+      recurrence: "yearly",
+      frequencyConfidence: "medium",
+      amount: annualEstimate,
+      monthlyAmount: annualEstimate / 12,
+      yearlyAmount: annualEstimate,
+      hasElectricity,
+      hasGas
+    };
+  }
+
+  if (isBimonthly && invoiceAmount) {
+    return {
+      documentKind: "invoice",
+      recurrence: "one_time",
+      frequencyConfidence: "medium",
+      amount: invoiceAmount,
+      monthlyAmount: invoiceAmount / 2,
+      yearlyAmount: invoiceAmount * 6,
+      confirmationPrompt: "Ce montant correspond-il bien a une facture bimestrielle ?",
+      hasElectricity,
+      hasGas
+    };
+  }
+
+  if (isInvoice && invoiceAmount) {
+    return {
+      documentKind: "invoice",
+      recurrence: "one_time",
+      frequencyConfidence: "low",
+      amount: invoiceAmount,
+      monthlyAmount: 0,
+      yearlyAmount: invoiceAmount,
+      confirmationPrompt: "Ce montant correspond-il a une facture mensuelle, bimestrielle ou ponctuelle ?",
+      hasElectricity,
+      hasGas
+    };
+  }
+
+  return {
+    documentKind: "unknown",
+    recurrence: "monthly",
+    frequencyConfidence: "low",
+    amount: invoiceAmount,
+    hasElectricity,
+    hasGas
+  };
 }
 
 const commercialProviderNames = ["NRJ Mobile", "Sosh", "RED by SFR", "B&You"];
@@ -400,6 +550,7 @@ export function extractDocumentPartyProfile(document: ExtractedDocument): Docume
   const providerAddress = extractProviderAddress(compactText);
   const inferredDocumentType = inferDocumentTypeFromContent(document, providerName);
   const profileInvoiceAmount = extractInvoiceAmount(text) ?? invoiceAmount;
+  const energyBilling = extractEnergyBillingInfo(text, inferredDocumentType, providerName);
   const postalAddress = extractPostalAddress(text, inferredDocumentType, providerName);
   const energyCustomerName =
     isEnergyDocument(inferredDocumentType, providerName)
@@ -426,16 +577,19 @@ export function extractDocumentPartyProfile(document: ExtractedDocument): Docume
       }
     : undefined;
 
-  return {
+  const profile: DocumentPartyProfile & { energyBilling?: EnergyBillingInfo } = {
     documentId: document.id,
     fileName: document.fileName,
     documentType: inferredDocumentType,
     providerName,
     subscriptionType: getSubscriptionType(inferredDocumentType),
-    invoiceAmount: reverseInvoiceAmount ?? profileInvoiceAmount,
+    invoiceAmount: energyBilling?.amount ?? reverseInvoiceAmount ?? profileInvoiceAmount,
     customer: Object.values(finalCustomer).some(Boolean) ? finalCustomer : undefined,
-    provider
+    provider,
+    energyBilling
   };
+
+  return profile;
 }
 
 export function buildDocumentPartyProfiles(documents: ExtractedDocument[]) {
@@ -694,6 +848,13 @@ function isGenericProvider(provider?: string) {
   return genericProviders.includes(provider.toLowerCase());
 }
 
+export function getEnergyBillingInfoFromProfile(
+  profile?: DocumentPartyProfile
+) {
+  return (profile as (DocumentPartyProfile & { energyBilling?: EnergyBillingInfo }) | undefined)
+    ?.energyBilling;
+}
+
 export function attachDocumentProfileToExpense(
   expense: Expense,
   documentProfiles: Record<string, DocumentPartyProfile>
@@ -714,11 +875,27 @@ export function attachDocumentProfileToExpense(
   );
   const inferredCategory = inferExpenseCategoryFromDocumentType(profile.documentType);
   const inferredSubcategory = inferExpenseSubcategoryFromDocumentType(profile.documentType);
-  const monthlyAmount = profile.invoiceAmount ?? expense.monthlyAmount;
+  const energyBilling = getEnergyBillingInfoFromProfile(profile);
+  const finalSubcategory =
+    inferredCategory === ExpenseCategory.ENERGY &&
+    energyBilling?.hasElectricity &&
+    energyBilling.hasGas
+      ? undefined
+      : inferredSubcategory;
+  const monthlyAmount =
+    inferredCategory === ExpenseCategory.ENERGY && energyBilling?.monthlyAmount != null
+      ? energyBilling.monthlyAmount
+      : profile.invoiceAmount ?? expense.monthlyAmount;
   const safeMonthlyAmount =
     typeof monthlyAmount === "number" && Number.isFinite(monthlyAmount)
       ? monthlyAmount
       : 0;
+  const safeYearlyAmount =
+    inferredCategory === ExpenseCategory.ENERGY &&
+    typeof energyBilling?.yearlyAmount === "number" &&
+    Number.isFinite(energyBilling.yearlyAmount)
+      ? energyBilling.yearlyAmount
+      : safeMonthlyAmount * 12;
 
   return {
     ...expense,
@@ -731,14 +908,18 @@ export function attachDocumentProfileToExpense(
     invoiceNumber: expense.invoiceNumber ?? profile.customer?.invoiceNumber,
     phone: expense.phone ?? profile.customer?.phone,
     monthlyAmount: safeMonthlyAmount,
-    yearlyAmount: safeMonthlyAmount * 12,
+    yearlyAmount: safeYearlyAmount,
+    recurrence:
+      inferredCategory === ExpenseCategory.ENERGY && energyBilling
+        ? energyBilling.recurrence
+        : expense.recurrence,
     category:
       !expense.category || expense.category === ExpenseCategory.OTHER
         ? inferredCategory
         : expense.category,
     subcategory:
       !expense.subcategory || expense.subcategory === ExpenseSubcategory.OTHER
-        ? inferredSubcategory
+        ? finalSubcategory
         : expense.subcategory
   };
 }
