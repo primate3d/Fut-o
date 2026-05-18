@@ -193,6 +193,9 @@ export type GeneratedLetter = {
   providerAddress?: string;
   customerProfile?: CustomerProfile;
   offerName?: string;
+  offerProvider?: string;
+  offerMonthlyPrice?: number;
+  offerEstimatedYearlySaving?: number;
   offerUrl?: string;
   category: ExpenseCategory;
   potentialSaving: number;

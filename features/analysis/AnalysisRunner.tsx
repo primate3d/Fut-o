@@ -15,7 +15,13 @@ import { expenseCategoryLabels, summarizeExpensesByCategory } from "@/lib/expens
 import { formatCurrency } from "@/lib/utils";
 import type { MockAnalysis, UploadedDocument } from "@/types";
 import { generateMockAnalysisFromDocuments } from "./service";
-import { getStoredMockAnalysis, isAnalysisForDocuments, storeMockAnalysis } from "./storage";
+import {
+  getStoredAnalysisServer,
+  getStoredMockAnalysis,
+  isAnalysisForDocuments,
+  refreshStoredAnalysisServer,
+  storeMockAnalysis
+} from "./storage";
 
 const analysisSteps = [
   "Lecture des éléments fournis",
@@ -24,6 +30,21 @@ const analysisSteps = [
   "Comparaison des pistes",
   "Préparation des actions"
 ];
+
+function hasUsableAmounts(analysis: MockAnalysis | null) {
+  return Boolean(
+    analysis &&
+      (analysis.totalMonthlyAmount > 0 ||
+        analysis.expenses.some((expense) => {
+          const monthlyAmount = Number(expense.monthlyAmount);
+          const yearlyAmount = Number(expense.yearlyAmount);
+          return (
+            (Number.isFinite(monthlyAmount) && monthlyAmount > 0) ||
+            (Number.isFinite(yearlyAmount) && yearlyAmount > 0)
+          );
+        }))
+  );
+}
 
 export function AnalysisRunner() {
   const [documents, setDocuments] = useState<UploadedDocument[]>([]);
@@ -55,16 +76,26 @@ export function AnalysisRunner() {
       setIsComplete(false);
 
       timers = analysisSteps.map((_, index) =>
-        window.setTimeout(() => {
+        window.setTimeout(async () => {
         setCurrentStep(index + 1);
 
         if (index === analysisSteps.length - 1) {
           const hasCurrentAnalysis = isAnalysisForDocuments(storedAnalysis, storedDocuments);
-          const currentAnalysis = hasCurrentAnalysis && storedAnalysis
-            ? storedAnalysis
-            : generateMockAnalysisFromDocuments(usableDocuments);
+          const serverAnalysis = await getStoredAnalysisServer();
+          const hasServerAnalysis =
+            isAnalysisForDocuments(serverAnalysis, storedDocuments) &&
+            hasUsableAmounts(serverAnalysis);
+          const refreshedAnalysis =
+            hasServerAnalysis && serverAnalysis
+              ? serverAnalysis
+              : await refreshStoredAnalysisServer(usableDocuments);
+          const currentAnalysis =
+            refreshedAnalysis ??
+            (hasCurrentAnalysis && hasUsableAmounts(storedAnalysis) && storedAnalysis
+              ? storedAnalysis
+              : generateMockAnalysisFromDocuments(usableDocuments));
 
-          if (!hasCurrentAnalysis) {
+          if (currentAnalysis) {
             storeMockAnalysis(currentAnalysis);
             setServiceMessage(
               "Analyse locale préparée à partir des documents ajoutés. Les services OCR et IA seront connectés ensuite."

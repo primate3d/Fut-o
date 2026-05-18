@@ -1,14 +1,17 @@
 import { formatCurrency } from "@/lib/utils";
 import { findAlternativeOffers } from "@/features/recommendations/service";
+import type { SelectedAlternativeOffer } from "@/features/recommendations/selected-offer";
 import { ExpenseCategory, ExpenseSubcategory } from "@/types";
 import type {
   CustomerProfile,
+  DocumentPartyProfile,
   Expense,
   GeneratedLetter,
   GeneratedLetterType,
   LetterPersonalization,
   LetterTemplate,
   MockAnalysis,
+  ProviderProfile,
   Recommendation
 } from "@/types";
 
@@ -99,10 +102,117 @@ function getProviderAddress(provider: string) {
   );
 }
 
-function getDetectedProviderAddress(analysis: MockAnalysis, provider: string) {
+function getDocumentProfileForExpense(
+  analysis: MockAnalysis,
+  expense: Expense
+): DocumentPartyProfile | undefined {
+  return expense.sourceDocumentId
+    ? analysis.detectedParties?.documents?.[expense.sourceDocumentId]
+    : undefined;
+}
+
+const commercialProviderNames = ["NRJ Mobile", "Sosh", "RED by SFR", "B&You"];
+
+function pickCommercialProvider(...providers: Array<string | undefined>) {
+  const candidates = providers.filter(Boolean) as string[];
   return (
-    analysis.detectedParties?.providers?.[provider]?.address ||
-    getProviderAddress(provider)
+    commercialProviderNames.find((provider) => candidates.includes(provider)) ??
+    candidates[0]
+  );
+}
+
+function getCommercialProviderName(analysis: MockAnalysis, expense: Expense) {
+  const documentProfile = getDocumentProfileForExpense(analysis, expense);
+  return pickCommercialProvider(
+    documentProfile?.providerName,
+    documentProfile?.provider?.name,
+    expense.provider
+  ) ?? expense.provider;
+}
+
+function getDetectedProviderProfile(
+  analysis: MockAnalysis,
+  expense: Expense,
+  provider: string
+): ProviderProfile | undefined {
+  const documentProfile = getDocumentProfileForExpense(analysis, expense);
+
+  return (
+    documentProfile?.provider ||
+    analysis.detectedParties?.providers?.[provider] ||
+    analysis.detectedParties?.providers?.[expense.provider]
+  );
+}
+
+function formatPostalAddressLines(address: string) {
+  return address
+    .split("\n")
+    .flatMap((line) => {
+      const trimmedLine = line.trim();
+      const postalMatch = trimmedLine.match(/^(.+?)[,\s]+(\d{5}\s+.+)$/);
+
+      if (!postalMatch) {
+        return [trimmedLine];
+      }
+
+      return [postalMatch[1].trim(), postalMatch[2].trim()];
+    })
+    .filter(Boolean);
+}
+
+function formatSenderAddress(address?: string) {
+  return (address ?? "")
+    .replace(/\s*,\s*/g, "\n")
+    .split("\n")
+    .flatMap((line) => {
+      const trimmedLine = line.trim();
+      const postalMatch = trimmedLine.match(/^(.+?)\s+(\d{5}\s+.+)$/);
+
+      if (!postalMatch) {
+        return [trimmedLine];
+      }
+
+      return [postalMatch[1].trim(), postalMatch[2].trim()];
+    })
+    .flatMap((line) => {
+      const streetMatch = line.match(/^(.{12,}?)\s+(\d{1,5}\s+(?:rue|avenue|av\.?|allee|allée|boulevard|bd|chemin|impasse|route|place)\b.+)$/i);
+      if (!streetMatch) {
+        return [line];
+      }
+
+      return [streetMatch[1].trim(), streetMatch[2].trim()];
+    })
+    .filter(Boolean)
+    .join("\n");
+}
+
+function isUsableReference(value?: string) {
+  if (!value?.trim()) return false;
+  return !/(?:titulaire|votre contrat|facture|electricit[eé]|tarif bleu|point de livraison)$/i.test(
+    value.trim()
+  );
+}
+
+function buildProviderRecipientBlock(provider: string, address?: string) {
+  const providerAddress = address || getProviderAddress(provider);
+  const addressLines = formatPostalAddressLines(providerAddress);
+  const firstLine = addressLines[0] ?? "";
+
+  if (firstLine.toLowerCase().includes(provider.toLowerCase())) {
+    return addressLines.join("\n");
+  }
+
+  return [provider, ...addressLines].join("\n");
+}
+
+function getDetectedProviderAddress(
+  analysis: MockAnalysis,
+  expense: Expense,
+  provider: string
+) {
+  return buildProviderRecipientBlock(
+    provider,
+    getDetectedProviderProfile(analysis, expense, provider)?.address
   );
 }
 
@@ -229,6 +339,8 @@ function buildBodyTemplate(params: {
   potentialSaving: number;
   providerAddress: string;
   offerName?: string;
+  offerProvider?: string;
+  offerMonthlyPrice?: number;
   offerUrl?: string;
   reason: string;
   request: string;
@@ -259,29 +371,33 @@ function buildBodyTemplate(params: {
     "",
     "Madame, Monsieur,",
     "",
-    `Client(e) chez vous sous la référence {{customerNumber}}, je vous contacte au sujet du contrat indiqué dans mes documents, dont le montant mensuel est estimé à ${formatCurrency(
+    `Je suis client(e) chez vous sous la référence {{customerNumber}}. Je vous écris au sujet de mon contrat, facturé ${formatCurrency(
       params.monthlyAmount
-    )}, soit environ ${formatCurrency(params.yearlyAmount)} par an.`,
+    )} par mois, soit environ ${formatCurrency(params.yearlyAmount)} par an.`,
     "",
     params.reason,
     "",
     params.offerName
-      ? `Offre repérée à comparer : ${params.offerName}${
+      ? `J'ai également repéré une offre comparable qui pourrait mieux correspondre à mon usage : ${
+          params.offerProvider ? `${params.offerProvider} - ` : ""
+        }${params.offerName}${
+          typeof params.offerMonthlyPrice === "number"
+            ? `, à ${formatCurrency(params.offerMonthlyPrice)} / mois`
+            : ""
+        }${
           params.offerUrl ? ` (${params.offerUrl})` : ""
         }.`
       : "",
     params.offerName ? "" : "",
     params.request,
     "",
-    `La piste d'amélioration estimée à partir des éléments fournis est de ${formatCurrency(
+    `D'après les éléments dont je dispose, l'économie possible serait d'environ ${formatCurrency(
       params.potentialSaving
-    )} par an. Je vous remercie de me faire parvenir une proposition actualisee ou les modalites permettant de faire evoluer mon engagement.`,
+    )} par an. Avant de prendre une décision, je souhaite savoir si vous pouvez me proposer de meilleures conditions ou une offre plus adaptée.`,
     "",
     "Dans l'attente de votre retour, je vous prie d'agréer, Madame, Monsieur, l'expression de mes salutations distinguées.",
     "",
-    "{{firstName}} {{lastName}}",
-    "",
-    "Document préparé avec Futéo"
+    "{{firstName}} {{lastName}}"
   ].join("\n");
 }
 
@@ -290,41 +406,41 @@ const fallbackPresets: Record<GeneratedLetterType, LetterPreset> = {
     title: "Demarche de resiliation",
     subject: "Demande de resiliation de contrat / abonnement",
     reason:
-      "Apres relecture de ma situation et de mes besoins actuels, je souhaite mettre fin a ce contrat.",
+      "Ma situation a evolue et ce contrat ne correspond plus vraiment a mes besoins.",
     request:
-      "Je vous demande donc de proceder a la resiliation effective de mon abonnement dans les delais prevus par les conditions generales."
+      "Je vous remercie de prendre en compte ma demande de resiliation et de m'indiquer la date de fin effective."
   },
   price_negotiation: {
     title: "Demande de negociation",
     subject: "Demande de renegociation de mes conditions tarifaires",
     reason:
-      "Les elements compares font apparaitre des offres equivalentes qui semblent plus adaptees a ma situation actuelle.",
+      "J'ai compare mon contrat avec d'autres offres du marche et je constate que mon tarif pourrait etre revu.",
     request:
-      "Je souhaite recevoir une proposition actualisee ou un geste commercial afin d'etudier la poursuite de mon contrat chez vous."
+      "Je prefere rester chez vous si une proposition plus competitive peut m'etre faite."
   },
   provider_followup: {
     title: "Relance fournisseur",
     subject: "Relance concernant ma demande precedente",
     reason:
-      "Je souhaite obtenir un retour clair concernant l'ajustement possible de mon contrat.",
+      "Je reviens vers vous car je n'ai pas encore de reponse claire concernant ma demande.",
     request:
-      "Je vous relance donc afin de connaitre les options disponibles pour faire evoluer mon offre actuelle."
+      "Pouvez-vous me confirmer les options possibles pour adapter mon offre actuelle ?"
   },
   offer_change: {
     title: "Demande de changement d'offre",
     subject: "Changement vers une offre plus adaptee",
     reason:
-      "Mon usage actuel semble pouvoir correspondre a une offre plus simple ou plus adaptee que mon contrat actuel.",
+      "Mon usage a change et une offre plus simple pourrait aujourd'hui mieux me convenir.",
     request:
-      "Je souhaite etudier le passage vers une offre plus competitive ou toute proposition equivalente que vous pourriez me transmettre."
+      "Je souhaite connaitre les offres disponibles et les conditions pour changer sans difficulte."
   },
   comparison_report: {
     title: "Rapport de comparaison",
     subject: "Transmission d'une comparaison de mon contrat",
     reason:
-      "Je souhaite partager une comparaison entre mon contrat actuel et plusieurs offres disponibles afin d'echanger sur une solution plus adaptee.",
+      "Je vous transmets les elements que j'ai releves afin d'echanger sur mon contrat actuel.",
     request:
-      "Ce document sert de base a ma demande d'alignement, d'ajustement ou de modification de mon engagement actuel."
+      "J'aimerais savoir si vous pouvez vous aligner ou me proposer une solution plus adaptee."
   }
 };
 
@@ -337,33 +453,33 @@ const categoryPresets: Record<
       title: "Négociation forfait mobile",
       subject: "Demande de renégociation de mon forfait mobile",
       reason:
-        "La comparaison de mon forfait mobile fait apparaître des offres mobiles plus adaptées à mon usage actuel.",
+        "En regardant les offres mobiles disponibles, je vois que mon forfait pourrait être ajusté à un tarif plus cohérent avec mon usage.",
       request:
-        "Je souhaite recevoir une proposition tarifaire actualisée pour conserver mon forfait dans de meilleures conditions."
+        "Je souhaite savoir si vous pouvez me proposer un meilleur tarif ou une offre équivalente plus avantageuse."
     },
     offer_change: {
       title: "Changement d'offre mobile",
       subject: "Demande de changement d'offre mobile",
       reason:
-        "Mon forfait mobile actuel semble pouvoir être remplacé par une offre plus simple ou plus compétitive.",
+        "Mon forfait actuel ne me semble plus le plus adapté, notamment au regard des offres mobiles disponibles aujourd'hui.",
       request:
-        "Je souhaite connaître les offres mobiles disponibles correspondant à mon usage et les modalités de changement."
+        "Pouvez-vous m'indiquer les offres que vous pouvez me proposer et les conditions de changement ?"
     },
     subscription_cancellation: {
       title: "Résiliation forfait mobile",
       subject: "Demande de résiliation de mon forfait mobile",
       reason:
-        "Après comparaison de mon forfait mobile et de mes besoins, je souhaite mettre fin à cet abonnement.",
+        "Après avoir comparé mon forfait et mes besoins actuels, je préfère mettre fin à cette ligne.",
       request:
-        "Je vous demande de procéder à la résiliation de ma ligne mobile selon les conditions applicables."
+        "Je vous remercie de procéder à la résiliation dans les conditions prévues et de me confirmer la date de fin."
     },
     comparison_report: {
       title: "Comparaison forfait mobile",
       subject: "Comparaison de mon forfait mobile",
       reason:
-        "Je souhaite partager les éléments de comparaison retrouvés autour de mon forfait mobile actuel.",
+        "Je souhaite vous partager les éléments que j'ai comparés concernant mon forfait mobile.",
       request:
-        "Cette comparaison sert de base pour étudier une négociation, un changement d'offre ou une résiliation."
+        "Ces éléments me permettront de décider s'il est préférable de renégocier, changer d'offre ou résilier."
     }
   },
   internet: {
@@ -371,33 +487,33 @@ const categoryPresets: Record<
       title: "Negociation box internet",
       subject: "Demande de renegociation de mon abonnement internet",
       reason:
-        "La comparaison de ma box internet fait apparaitre des offres proches potentiellement plus interessantes.",
+        "En comparant mon abonnement internet avec les offres disponibles, je constate que mon tarif pourrait etre revu.",
       request:
-        "Je souhaite recevoir une proposition actualisee pour mon abonnement internet."
+        "Je souhaite savoir si vous pouvez me proposer un tarif plus interessant pour conserver mon abonnement."
     },
     offer_change: {
       title: "Changement d'offre internet",
       subject: "Demande de changement d'offre internet",
       reason:
-        "Mon abonnement internet actuel semble pouvoir evoluer vers une offre plus adaptee.",
+        "Mon abonnement actuel ne correspond peut-etre plus exactement a mes besoins.",
       request:
-        "Je souhaite connaitre les offres internet disponibles et les conditions de changement."
+        "Pouvez-vous m'indiquer les offres disponibles et les conditions pour changer simplement ?"
     },
     subscription_cancellation: {
       title: "Resiliation box internet",
       subject: "Demande de resiliation de mon abonnement internet",
       reason:
-        "Apres comparaison de mon contrat internet et de mes besoins, je souhaite mettre fin a cet abonnement.",
+        "Apres comparaison de mon abonnement et de mes besoins actuels, je souhaite y mettre fin.",
       request:
-        "Je vous demande de proceder a la resiliation de ma box internet dans les conditions prevues."
+        "Je vous remercie de m'indiquer la date de resiliation possible et les eventuelles demarches a prevoir."
     },
     comparison_report: {
       title: "Comparaison box internet",
       subject: "Comparaison de mon abonnement internet",
       reason:
-        "Je souhaite partager les elements de comparaison retrouves autour de mon contrat internet actuel.",
+        "Je souhaite vous transmettre les elements que j'ai compares concernant mon abonnement internet.",
       request:
-        "Cette comparaison sert de base pour etudier une negociation ou un changement d'offre."
+        "J'aimerais savoir si une adaptation de mon offre actuelle est possible."
     }
   },
   assurance: {
@@ -413,25 +529,25 @@ const categoryPresets: Record<
       title: "Reevaluation tarifaire assurance",
       subject: "Demande de reevaluation tarifaire de mon assurance",
       reason:
-        "La comparaison de mon assurance fait apparaitre une possibilite de reevaluation tarifaire.",
+        "En relisant mon contrat, je pense que le tarif pourrait etre reevalue.",
       request:
-        "Je souhaite recevoir une proposition actualisee tenant compte de ma situation et des garanties utiles."
+        "Je souhaite savoir si vous pouvez me proposer un ajustement tenant compte de ma situation actuelle."
     },
     offer_change: {
       title: "Changement d'offre assurance",
       subject: "Demande de changement d'offre assurance",
       reason:
-        "Mes garanties actuelles semblent pouvoir etre ajustees vers une offre plus adaptee.",
+        "Mes garanties actuelles pourraient etre mieux ajustees a mes besoins.",
       request:
-        "Je souhaite connaitre les formules disponibles et les consequences sur mon tarif."
+        "Pouvez-vous me presenter les formules disponibles et leur impact sur mon tarif ?"
     },
     comparison_report: {
       title: "Comparaison assurance",
       subject: "Comparaison de mon contrat d'assurance",
       reason:
-        "Je souhaite partager une comparaison de mon contrat d'assurance avec les garanties et tarifs reperes.",
+        "Je souhaite partager les elements compares concernant mon contrat d'assurance.",
       request:
-        "Cette comparaison sert de base pour une reevaluation, un changement d'offre ou une resiliation."
+        "J'aimerais savoir si une solution plus adaptee peut etre proposee."
     }
   },
   energie: {
@@ -439,33 +555,33 @@ const categoryPresets: Record<
       title: "Changement fournisseur energie",
       subject: "Demande d'information pour changer d'offre energie",
       reason:
-        "La comparaison de mon contrat energie fait apparaitre des offres potentiellement plus adaptees.",
+        "En comparant mon contrat energie, je vois qu'une autre offre pourrait etre plus adaptee.",
       request:
-        "Je souhaite connaitre les conditions pour faire evoluer mon contrat ou changer d'offre energie."
+        "Je souhaite connaitre les conditions pour faire evoluer mon contrat ou changer d'offre."
     },
     comparison_report: {
       title: "Comparaison energie",
       subject: "Comparaison de mon contrat energie",
       reason:
-        "Je souhaite partager les elements de comparaison retrouves autour de mon contrat electricite ou gaz.",
+        "Je souhaite vous transmettre les elements compares autour de mon contrat energie.",
       request:
-        "Cette comparaison sert de base pour etudier un changement de fournisseur ou une negociation."
+        "J'aimerais savoir quelles options sont possibles pour reduire ou ajuster ma facture."
     },
     price_negotiation: {
       title: "Negociation contrat energie",
       subject: "Demande de renegociation de mon contrat energie",
       reason:
-        "Les elements compares font apparaitre une possibilite d'ajustement de mon contrat energie.",
+        "Les elements compares me laissent penser que mon contrat energie pourrait etre ajuste.",
       request:
-        "Je souhaite recevoir une proposition actualisee ou des informations sur les options plus adaptees."
+        "Je souhaite recevoir une proposition plus adaptee, ou les informations utiles pour faire evoluer mon contrat."
     },
     subscription_cancellation: {
       title: "Resiliation energie",
       subject: "Demande de resiliation de mon contrat energie",
       reason:
-        "Apres comparaison de mon contrat energie, je souhaite connaitre les conditions de resiliation.",
+        "Apres comparaison de mon contrat energie, j'envisage d'y mettre fin.",
       request:
-        "Je vous remercie de m'indiquer les modalites applicables pour mettre fin a ce contrat."
+        "Je vous remercie de m'indiquer les modalites applicables et la date possible de resiliation."
     }
   },
   abonnements: {
@@ -473,25 +589,25 @@ const categoryPresets: Record<
       title: "Resiliation abonnement",
       subject: "Demande de resiliation de mon abonnement",
       reason:
-        "Apres relecture de mes depenses mensuelles, cet abonnement ne semble plus correspondre a mon besoin actuel.",
+        "Apres relecture de mes depenses mensuelles, cet abonnement ne me semble plus utile aujourd'hui.",
       request:
-        "Je vous demande de proceder a la resiliation de cet abonnement selon les conditions applicables."
+        "Je vous remercie de prendre en compte ma demande de resiliation et de me confirmer sa date d'effet."
     },
     price_negotiation: {
       title: "Negociation abonnement",
       subject: "Demande de reduction tarifaire sur mon abonnement",
       reason:
-        "La comparaison de mes abonnements fait apparaitre une possibilite de reduction tarifaire.",
+        "En comparant mes abonnements, je pense que ce tarif pourrait etre revu.",
       request:
-        "Je souhaite connaitre les offres ou gestes commerciaux disponibles pour conserver cet abonnement."
+        "Je souhaite savoir si une remise ou une offre plus adaptee peut m'etre proposee."
     },
     provider_followup: {
       title: "Relance service abonnement",
       subject: "Relance concernant mon abonnement",
       reason:
-        "Je souhaite obtenir un retour clair concernant ma demande sur cet abonnement.",
+        "Je me permets de vous relancer concernant ma demande sur cet abonnement.",
       request:
-        "Je vous relance afin de connaitre les options disponibles ou la suite donnee a ma demande."
+        "Pouvez-vous m'indiquer les options disponibles ou la suite donnee a mon dossier ?"
     }
   },
   banque: {
@@ -499,25 +615,25 @@ const categoryPresets: Record<
       title: "Negociation frais bancaires",
       subject: "Demande de reevaluation de mes frais bancaires",
       reason:
-        "La lecture de mes depenses fait apparaitre des frais bancaires qui meritent une reevaluation.",
+        "En relisant mes depenses, certains frais bancaires me semblent pouvoir etre revus.",
       request:
-        "Je souhaite connaitre les possibilites de reduction, de geste commercial ou d'offre plus adaptee."
+        "Je souhaite connaitre les possibilites de reduction ou d'offre plus adaptee."
     },
     provider_followup: {
       title: "Relance banque",
       subject: "Relance concernant ma demande bancaire",
       reason:
-        "Je souhaite obtenir un retour clair concernant ma demande liee a mes frais ou a mon contrat bancaire.",
+        "Je me permets de vous relancer concernant ma demande liee a mes frais ou a mon contrat bancaire.",
       request:
-        "Je vous relance afin de connaitre les options disponibles et la suite donnee a ma demande."
+        "Pouvez-vous m'indiquer les options disponibles et la suite donnee a ma demande ?"
     },
     comparison_report: {
       title: "Comparaison frais bancaires",
       subject: "Comparaison de mes frais bancaires",
       reason:
-        "Je souhaite partager une comparaison de mes frais bancaires avec les elements retrouves.",
+        "Je souhaite vous transmettre les elements que j'ai compares concernant mes frais bancaires.",
       request:
-        "Cette comparaison sert de base pour etudier une reduction tarifaire ou une offre plus adaptee."
+        "J'aimerais savoir si une reduction ou une offre plus adaptee peut etre envisagee."
     }
   }
 };
@@ -530,21 +646,32 @@ function getPresetForExpense(type: GeneratedLetterType, expense: Expense) {
 function createLetter(
   type: GeneratedLetterType,
   expense: Expense,
-  analysis: MockAnalysis
+  analysis: MockAnalysis,
+  selectedOffer?: SelectedAlternativeOffer | null
 ): GeneratedLetter {
-  const potentialSaving = Math.max(getPotentialSavingForExpense(analysis, expense), 48);
-  const bestOffer = findAlternativeOffers([expense])[0];
-  const providerAddress = getDetectedProviderAddress(analysis, expense.provider);
+  const bestOffer =
+    selectedOffer?.category === expense.category
+      ? selectedOffer
+      : findAlternativeOffers([expense])[0];
+  const potentialSaving =
+    selectedOffer?.category === expense.category
+      ? selectedOffer.estimatedYearlySaving
+      : Math.max(getPotentialSavingForExpense(analysis, expense), 48);
+  const provider = getCommercialProviderName(analysis, expense);
+  const providerAddress = getDetectedProviderAddress(analysis, expense, provider);
 
   const preset = getPresetForExpense(type, expense);
 
   return {
     id: `letter_${type}_${expense.id}`,
     type,
-    provider: expense.provider,
+    provider,
     providerAddress,
     customerProfile: getDocumentCustomerProfile(analysis, expense),
     offerName: bestOffer?.name,
+    offerProvider: bestOffer?.provider,
+    offerMonthlyPrice: bestOffer?.monthlyPrice,
+    offerEstimatedYearlySaving: bestOffer?.estimatedYearlySaving,
     offerUrl: bestOffer?.url,
     category: expense.category,
     potentialSaving,
@@ -553,12 +680,14 @@ function createLetter(
     subject: preset.subject,
     title: preset.title,
     bodyTemplate: buildBodyTemplate({
-      provider: expense.provider,
+      provider,
       monthlyAmount: expense.monthlyAmount,
       yearlyAmount: expense.yearlyAmount,
       potentialSaving,
       providerAddress,
       offerName: bestOffer?.name,
+      offerProvider: bestOffer?.provider,
+      offerMonthlyPrice: bestOffer?.monthlyPrice,
       offerUrl: bestOffer?.url,
       reason: preset.reason,
       request: preset.request
@@ -571,10 +700,13 @@ function getLetterTypesForExpense(expense: Expense, _analysis: MockAnalysis) {
   return context ? letterTypesByCategory[context] : defaultLetterTypes;
 }
 
-export function generateLettersFromAnalysis(analysis: MockAnalysis): GeneratedLetter[] {
+export function generateLettersFromAnalysis(
+  analysis: MockAnalysis,
+  selectedOffer?: SelectedAlternativeOffer | null
+): GeneratedLetter[] {
   const letters = analysis.expenses.flatMap((expense) =>
     getLetterTypesForExpense(expense, analysis).map((type) =>
-      createLetter(type, expense, analysis)
+      createLetter(type, expense, analysis, selectedOffer)
     )
   );
 
@@ -596,8 +728,12 @@ export function renderLetter(
     address: letter.customerProfile?.address,
     customerNumber:
       letter.customerProfile?.customerNumber || letter.customerProfile?.contractNumber,
-    contractNumber: letter.customerProfile?.contractNumber,
-    invoiceNumber: letter.customerProfile?.invoiceNumber,
+    contractNumber: isUsableReference(letter.customerProfile?.contractNumber)
+      ? letter.customerProfile?.contractNumber
+      : "",
+    invoiceNumber: isUsableReference(letter.customerProfile?.invoiceNumber)
+      ? letter.customerProfile?.invoiceNumber
+      : "",
     phone: letter.customerProfile?.phone,
     email: letter.customerProfile?.email,
     ...Object.fromEntries(
@@ -608,7 +744,7 @@ export function renderLetter(
   // 1. Gestion du bloc expéditeur (toujours présent)
   const senderInfo = [
     `${values.firstName || ""} ${values.lastName || ""}`.trim(),
-    (values.address || "").replace(/(.*?)(?:,\s*|\s+)(\b\d{5}\b.*)/, "$1\n$2"),
+    formatSenderAddress(values.address),
     values.email || ""
   ].filter(line => line.length > 0);
 

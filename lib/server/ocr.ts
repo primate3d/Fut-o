@@ -88,7 +88,10 @@ function isUsableExtractedText(text: string) {
   return text.trim().replace(/\s+/g, " ").length >= 40;
 }
 
-async function extractTextFromImage(physicalFileName: string): Promise<string> {
+async function extractTextFromImage(
+  physicalFileName: string,
+  declaredMimeType?: string
+): Promise<string> {
   const imageBuffer = await storage.get(physicalFileName);
   if (!imageBuffer) return "";
 
@@ -99,7 +102,10 @@ async function extractTextFromImage(physicalFileName: string): Promise<string> {
     return "";
   }
 
-  const mimeType = `image/${extension}`;
+  const mimeType =
+    declaredMimeType?.startsWith("image/")
+      ? declaredMimeType
+      : `image/${extension === "jpg" ? "jpeg" : extension}`;
 
   try {
     const openai = getOpenAI();
@@ -164,7 +170,7 @@ export async function extractTextFromDocument(
   }
 
   if ([".jpg", ".jpeg", ".png"].includes(extension)) {
-    return extractTextFromImage(physicalFileName);
+    return extractTextFromImage(physicalFileName, document.mimeType);
   }
 
   return "";

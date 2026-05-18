@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { Download, FileSearch, Loader2, Printer } from "lucide-react";
+import { Download, ExternalLink, FileSearch, Loader2, Printer } from "lucide-react";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
@@ -10,12 +10,18 @@ import { StatCard } from "@/components/ui/StatCard";
 import {
   getStoredAnalysisServer,
   getStoredMockAnalysis,
+  hasDocumentProfiles,
   isAnalysisForDocuments,
+  refreshStoredAnalysisServer,
   storeMockAnalysis
 } from "@/features/analysis";
 import { generateLettersFromAnalysis } from "@/features/letters/service";
 import type { AlternativeOffer } from "@/features/recommendations/service";
 import { findAlternativeOffers } from "@/features/recommendations/service";
+import {
+  getSelectedAlternativeOffer,
+  type SelectedAlternativeOffer
+} from "@/features/recommendations/selected-offer";
 import {
   getStoredUploadedDocuments,
   getStoredUploadedDocumentsServer
@@ -57,30 +63,73 @@ const actionPlan = [
   "Refaire un point dans quelques mois"
 ];
 
+function getLetterTypeLabel(type: GeneratedLetter["type"]) {
+  const labels: Record<GeneratedLetter["type"], string> = {
+    subscription_cancellation: "Résiliation",
+    price_negotiation: "Négociation",
+    provider_followup: "Relance",
+    offer_change: "Changement d'offre",
+    comparison_report: "Comparaison"
+  };
+
+  return labels[type];
+}
+
+function getSyntheticPreparedLetters(letters: GeneratedLetter[], maxItems = 5) {
+  const seen = new Set<string>();
+  const uniqueLetters = letters.filter((letter) => {
+    const key = `${letter.type}-${letter.category}-${letter.provider}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+
+  return {
+    displayedLetters: uniqueLetters.slice(0, maxItems),
+    hiddenCount: Math.max(0, letters.length - maxItems),
+    totalCount: letters.length
+  };
+}
+
 export function ReportPanel() {
   const [analysis, setAnalysis] = useState<MockAnalysis | null>(null);
   const [alternatives, setAlternatives] = useState<AlternativeOffer[]>([]);
+  const [selectedOffer, setSelectedOffer] = useState<SelectedAlternativeOffer | null>(null);
   const [recommendedLetters, setRecommendedLetters] = useState<GeneratedLetter[]>([]);
   const [isDownloading, setIsDownloading] = useState(false);
   const [serviceMessage, setServiceMessage] = useState<string | null>(null);
 
   useEffect(() => {
+    const retainedOffer = getSelectedAlternativeOffer();
+    setSelectedOffer(retainedOffer);
+
     const storedAnalysis = getStoredMockAnalysis();
     const documents = getStoredUploadedDocuments();
-    const hasCurrentAnalysis = isAnalysisForDocuments(storedAnalysis, documents);
+    const hasCurrentAnalysis =
+      isAnalysisForDocuments(storedAnalysis, documents) &&
+      hasDocumentProfiles(storedAnalysis);
 
     setAnalysis(hasCurrentAnalysis ? storedAnalysis : null);
 
     if (!storedAnalysis || !hasCurrentAnalysis) {
       async function loadServerState() {
         const serverDocuments = await getStoredUploadedDocumentsServer();
-        const serverAnalysis = await getStoredAnalysisServer();
+        const readyServerDocuments = serverDocuments.filter(
+          (document) => document.status === "ready"
+        );
+        const serverAnalysis =
+          (await getStoredAnalysisServer()) ??
+          (readyServerDocuments.length > 0
+            ? await refreshStoredAnalysisServer(readyServerDocuments)
+            : null);
 
         if (isAnalysisForDocuments(serverAnalysis, serverDocuments) && serverAnalysis) {
           storeMockAnalysis(serverAnalysis);
           setAnalysis(serverAnalysis);
           setAlternatives(findAlternativeOffers(serverAnalysis.expenses).slice(0, 5));
-          setRecommendedLetters(generateLettersFromAnalysis(serverAnalysis).slice(0, 5));
+          setRecommendedLetters(
+            generateLettersFromAnalysis(serverAnalysis, retainedOffer).slice(0, 5)
+          );
         }
       }
 
@@ -121,10 +170,16 @@ export function ReportPanel() {
         };
 
         setAlternatives((alternativesPayload.alternatives ?? []).slice(0, 5));
-        setRecommendedLetters((lettersPayload.letters ?? []).slice(0, 5));
+        setRecommendedLetters(
+          retainedOffer
+            ? generateLettersFromAnalysis(analysisToLoad, retainedOffer).slice(0, 5)
+            : (lettersPayload.letters ?? []).slice(0, 5)
+        );
       } catch {
         setAlternatives(findAlternativeOffers(analysisToLoad.expenses).slice(0, 5));
-        setRecommendedLetters(generateLettersFromAnalysis(analysisToLoad).slice(0, 5));
+        setRecommendedLetters(
+          generateLettersFromAnalysis(analysisToLoad, retainedOffer).slice(0, 5)
+        );
         setServiceMessage(
           "Rapport préparé localement. Les services externes de comparaison, d'email et de stockage seront connectés ensuite."
         );
@@ -138,7 +193,7 @@ export function ReportPanel() {
     if (!analysis) return;
     setIsDownloading(true);
     try {
-      await generatePdfReport(analysis, alternatives, recommendedLetters);
+      await generatePdfReport(analysis, alternatives, recommendedLetters, selectedOffer);
     } catch (error) {
       console.error("Erreur PDF:", error);
       setServiceMessage("Le PDF n'a pas pu être généré. Vous pouvez utiliser l'impression navigateur.");
@@ -173,6 +228,8 @@ export function ReportPanel() {
   const priorityRecommendations = analysis.recommendations
     .filter((recommendation) => recommendation.priority !== "low")
     .slice(0, 4);
+  const preparedAt = new Date(analysis.generatedAt).toLocaleDateString("fr-FR");
+  const preparedLettersSummary = getSyntheticPreparedLetters(recommendedLetters);
 
   return (
     <section className="space-y-6 print:space-y-4">
@@ -244,6 +301,65 @@ export function ReportPanel() {
         <StatCard label="Postes détectés" value={`${analysis.expenses.length}`} />
         <StatCard label="Points à vérifier" value={`${analysis.anomalies.length}`} />
       </div>
+
+      {selectedOffer ? (
+        <Card className="border-sage-200 bg-sage-50 print:shadow-none">
+          <h2 className="text-xl font-semibold text-navy-900">
+            Offre retenue pour comparaison
+          </h2>
+          <p className="mt-2 text-sm leading-6 text-slate-600">
+            Cette estimation permet de mesurer le gain potentiel par rapport à votre contrat actuel.
+          </p>
+          <div className="mt-4 grid gap-3 md:grid-cols-5">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-wide text-sage-700">
+                Fournisseur
+              </p>
+              <p className="mt-1 font-semibold text-navy-900">{selectedOffer.provider}</p>
+            </div>
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-wide text-sage-700">
+                Offre
+              </p>
+              <p className="mt-1 font-semibold text-navy-900">{selectedOffer.name}</p>
+            </div>
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-wide text-sage-700">
+                Prix mensuel
+              </p>
+              <p className="mt-1 font-semibold text-navy-900">
+                {formatCurrency(selectedOffer.monthlyPrice)}
+              </p>
+            </div>
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-wide text-sage-700">
+                Économie annuelle
+              </p>
+              <p className="mt-1 text-xl font-bold text-sage-700">
+                {formatCurrency(selectedOffer.estimatedYearlySaving)} / an
+              </p>
+            </div>
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-wide text-sage-700">
+                Économie mensuelle
+              </p>
+              <p className="mt-1 text-xl font-bold text-sage-700">
+                {formatCurrency(selectedOffer.estimatedYearlySaving / 12)} / mois
+              </p>
+            </div>
+          </div>
+          {selectedOffer.url ? (
+            <a
+              className="mt-4 inline-flex min-h-10 items-center justify-center gap-2 rounded-lg border border-sage-200 bg-white px-4 py-2 text-sm font-semibold text-sage-800 transition hover:bg-sage-100"
+              href={selectedOffer.url}
+              rel="noopener noreferrer"
+              target="_blank"
+            >
+              Voir l'offre retenue <ExternalLink size={15} />
+            </a>
+          ) : null}
+        </Card>
+      ) : null}
 
       <div className="grid gap-6 xl:grid-cols-2">
         <Card className="print:shadow-none">
@@ -360,14 +476,24 @@ export function ReportPanel() {
       </Card>
 
       <Card className="print:shadow-none">
-        <h2 className="text-xl font-semibold text-navy-900">Courriers recommandés</h2>
+        <h2 className="text-xl font-semibold text-navy-900">Courriers préparés</h2>
+        <p className="mt-2 text-sm leading-6 text-slate-600">
+          {preparedLettersSummary.totalCount > 0
+            ? `${preparedLettersSummary.totalCount} démarches prêtes à utiliser.`
+            : "Les courriers préparés apparaîtront ici après génération."}
+        </p>
         <div className="mt-4 grid gap-3 md:grid-cols-2">
-          {recommendedLetters.length > 0 ? (
-            recommendedLetters.map((letter) => (
+          {preparedLettersSummary.displayedLetters.length > 0 ? (
+            preparedLettersSummary.displayedLetters.map((letter) => (
               <div className="rounded-lg bg-navy-50 p-4" key={letter.id}>
-                <p className="font-semibold text-navy-900">{letter.title}</p>
+                <p className="font-semibold text-navy-900">
+                  {getLetterTypeLabel(letter.type)} - {letter.title}
+                </p>
                 <p className="mt-1 text-sm text-slate-500">
-                  {letter.provider} - {formatCurrency(letter.potentialSaving)} / an
+                  {expenseCategoryLabels[letter.category]} - {letter.provider}
+                </p>
+                <p className="mt-2 text-sm font-medium text-sage-700">
+                  Préparée le {preparedAt}
                 </p>
               </div>
             ))
@@ -377,6 +503,11 @@ export function ReportPanel() {
             </p>
           )}
         </div>
+        {preparedLettersSummary.hiddenCount > 0 ? (
+          <p className="mt-3 text-sm font-medium text-slate-600">
+            + {preparedLettersSummary.hiddenCount} autres courriers disponibles dans l'espace Courriers
+          </p>
+        ) : null}
       </Card>
     </section>
   );

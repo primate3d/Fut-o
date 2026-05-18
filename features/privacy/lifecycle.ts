@@ -1,6 +1,7 @@
 import { ACCESS_KEY_STORAGE_KEY, getStoredAccessKey } from "@/features/billing/access-keys";
 import { MOCK_ANALYSIS_STORAGE_KEY } from "@/features/analysis/storage";
 import { UPLOADED_DOCUMENTS_STORAGE_KEY } from "@/features/upload/storage";
+import { SELECTED_ALTERNATIVE_OFFER_STORAGE_KEY } from "@/features/recommendations/selected-offer";
 
 /**
  * Supprime uniquement les fichiers sources importés.
@@ -65,6 +66,8 @@ export async function purgeFullAudit() {
 
   window.localStorage.removeItem(UPLOADED_DOCUMENTS_STORAGE_KEY);
   window.localStorage.removeItem(MOCK_ANALYSIS_STORAGE_KEY);
+  window.localStorage.removeItem(SELECTED_ALTERNATIVE_OFFER_STORAGE_KEY);
+  window.localStorage.removeItem("futeo.uploadedDocumentsOwner");
 }
 
 /**
@@ -74,4 +77,5 @@ export async function purgeAllSessionData() {
   if (typeof window === "undefined") return;
   await purgeFullAudit();
   window.localStorage.removeItem(ACCESS_KEY_STORAGE_KEY);
+  window.sessionStorage.clear();
 }

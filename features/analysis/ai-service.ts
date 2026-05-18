@@ -2,6 +2,7 @@ import { OpenAI } from "openai";
 import {
   attachDocumentProfileToExpense,
   buildDocumentPartyProfiles,
+  ensureDetectedDocumentsFromExpenses,
   inferExpenseCategoryFromDocumentType,
   inferExpenseSubcategoryFromDocumentType,
   mergeDetectedParties,
@@ -67,50 +68,79 @@ Contenu extrait :\n${document.extractedText || "Contenu illisible ou vide."}`
       messages: [
         {
           role: "system",
-          content: `Tu es un expert en analyse de documents administratifs (factures, contrats, abonnements). 
-Ton objectif est d'extraire les données avec une RIGUEUR ABSOLUE pour préparer des courriers officiels.
+          content: `Tu es un expert en analyse de documents administratifs pour générer des courriers officiels.
 
-PRIORITÉS D'EXTRACTION (dans cet ordre) :
-1. COORDONNÉES CLIENT (firstName, lastName, fullName, address, email, phone, customerNumber, contractNumber, invoiceNumber)
-2. COORDONNÉES FOURNISSEUR (name, service, address, postalCode, city, phone)
-3. DÉTAILS CONTRAT (provider, category, subcategory, monthlyAmount)
-4. RECOMMANDATIONS & ANOMALIES
+EXEMPLE COMPLET - Entrée/Sortie :
 
-RÈGLES CRITIQUES :
-- NE JAMAIS INVENTER. Si une donnée n'est pas visible, retourne null ou laisse vide.
-- NE PAS HALLUCINER de noms, d'adresses ou de numéros.
-- Pour chaque bloc principal (customer, providers), inclus un score de confiance global "confidence" (0.0 à 1.0).
-- Le nom du client est prioritaire sur tout autre nom dans le document.
+Entrée reçue :
+### Document ID: abc-123
+Fichier analysé: facture_mobile.pdf
+Type detecte: invoice
+Contenu extrait :
+Monsieur Jean DUPONT
+5 rue Example, 75001 PARIS
+NRJ Mobile - Service Client
+40 avenue Commerce, 92000 Nanterre
+Tel: 0800123456
+Facture du 01/05/2026
+Montant TTC: 25 EUR
+N° client: 987654
 
-STRUCTURE JSON ATTENDUE :
+Sortie JSON OBLIGATOIRE :
 {
   "detectedParties": {
     "customer": {
-      "firstName": "...", "lastName": "...", "fullName": "...", 
-      "address": "...", "email": "...", "phone": "...", 
-      "customerNumber": "...", "contractNumber": "...", "invoiceNumber": "...",
-      "confidence": 0.95
+      "firstName": "Jean",
+      "lastName": "DUPONT",
+      "fullName": "Jean DUPONT",
+      "address": "5 rue Example, 75001 PARIS",
+      "customerNumber": "987654"
     },
     "providers": {
-      "NomFournisseur": {
-        "name": "...", "service": "...", "address": "...", 
-        "postalCode": "...", "city": "...", "phone": "...",
-        "confidence": 0.9
+      "NRJ Mobile": {
+        "name": "NRJ Mobile",
+        "address": "40 avenue Commerce, 92000 Nanterre",
+        "phone": "0800123456"
       }
     },
     "documents": {
-      "DocumentID": {
-        "documentId": "...", "fileName": "...", "documentType": "...", 
-        "providerName": "...", "subscriptionType": "...", "invoiceAmount": 0,
-        "customer": { ...même structure que ci-dessus... },
-        "provider": { ...même structure que ci-dessus... }
+      "abc-123": {
+        "documentId": "abc-123",
+        "fileName": "facture_mobile.pdf",
+        "documentType": "invoice",
+        "providerName": "NRJ Mobile",
+        "invoiceAmount": 25,
+        "customer": {
+          "firstName": "Jean",
+          "lastName": "DUPONT",
+          "fullName": "Jean DUPONT",
+          "address": "5 rue Example, 75001 PARIS",
+          "customerNumber": "987654"
+        },
+        "provider": {
+          "name": "NRJ Mobile",
+          "address": "40 avenue Commerce, 92000 Nanterre",
+          "phone": "0800123456"
+        }
       }
     }
   },
-  "expenses": [ ... ],
-  "recommendations": [ ... ],
-  "anomalies": [ ... ]
-}`
+  "expenses": [{
+    "sourceDocumentId": "abc-123",
+    "provider": "NRJ Mobile",
+    "category": "TELECOM",
+    "subcategory": "MOBILE",
+    "monthlyAmount": 25,
+    "customerNumber": "987654"
+  }]
+}
+
+RÈGLES IMPÉRATIVES :
+1. Pour CHAQUE "### Document ID: X" reçu, crée documents[X] avec X comme clé EXACTE
+2. Le customer/provider dans documents[X] = coordonnées visibles dans CE document
+3. Chaque expense.sourceDocumentId DOIT matcher une clé documents[]
+4. Fournisseur = marque commerciale prioritaire (NRJ Mobile > Bouygues, Sosh > Orange)
+5. N'invente JAMAIS de coordonnées absentes`
         },
         {
           role: "user",
@@ -125,26 +155,53 @@ STRUCTURE JSON ATTENDUE :
     ) as AiAnalysisPayload;
 
     const aiExpenses = rawResult.expenses ?? [];
+    const profileFallbackExpenses: AiExpense[] = Object.values(documentProfiles)
+      .filter((profile) => profile.invoiceAmount)
+      .map((profile) => ({
+        label: profile.subscriptionType ?? "Contrat",
+        provider: profile.providerName ?? "Fournisseur",
+        category: inferExpenseCategoryFromDocumentType(profile.documentType),
+        subcategory: inferExpenseSubcategoryFromDocumentType(profile.documentType),
+        isRecurring: true,
+        monthlyAmount: profile.invoiceAmount ?? 0,
+        documentType: profile.documentType,
+        sourceDocumentId: profile.documentId,
+        sourceDocumentName: profile.fileName,
+        customerNumber: profile.customer?.customerNumber,
+        contractNumber: profile.customer?.contractNumber,
+        invoiceNumber: profile.customer?.invoiceNumber,
+        phone: profile.customer?.phone
+      }));
+    const detectedDocumentFallbackExpenses: AiExpense[] = Object.values(
+      rawResult.detectedParties?.documents ?? {}
+    )
+      .filter(
+        (document) =>
+          document.documentId &&
+          document.invoiceAmount &&
+          !profileFallbackExpenses.some(
+            (expense) => expense.sourceDocumentId === document.documentId
+          )
+      )
+      .map((document) => ({
+        label: document.subscriptionType ?? "Contrat",
+        provider: document.providerName ?? document.provider?.name ?? "Fournisseur",
+        category: inferExpenseCategoryFromDocumentType(document.documentType),
+        subcategory: inferExpenseSubcategoryFromDocumentType(document.documentType),
+        isRecurring: true,
+        monthlyAmount: document.invoiceAmount ?? 0,
+        documentType: document.documentType,
+        sourceDocumentId: document.documentId,
+        sourceDocumentName: document.fileName,
+        customerNumber: document.customer?.customerNumber,
+        contractNumber: document.customer?.contractNumber,
+        invoiceNumber: document.customer?.invoiceNumber,
+        phone: document.customer?.phone
+      }));
     const fallbackExpenses: AiExpense[] =
       aiExpenses.length > 0
         ? []
-        : Object.values(documentProfiles)
-          .filter((profile) => profile.invoiceAmount)
-          .map((profile) => ({
-            label: profile.subscriptionType ?? "Contrat",
-            provider: profile.providerName ?? "Fournisseur",
-            category: inferExpenseCategoryFromDocumentType(profile.documentType),
-            subcategory: inferExpenseSubcategoryFromDocumentType(profile.documentType),
-            isRecurring: true,
-            monthlyAmount: profile.invoiceAmount ?? 0,
-            documentType: profile.documentType,
-            sourceDocumentId: profile.documentId,
-            sourceDocumentName: profile.fileName,
-            customerNumber: profile.customer?.customerNumber,
-            contractNumber: profile.customer?.contractNumber,
-            invoiceNumber: profile.customer?.invoiceNumber,
-            phone: profile.customer?.phone
-          }));
+        : [...profileFallbackExpenses, ...detectedDocumentFallbackExpenses];
 
     const expenses: Expense[] = [...aiExpenses, ...fallbackExpenses].map(
       (expense, index) =>
@@ -181,12 +238,17 @@ STRUCTURE JSON ATTENDUE :
       (sum, recommendation) => sum + recommendation.potentialSaving,
       0
     );
+    const detectedParties = ensureDetectedDocumentsFromExpenses(
+      mergeDetectedParties(rawResult.detectedParties, documentProfiles),
+      expenses,
+      documentProfiles
+    );
 
     return {
       id: `analysis_${keyCode}_${Date.now()}`,
       generatedAt: new Date().toISOString(),
       documents,
-      detectedParties: mergeDetectedParties(rawResult.detectedParties, documentProfiles),
+      detectedParties,
       expenses,
       recommendations,
       anomalies,

@@ -39,6 +39,53 @@ function parseAmount(value?: string) {
   return Number.isFinite(amount) ? amount : undefined;
 }
 
+function firstAmountNearLabel(text: string, labels: RegExp[]) {
+  for (const label of labels) {
+    const match = text.match(
+      new RegExp(`${label.source}.{0,90}?([0-9][0-9\\s.,]*[,.][0-9]{2})`, "i")
+    );
+    const amount = parseAmount(match?.[1]);
+    if (amount) return amount;
+  }
+  return undefined;
+}
+
+function extractInvoiceAmount(text: string) {
+  const compactText = clean(text) ?? "";
+  const normalizedText = normalize(compactText);
+  const normalizedAmount = firstAmountNearLabel(normalizedText, [
+    /net\s+a\s+payer/,
+    /montant\s+(?:total|ttc|a\s+payer|du|de\s+votre\s+facture|preleve)/,
+    /total\s+(?:ttc|a\s+payer)?/,
+    /facture\s+ttc/,
+    /a\s+regler/,
+    /reste\s+a\s+payer/
+  ]);
+
+  if (normalizedAmount) return normalizedAmount;
+
+  const amount = parseAmount(
+    firstMatch(compactText, [
+      /(?:montant\s+(?:total|ttc|factur[ée]|de\s+la\s+facture|d[ûu]|à\s+payer|a\s+payer)|total\s+(?:ttc|à\s+payer|a\s+payer)?|net\s+(?:à|a)\s+payer|montant\s+net\s+(?:à|a)\s+payer|facture\s+ttc|à\s+régler|a\s+regler|reste\s+(?:à|a)\s+payer)[^\d€]{0,50}([0-9][0-9\s.,]*[,.][0-9]{2})\s*(?:€|eur|euros|â‚¬)?/i,
+      /([0-9][0-9\s.,]*[,.][0-9]{2})\s*(?:€|eur|euros|â‚¬)\s*(?:ttc|à\s+payer|a\s+payer|net\s+(?:à|a)\s+payer|total|montant\s+d[ûu])/i,
+      /(?:total|montant|facture)[^\d€]{0,30}([0-9][0-9\s.,]*[,.][0-9]{2})/i,
+      /montant\s+de\s+votre\s+facture\s+[0-9][0-9\s.,]*\s+([0-9][0-9\s.,]*[,.][0-9]{2})/i
+    ])
+  );
+
+  return amount;
+}
+
+const commercialProviderNames = ["NRJ Mobile", "Sosh", "RED by SFR", "B&You"];
+
+function pickCommercialProvider(...providers: Array<string | undefined>) {
+  const candidates = providers.filter(Boolean) as string[];
+  return (
+    commercialProviderNames.find((provider) => candidates.includes(provider)) ??
+    candidates[0]
+  );
+}
+
 function extractInlinePostalAddress(text: string) {
   const compactText = clean(text);
   const match = compactText?.match(
@@ -49,27 +96,93 @@ function extractInlinePostalAddress(text: string) {
 }
 
 function extractProviderAddress(text: string) {
+  const bouyguesSupportAddress = text.match(
+    /13\s*[-–]\s*15[,\s]+avenue\s+du\s+Mar(?:é|e|Ã©)chal\s+Juin[\s,.-]+92360\s+Meudon(?:[\s-]+la[\s-]+For(?:ê|e|Ãª)t)?/i
+  );
+
+  if (bouyguesSupportAddress) {
+    return "13-15, avenue du Maréchal Juin\n92360 Meudon-la-Forêt";
+  }
+
   // We prefer the highly accurate predefined service client addresses (e.g. CEDEX addresses)
   // rather than the legal/corporate headquarters footers from invoices.
   return undefined;
 }
 
 function detectProvider(document: ExtractedDocument) {
-  const text = normalize(`${document.provider ?? ""} ${document.fileName} ${document.extractedText}`);
+  const fileNameNorm = clean(normalize(document.fileName)) ?? "";
+  const textNorm = clean(normalize(document.extractedText)) ?? "";
+  const rawText = document.extractedText || "";
+
   const providers = [
-    "NRJ Mobile",
-    "B&You",
-    "Sosh",
-    "RED by SFR",
-    "SFR",
-    "Orange",
-    "Free",
-    "Bouygues Telecom",
-    "EDF",
-    "Engie"
+    // MVNOs / Brands (Highest priority)
+    { name: "NRJ Mobile", aliases: ["nrj mobile", "nrjmobile", "nrj"] },
+    { name: "Sosh", aliases: ["sosh"] },
+    { name: "RED by SFR", aliases: ["red by sfr", "red by", "redbysfr"] },
+    { name: "B&You", aliases: ["b&you", "b and you", "b & you"] },
+    { name: "La Poste Mobile", aliases: ["la poste mobile", "lapostemobile"] },
+    { name: "Prixtel", aliases: ["prixtel"] },
+    { name: "Syma Mobile", aliases: ["syma mobile", "syma"] },
+    { name: "Lebara", aliases: ["lebara"] },
+
+    // Main Operators / Providers
+    { name: "Free", aliases: ["free mobile", "free telecom", "free"] },
+    { name: "SFR", aliases: ["sfr"] },
+    { name: "Orange", aliases: ["orange"] },
+    { name: "Bouygues Telecom", aliases: ["bouygues telecom", "bouygues"] },
+
+    // Energy
+    { name: "EDF", aliases: ["edf", "electricite de france"] },
+    { name: "Engie", aliases: ["engie", "gdf suez"] },
+    { name: "TotalEnergies", aliases: ["totalenergies", "total energies", "direct energie"] },
+    { name: "Eni", aliases: ["eni"] }
   ];
 
-  return providers.find((provider) => text.includes(normalize(provider))) ?? document.provider;
+  let bestProvider: string | undefined = undefined;
+  let maxScore = 0;
+
+  for (const { name, aliases } of providers) {
+    for (const alias of aliases) {
+      const aliasNorm = clean(normalize(alias)) ?? "";
+      let score = 0;
+
+      if (fileNameNorm.includes(aliasNorm)) {
+        score += 50;
+      }
+
+      if (textNorm.includes(aliasNorm)) {
+        score += 10;
+
+        const index = textNorm.indexOf(aliasNorm);
+        if (index >= 0 && index < 500) {
+          score += 20;
+        }
+
+        const domainAlias = aliasNorm.replace(/\s+/g, "");
+        if (domainAlias.length > 2) {
+          const domainRegex = new RegExp(`@(?:[a-z0-9-]+\\.)*${domainAlias}\\.[a-z]{2,}`, "i");
+          if (domainRegex.test(rawText)) {
+            score += 15;
+          }
+        }
+
+        const mvnoBrands = [
+          "NRJ Mobile", "Sosh", "RED by SFR", "B&You",
+          "La Poste Mobile", "Prixtel", "Syma Mobile", "Lebara"
+        ];
+        if (mvnoBrands.includes(name)) {
+          score += 100;
+        }
+      }
+
+      if (score > maxScore) {
+        maxScore = score;
+        bestProvider = name;
+      }
+    }
+  }
+
+  return bestProvider ?? document.provider;
 }
 
 function getSubscriptionType(documentType: UploadedDocumentType) {
@@ -104,7 +217,107 @@ function splitFullName(fullName?: string): CustomerProfile {
   };
 }
 
-function extractPostalAddress(text: string) {
+const postalAddressPattern =
+  /\b\d{1,5}[,\s]+(?:all[ée]e|allee|rue|avenue|av\.?|boulevard|bd|chemin|impasse|route|place|quai|square|résidence|residence|cours|passage)\b.{0,140}?\b\d{5}\s+[A-Z\u00C0-\u0178][A-Za-z\u00C0-\u017F' -]{2,}/i;
+
+const consumptionAddressMarkers = [
+  "lieu de consommation",
+  "adresse de consommation",
+  "adresse du site",
+  "site de consommation",
+  "point de livraison",
+  "pdl",
+  "prm"
+];
+
+function isEnergyDocument(documentType?: UploadedDocumentType, providerName?: string) {
+  return (
+    documentType === "electricity_invoice" ||
+    documentType === "gas_invoice" ||
+    ["EDF", "Engie", "TotalEnergies", "Eni"].includes(providerName ?? "")
+  );
+}
+
+function isLikelyProviderAddress(address?: string) {
+  const normalized = normalize(address);
+  return /(?:service client|tsa|cedex|rcs|capital|tva|samuel de champlain|marechal juin|meudon|courbevoie|noailles|arras|rouen)/i.test(
+    normalized
+  );
+}
+
+function extractAddressFromSegment(segment?: string) {
+  const match = segment?.match(postalAddressPattern);
+  const address = clean(match?.[0]);
+
+  if (!address || isLikelyProviderAddress(address)) {
+    return undefined;
+  }
+
+  return address.replace(/\s+(\d{5}\s+[A-Z\u00C0-\u0178])/i, "\n$1");
+}
+
+function extractEnergyConsumptionAddress(text: string) {
+  const compactText = clean(text) ?? "";
+
+  for (const marker of consumptionAddressMarkers) {
+    const markerIndex = normalize(compactText).indexOf(marker);
+    if (markerIndex < 0) continue;
+
+    const segment = compactText.slice(markerIndex, markerIndex + 360);
+    const address = extractAddressFromSegment(segment);
+    if (address) return address;
+  }
+
+  const customerReferenceMatch = compactText.match(
+    /(?:r[ée]f[ée]rence\s+client|reference\s+client|compte\s+de\s+contrat).{0,260}/i
+  );
+
+  return extractAddressFromSegment(customerReferenceMatch?.[0]);
+}
+
+function extractNameNearAddress(text: string, address?: string) {
+  if (!address) return undefined;
+
+  const compactText = clean(text) ?? "";
+  const firstAddressLine = address.split("\n")[0]?.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  if (!firstAddressLine) return undefined;
+
+  const addressMatch = compactText.match(new RegExp(firstAddressLine, "i"));
+  if (!addressMatch || addressMatch.index == null) return undefined;
+
+  const beforeAddress = compactText
+    .slice(Math.max(0, addressMatch.index - 140), addressMatch.index)
+    .replace(
+      /(?:lieu de consommation|adresse de consommation|adresse du site|site de consommation|point de livraison|pdl|prm|r[ée]f[ée]rence client|reference client|num[ée]ro compte de contrat|compte de contrat)\s*:?\s*/gi,
+      " "
+    )
+    .replace(/\b[A-Z0-9]{2,}\d[A-Z0-9]*\b/g, " ")
+    .replace(/\b\d+[A-Z]?\b/g, " ");
+
+  const tokens = beforeAddress.match(/\b[A-Z\u00C0-\u0178][A-Z\u00C0-\u0178' -]{2,}\b/g) ?? [];
+  const filteredTokens = tokens
+    .map((token) => clean(token))
+    .filter((token): token is string =>
+      Boolean(token && !/^(DUPLICATA|CLIENT|CONTRAT|LIEU|CONSOMMATION|ADRESSE|SITE|POINT|LIVRAISON)$/i.test(token))
+    );
+
+  if (filteredTokens.length < 2 || filteredTokens.length > 4) {
+    return undefined;
+  }
+
+  return filteredTokens.join(" ");
+}
+
+function extractPostalAddress(
+  text: string,
+  documentType?: UploadedDocumentType,
+  providerName?: string
+) {
+  if (isEnergyDocument(documentType, providerName)) {
+    const energyAddress = extractEnergyConsumptionAddress(text);
+    if (energyAddress) return energyAddress;
+  }
+
   const inlineAddress = extractInlinePostalAddress(text);
   if (inlineAddress) return inlineAddress;
 
@@ -125,7 +338,8 @@ function extractPostalAddress(text: string) {
     start -= 1;
   }
 
-  return lines.slice(start, postalIndex + 1).join("\n");
+  const address = lines.slice(start, postalIndex + 1).join("\n");
+  return isLikelyProviderAddress(address) ? undefined : address;
 }
 
 export function extractDocumentPartyProfile(document: ExtractedDocument): DocumentPartyProfile {
@@ -184,12 +398,23 @@ export function extractDocumentPartyProfile(document: ExtractedDocument): Docume
     ])
   );
   const providerAddress = extractProviderAddress(compactText);
+  const inferredDocumentType = inferDocumentTypeFromContent(document, providerName);
+  const profileInvoiceAmount = extractInvoiceAmount(text) ?? invoiceAmount;
+  const postalAddress = extractPostalAddress(text, inferredDocumentType, providerName);
+  const energyCustomerName =
+    isEnergyDocument(inferredDocumentType, providerName)
+      ? extractNameNearAddress(text, postalAddress)
+      : undefined;
+  const finalCustomer =
+    Object.values(customer).some(Boolean) || !energyCustomerName
+      ? customer
+      : splitFullName(energyCustomerName);
 
-  customer.address = extractPostalAddress(text);
-  customer.phone = reversePhone ?? phone;
-  customer.customerNumber = reverseCustomerNumber ?? customerNumber;
-  customer.contractNumber = reverseContractNumber ?? contractNumber;
-  customer.invoiceNumber = reverseInvoiceNumber ?? invoiceNumber;
+  finalCustomer.address = postalAddress;
+  finalCustomer.phone = reversePhone ?? phone;
+  finalCustomer.customerNumber = reverseCustomerNumber ?? customerNumber;
+  finalCustomer.contractNumber = reverseContractNumber ?? contractNumber;
+  finalCustomer.invoiceNumber = reverseInvoiceNumber ?? invoiceNumber;
 
   const provider: ProviderProfile | undefined = providerName
     ? {
@@ -204,11 +429,11 @@ export function extractDocumentPartyProfile(document: ExtractedDocument): Docume
   return {
     documentId: document.id,
     fileName: document.fileName,
-    documentType: document.documentType,
+    documentType: inferredDocumentType,
     providerName,
-    subscriptionType: getSubscriptionType(document.documentType),
-    invoiceAmount: reverseInvoiceAmount ?? invoiceAmount,
-    customer: Object.values(customer).some(Boolean) ? customer : undefined,
+    subscriptionType: getSubscriptionType(inferredDocumentType),
+    invoiceAmount: reverseInvoiceAmount ?? profileInvoiceAmount,
+    customer: Object.values(finalCustomer).some(Boolean) ? finalCustomer : undefined,
     provider
   };
 }
@@ -254,6 +479,155 @@ export function mergeDetectedParties(
       ...documentProfiles,
       ...(detectedParties?.documents ?? {})
     }
+  };
+}
+
+function inferDocumentTypeFromContent(
+  document: ExtractedDocument,
+  providerName?: string
+): UploadedDocumentType {
+  if (document.documentType !== "other") {
+    return document.documentType;
+  }
+
+  const text = normalize(
+    `${document.fileName} ${document.provider ?? ""} ${providerName ?? ""} ${document.extractedText}`
+  );
+
+  if (
+    /\b(edf|electricite|electricit[eé]|enedis|linky|kwh|compteur)\b/.test(text)
+  ) {
+    return "electricity_invoice";
+  }
+
+  if (/\b(engie|gaz|grdf|kwh pcs|consommation gaz)\b/.test(text)) {
+    return "gas_invoice";
+  }
+
+  if (/\b(mobile|forfait|ligne mobile|telephone|data|go\b|5g|4g|sim)\b/.test(text)) {
+    return "mobile_invoice";
+  }
+
+  if (/\b(box|internet|fibre|adsl|wifi|livebox|freebox|bbox)\b/.test(text)) {
+    return "internet_invoice";
+  }
+
+  if (/\b(assurance auto|vehicule|immatriculation|bonus malus)\b/.test(text)) {
+    return "car_insurance";
+  }
+
+  if (/\b(assurance habitation|multirisque habitation|logement)\b/.test(text)) {
+    return "home_insurance";
+  }
+
+  if (/\b(mutuelle|complementaire sante|assurance sante)\b/.test(text)) {
+    return "health_insurance";
+  }
+
+  if (/\b(releve de compte|frais bancaires|carte bancaire|iban|banque)\b/.test(text)) {
+    return "bank_statement";
+  }
+
+  if (/\b(abonnement|mensualite|prelevement mensuel)\b/.test(text)) {
+    return "subscription";
+  }
+
+  return document.documentType;
+}
+
+function hasValue<T>(value: T | undefined | null): value is T {
+  return typeof value === "string" ? value.trim().length > 0 : value != null;
+}
+
+function mergeWithoutEmptyOverwrite<T extends Record<string, unknown>>(
+  ...sources: Array<T | undefined>
+): T {
+  return sources.reduce<T>((merged, source) => {
+    if (!source) return merged;
+
+    for (const [key, value] of Object.entries(source)) {
+      if (!hasValue(value)) continue;
+      if (hasValue(merged[key])) continue;
+      merged[key as keyof T] = value as T[keyof T];
+    }
+
+    return merged;
+  }, {} as T);
+}
+
+function normalizeDetectedDocuments(
+  documents?: DetectedParties["documents"]
+): NonNullable<DetectedParties["documents"]> {
+  if (!documents || Array.isArray(documents)) {
+    return {};
+  }
+
+  return documents;
+}
+
+export function ensureDetectedDocumentsFromExpenses(
+  detectedParties: DetectedParties | undefined,
+  expenses: Expense[],
+  documentProfiles: Record<string, DocumentPartyProfile>
+): DetectedParties {
+  const documents = { ...normalizeDetectedDocuments(detectedParties?.documents) };
+  const providers = { ...(detectedParties?.providers ?? {}) };
+
+  for (const expense of expenses) {
+    const sourceDocumentId = expense.sourceDocumentId;
+    if (!sourceDocumentId) continue;
+
+    const existingDocument = documents[sourceDocumentId];
+    const profile = documentProfiles[sourceDocumentId];
+    const providerName =
+      existingDocument?.providerName ||
+      expense.provider ||
+      profile?.providerName ||
+      profile?.provider?.name;
+    const detectedProvider = providerName ? providers[providerName] : undefined;
+    const expenseCustomer: CustomerProfile = {
+      customerNumber: expense.customerNumber,
+      contractNumber: expense.contractNumber,
+      invoiceNumber: expense.invoiceNumber,
+      phone: expense.phone
+    };
+    const customer = mergeWithoutEmptyOverwrite<CustomerProfile>(
+      existingDocument?.customer,
+      detectedParties?.customer,
+      expenseCustomer,
+      profile?.customer
+    );
+    const provider = mergeWithoutEmptyOverwrite<ProviderProfile>(
+      existingDocument?.provider,
+      detectedProvider,
+      profile?.provider,
+      providerName ? { name: providerName } : undefined
+    );
+
+    documents[sourceDocumentId] = {
+      documentId: existingDocument?.documentId || profile?.documentId || sourceDocumentId,
+      fileName: existingDocument?.fileName || expense.sourceDocumentName || profile?.fileName,
+      documentType: existingDocument?.documentType || expense.documentType || profile?.documentType,
+      providerName,
+      subscriptionType: existingDocument?.subscriptionType || profile?.subscriptionType,
+      invoiceAmount: existingDocument?.invoiceAmount || profile?.invoiceAmount,
+      customer: Object.values(customer).some(Boolean) ? customer : undefined,
+      provider: Object.values(provider).some(Boolean) ? provider : undefined
+    };
+
+    if (providerName && provider.name) {
+      providers[providerName] = mergeWithoutEmptyOverwrite<ProviderProfile>(
+        providers[providerName],
+        provider
+      );
+    }
+  }
+
+  return {
+    ...detectedParties,
+    customer: detectedParties?.customer,
+    providers,
+    documents
   };
 }
 
@@ -332,9 +706,19 @@ export function attachDocumentProfileToExpense(
 
   if (!profile) return expense;
 
-  const finalProvider = expense.provider && !isGenericProvider(expense.provider)
-    ? expense.provider
-    : (profile.providerName || expense.provider);
+  const finalProvider = pickCommercialProvider(
+    profile.providerName,
+    profile.provider?.name,
+    expense.provider && !isGenericProvider(expense.provider) ? expense.provider : undefined,
+    expense.provider
+  );
+  const inferredCategory = inferExpenseCategoryFromDocumentType(profile.documentType);
+  const inferredSubcategory = inferExpenseSubcategoryFromDocumentType(profile.documentType);
+  const monthlyAmount = profile.invoiceAmount ?? expense.monthlyAmount;
+  const safeMonthlyAmount =
+    typeof monthlyAmount === "number" && Number.isFinite(monthlyAmount)
+      ? monthlyAmount
+      : 0;
 
   return {
     ...expense,
@@ -346,9 +730,15 @@ export function attachDocumentProfileToExpense(
     contractNumber: expense.contractNumber ?? profile.customer?.contractNumber,
     invoiceNumber: expense.invoiceNumber ?? profile.customer?.invoiceNumber,
     phone: expense.phone ?? profile.customer?.phone,
-    monthlyAmount: profile.invoiceAmount ?? expense.monthlyAmount,
-    yearlyAmount: (profile.invoiceAmount ?? expense.monthlyAmount) * 12,
-    category: expense.category ?? inferExpenseCategoryFromDocumentType(profile.documentType),
-    subcategory: expense.subcategory ?? inferExpenseSubcategoryFromDocumentType(profile.documentType)
+    monthlyAmount: safeMonthlyAmount,
+    yearlyAmount: safeMonthlyAmount * 12,
+    category:
+      !expense.category || expense.category === ExpenseCategory.OTHER
+        ? inferredCategory
+        : expense.category,
+    subcategory:
+      !expense.subcategory || expense.subcategory === ExpenseSubcategory.OTHER
+        ? inferredSubcategory
+        : expense.subcategory
   };
 }

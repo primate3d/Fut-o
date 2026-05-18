@@ -32,6 +32,7 @@ import {
 import { expenseCategoryLabels } from "@/lib/expense-summary";
 import { getProviderBranding } from "@/lib/provider-branding";
 import { formatCurrency } from "@/lib/utils";
+import { getSelectedAlternativeOffer } from "@/features/recommendations/selected-offer";
 import type { GeneratedLetter, LetterPersonalization, MockAnalysis } from "@/types";
 import { generateLettersFromAnalysis, renderLetter } from "./service";
 
@@ -140,6 +141,18 @@ function getLetterTypeLabel(type: GeneratedLetter["type"]) {
   return labels[type];
 }
 
+function getLetterOfferLabel(letter: GeneratedLetter) {
+  return [
+    letter.offerProvider,
+    letter.offerName,
+    typeof letter.offerMonthlyPrice === "number"
+      ? `${formatCurrency(letter.offerMonthlyPrice)} / mois`
+      : undefined
+  ]
+    .filter(Boolean)
+    .join(" - ");
+}
+
 function downloadTextFile(fileName: string, content: string) {
   const blob = new Blob([content], { type: "text/plain;charset=utf-8" });
   const url = URL.createObjectURL(blob);
@@ -195,7 +208,7 @@ export function LettersPanel() {
             currentValue
           )
         }));
-        setLetters(generateLettersFromAnalysis(newAnalysis));
+        setLetters(generateLettersFromAnalysis(newAnalysis, getSelectedAlternativeOffer()));
         setServiceMessage("Analyse IA terminée.");
       } else {
         setServiceMessage("Erreur lors de la relance de l'analyse.");
@@ -219,7 +232,7 @@ export function LettersPanel() {
           currentValue
         )
       }));
-      setLetters(generateLettersFromAnalysis(nextAnalysis));
+      setLetters(generateLettersFromAnalysis(nextAnalysis, getSelectedAlternativeOffer()));
     }
 
     if (storedAnalysis && hasUsableStoredAnalysis) {
@@ -417,7 +430,7 @@ export function LettersPanel() {
                   </p>
                   {letter.offerName ? (
                     <p className="mt-2 text-sm font-medium text-sage-800">
-                      Offre cible : {letter.offerName}
+                      Offre cible : {getLetterOfferLabel(letter)}
                     </p>
                   ) : null}
                 </div>

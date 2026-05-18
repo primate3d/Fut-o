@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import {
   AlertTriangle,
   ExternalLink,
@@ -17,6 +18,11 @@ import { EmptyState } from "@/components/ui/EmptyState";
 import { ProviderLogo } from "@/components/ui/ProviderLogo";
 import { StatCard } from "@/components/ui/StatCard";
 import type { AlternativeOffer } from "@/features/recommendations/service";
+import {
+  getSelectedAlternativeOffer,
+  storeSelectedAlternativeOffer,
+  type SelectedAlternativeOffer
+} from "@/features/recommendations/selected-offer";
 import {
   getStoredUploadedDocuments,
   getStoredUploadedDocumentsServer
@@ -36,12 +42,36 @@ import {
   storeMockAnalysis
 } from "./storage";
 
+function hasUsableAmounts(analysis: MockAnalysis | null) {
+  return Boolean(
+    analysis &&
+      (analysis.totalMonthlyAmount > 0 ||
+        analysis.expenses.some((expense) => {
+          const monthlyAmount = Number(expense.monthlyAmount);
+          const yearlyAmount = Number(expense.yearlyAmount);
+          return (
+            (Number.isFinite(monthlyAmount) && monthlyAmount > 0) ||
+            (Number.isFinite(yearlyAmount) && yearlyAmount > 0)
+          );
+        }))
+  );
+}
+
 export function ResultsPanel() {
+  const router = useRouter();
   const [analysis, setAnalysis] = useState<MockAnalysis | null>(null);
   const [alternatives, setAlternatives] = useState<AlternativeOffer[]>([]);
   const [isLoadingAlternatives, setIsLoadingAlternatives] = useState(false);
   const [alternativesUpdatedAt, setAlternativesUpdatedAt] = useState<string | null>(null);
+  const [selectedOffer, setSelectedOffer] = useState<SelectedAlternativeOffer | null>(null);
   const [serviceMessage, setServiceMessage] = useState<string | null>(null);
+
+  function handleSelectOffer(offer: AlternativeOffer) {
+    storeSelectedAlternativeOffer(offer);
+    setSelectedOffer(getSelectedAlternativeOffer());
+    setServiceMessage("Offre retenue pour les courriers et le rapport.");
+    router.push("/courriers");
+  }
 
   async function loadAlternatives(analysisToLoad: MockAnalysis) {
     setIsLoadingAlternatives(true);
@@ -77,13 +107,17 @@ export function ResultsPanel() {
   }
 
   useEffect(() => {
+    setSelectedOffer(getSelectedAlternativeOffer());
+
     const storedAnalysis = getStoredMockAnalysis();
     const documents = getStoredUploadedDocuments();
     const hasCurrentAnalysis = isAnalysisForDocuments(storedAnalysis, documents);
+    const hasUsableCurrentAnalysis =
+      hasCurrentAnalysis && hasUsableAmounts(storedAnalysis);
 
-    setAnalysis(hasCurrentAnalysis ? storedAnalysis : null);
+    setAnalysis(hasUsableCurrentAnalysis ? storedAnalysis : null);
 
-    if (storedAnalysis && hasCurrentAnalysis) {
+    if (storedAnalysis && hasUsableCurrentAnalysis) {
       void loadAlternatives(storedAnalysis);
     }
 
@@ -91,7 +125,11 @@ export function ResultsPanel() {
       const serverDocuments = await getStoredUploadedDocumentsServer();
       const serverAnalysis = await getStoredAnalysisServer();
 
-      if (isAnalysisForDocuments(serverAnalysis, serverDocuments) && serverAnalysis) {
+      if (
+        isAnalysisForDocuments(serverAnalysis, serverDocuments) &&
+        hasUsableAmounts(serverAnalysis) &&
+        serverAnalysis
+      ) {
         storeMockAnalysis(serverAnalysis);
         setAnalysis(serverAnalysis);
         void loadAlternatives(serverAnalysis);
@@ -174,6 +212,35 @@ export function ResultsPanel() {
           value={formatCurrency(analysis.yearlyPotentialSavings)}
         />
       </div>
+
+      {selectedOffer ? (
+        <Card className="border-sage-200 bg-sage-50">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            <div>
+              <Badge tone="blue">Offre retenue pour comparaison</Badge>
+              <h2 className="mt-3 text-lg font-semibold text-navy-900">
+                {selectedOffer.provider} - {selectedOffer.name}
+              </h2>
+              <p className="mt-1 text-sm text-slate-600">
+                Cette offre sera reprise dans les courriers et le rapport.
+              </p>
+              <div className="mt-3">
+                <Button href="/courriers" variant="secondary">
+                  Préparer le courrier avec cette offre
+                </Button>
+              </div>
+            </div>
+            <div className="text-left sm:text-right">
+              <p className="font-semibold text-navy-900">
+                {formatCurrency(selectedOffer.monthlyPrice)} / mois
+              </p>
+              <p className="text-sm font-semibold text-sage-700">
+                {formatCurrency(selectedOffer.estimatedYearlySaving)} / an estimés
+              </p>
+            </div>
+          </div>
+        </Card>
+      ) : null}
 
       <div className="grid gap-4 lg:grid-cols-2">
         <Card>
@@ -351,9 +418,21 @@ export function ResultsPanel() {
             </div>
           ) : alternatives.length > 0 ? (
             alternatives.map((offer) => (
-              <div className="rounded-lg border border-navy-100 p-4" key={offer.id}>
+              <div
+                className={
+                  selectedOffer?.id === offer.id
+                    ? "rounded-lg border border-sage-400 bg-sage-50 p-4"
+                    : "rounded-lg border border-navy-100 p-4"
+                }
+                key={offer.id}
+              >
                 <div className="flex flex-wrap items-start justify-between gap-3">
-                  <Badge tone="green">{expenseCategoryLabels[offer.category]}</Badge>
+                  <div className="flex flex-wrap gap-2">
+                    <Badge tone="green">{expenseCategoryLabels[offer.category]}</Badge>
+                    {selectedOffer?.id === offer.id ? (
+                      <Badge tone="blue">Offre choisie pour le courrier et le rapport</Badge>
+                    ) : null}
+                  </div>
                   <p className="font-semibold text-sage-700">
                     {formatCurrency(offer.estimatedYearlySaving)} / an
                   </p>
@@ -373,14 +452,19 @@ export function ResultsPanel() {
                 <p className="mt-2 text-sm font-medium text-navy-900">
                   {offer.action}
                 </p>
-                <a
-                  className="mt-4 inline-flex min-h-10 items-center justify-center gap-2 rounded-lg border border-sage-200 bg-white px-4 py-2 text-sm font-semibold text-sage-800 transition hover:bg-sage-50"
-                  href={offer.url}
-                  rel="noopener noreferrer"
-                  target="_blank"
-                >
-                  Voir l'offre <ExternalLink size={15} />
-                </a>
+                <div className="mt-4 flex flex-wrap gap-2">
+                  <Button onClick={() => handleSelectOffer(offer)} type="button" variant="secondary">
+                    Choisir pour mon courrier et mon rapport
+                  </Button>
+                  <a
+                    className="inline-flex min-h-10 items-center justify-center gap-2 rounded-lg border border-sage-200 bg-white px-4 py-2 text-sm font-semibold text-sage-800 transition hover:bg-sage-50"
+                    href={offer.url}
+                    rel="noopener noreferrer"
+                    target="_blank"
+                  >
+                    Voir l'offre <ExternalLink size={15} />
+                  </a>
+                </div>
               </div>
             ))
           ) : (

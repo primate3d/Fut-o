@@ -1,6 +1,7 @@
 import { jsPDF } from "jspdf";
 import type { GeneratedLetter, MockAnalysis } from "@/types";
 import type { AlternativeOffer } from "@/features/recommendations/service";
+import type { SelectedAlternativeOffer } from "@/features/recommendations/selected-offer";
 import { expenseCategoryLabels } from "@/lib/expense-summary";
 import { formatCurrency } from "@/lib/utils";
 
@@ -22,10 +23,44 @@ async function loadImageAsDataUrl(src: string) {
   });
 }
 
+function getLetterTypeLabel(type: GeneratedLetter["type"]) {
+  const labels: Record<GeneratedLetter["type"], string> = {
+    subscription_cancellation: "Résiliation",
+    price_negotiation: "Négociation",
+    provider_followup: "Relance",
+    offer_change: "Changement d'offre",
+    comparison_report: "Comparaison"
+  };
+
+  return labels[type];
+}
+
+function truncateText(value: unknown, maxLength: number, fallback = "") {
+  const text = typeof value === "string" && value.trim().length > 0 ? value : fallback;
+  return text.substring(0, maxLength);
+}
+
+function getSyntheticPreparedLetters(letters: GeneratedLetter[], maxItems = 5) {
+  const seen = new Set<string>();
+  const uniqueLetters = letters.filter((letter) => {
+    const key = `${letter.type}-${letter.category}-${letter.provider}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+
+  return {
+    displayedLetters: uniqueLetters.slice(0, maxItems),
+    hiddenCount: Math.max(0, letters.length - maxItems),
+    totalCount: letters.length
+  };
+}
+
 export async function generatePdfReport(
   analysis: MockAnalysis,
   _alternatives: AlternativeOffer[] = [],
-  _letters: GeneratedLetter[] = []
+  letters: GeneratedLetter[] = [],
+  selectedOffer?: SelectedAlternativeOffer | null
 ): Promise<void> {
   const doc = new jsPDF({
     orientation: "portrait",
@@ -91,10 +126,51 @@ export async function generatePdfReport(
 
   y += 50;
 
+  if (selectedOffer) {
+    doc.setTextColor(navy[0], navy[1], navy[2]);
+    doc.setFontSize(16);
+    doc.setFont("helvetica", "bold");
+    doc.text("2. Offre retenue pour comparaison", 20, y);
+
+    y += 10;
+    doc.setFillColor(lightSage[0], lightSage[1], lightSage[2]);
+    doc.roundedRect(20, y, 170, 42, 3, 3, "F");
+    doc.setFontSize(10);
+    doc.setTextColor(navy[0], navy[1], navy[2]);
+    doc.setFont("helvetica", "bold");
+    doc.text(
+      truncateText(`${selectedOffer.provider ?? "Offre"} - ${selectedOffer.name ?? "retenue"}`, 75),
+      28,
+      y + 9
+    );
+    doc.setFont("helvetica", "normal");
+    doc.text(`Prix mensuel: ${formatCurrency(selectedOffer.monthlyPrice)}`, 28, y + 18);
+    doc.text(
+      `Economie estimee: ${formatCurrency(selectedOffer.estimatedYearlySaving)} / an`,
+      100,
+      y + 18
+    );
+    doc.text(
+      `Soit environ ${formatCurrency(selectedOffer.estimatedYearlySaving / 12)} / mois`,
+      100,
+      y + 26
+    );
+    doc.text(
+      "Cette estimation permet de mesurer le gain potentiel par rapport au contrat actuel.",
+      28,
+      y + 34
+    );
+    if (selectedOffer.url) {
+      doc.text(truncateText(`Lien: ${selectedOffer.url}`, 95), 28, y + 40);
+    }
+
+    y += 55;
+  }
+
   doc.setTextColor(navy[0], navy[1], navy[2]);
   doc.setFontSize(16);
   doc.setFont("helvetica", "bold");
-  doc.text("2. Postes retrouvés", 20, y);
+  doc.text(selectedOffer ? "3. Postes retrouvés" : "2. Postes retrouvés", 20, y);
 
   y += 10;
   doc.setFontSize(10);
@@ -114,7 +190,7 @@ export async function generatePdfReport(
       doc.addPage();
       y = 20;
     }
-    doc.text(expense.label.substring(0, 30), 25, y);
+    doc.text(truncateText(expense.label, 30, "Dépense"), 25, y);
     doc.text(expenseCategoryLabels[expense.category] || expense.category, 82, y);
     doc.text(formatCurrency(expense.monthlyAmount), 140, y);
     doc.text(formatCurrency(expense.yearlyAmount), 170, y);
@@ -131,7 +207,7 @@ export async function generatePdfReport(
   doc.setTextColor(navy[0], navy[1], navy[2]);
   doc.setFontSize(16);
   doc.setFont("helvetica", "bold");
-  doc.text("3. Recommandations prioritaires", 20, y);
+  doc.text(selectedOffer ? "4. Recommandations prioritaires" : "3. Recommandations prioritaires", 20, y);
 
   y += 10;
   analysis.recommendations.slice(0, 5).forEach((recommendation) => {
@@ -166,6 +242,69 @@ export async function generatePdfReport(
     y += 30;
   });
 
+  const preparedLettersSummary = getSyntheticPreparedLetters(letters);
+
+  if (preparedLettersSummary.totalCount > 0) {
+    y += 8;
+    if (y > 220) {
+      doc.addPage();
+      y = 20;
+    }
+
+    doc.setTextColor(navy[0], navy[1], navy[2]);
+    doc.setFontSize(16);
+    doc.setFont("helvetica", "bold");
+    doc.text("Courriers préparés", 20, y);
+
+    y += 10;
+    doc.setFontSize(10);
+    doc.setFont("helvetica", "normal");
+    doc.setTextColor(80, 80, 80);
+    doc.text(`${preparedLettersSummary.totalCount} démarches prêtes à utiliser.`, 25, y);
+    y += 8;
+
+    const preparedAt = new Date(analysis.generatedAt).toLocaleDateString("fr-FR");
+    preparedLettersSummary.displayedLetters.forEach((letter) => {
+      if (y > 265) {
+        doc.addPage();
+        y = 20;
+      }
+
+      doc.setFontSize(10);
+      doc.setFont("helvetica", "bold");
+      doc.setTextColor(navy[0], navy[1], navy[2]);
+      doc.text(
+        truncateText(`• ${getLetterTypeLabel(letter.type)} - ${letter.title ?? "Démarche"}`, 90),
+        25,
+        y
+      );
+      y += 6;
+      doc.setFont("helvetica", "normal");
+      doc.setTextColor(80, 80, 80);
+      doc.text(
+        truncateText(
+          `${expenseCategoryLabels[letter.category] || letter.category || "Catégorie"} - ${
+            letter.provider || "Fournisseur"
+          } - Préparée le ${preparedAt}`,
+          100
+        ),
+        30,
+        y
+      );
+      y += 9;
+    });
+
+    if (preparedLettersSummary.hiddenCount > 0) {
+      doc.setFont("helvetica", "normal");
+      doc.setTextColor(80, 80, 80);
+      doc.text(
+        `+ ${preparedLettersSummary.hiddenCount} autres courriers disponibles dans l'espace Courriers`,
+        25,
+        y
+      );
+    }
+  }
+
   const pageCount = (doc as JsPdfWithPages).internal.getNumberOfPages();
   for (let i = 1; i <= pageCount; i += 1) {
     doc.setPage(i);
@@ -179,5 +318,5 @@ export async function generatePdfReport(
     doc.text(`Page ${i} / ${pageCount}`, 180, 285);
   }
 
-  doc.save(`Rapport_Futeo_${analysis.id.substring(0, 8)}.pdf`);
+  doc.save(`Rapport_Futeo_${truncateText(analysis.id, 8, "audit")}.pdf`);
 }

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { findKeyByCode, getAnalysisByKey, saveAnalysis, saveKey, deleteAnalysisByKey } from "@/lib/server/db";
 import { analyzeDocumentsWithAI } from "@/features/analysis/ai-service";
+import { createAdminAccessKey, isAdminAccessCode } from "@/features/billing/access-keys";
 import { logger, withLatency } from "@/lib/server/logger";
 import { extractTextFromDocument } from "@/lib/server/ocr";
 import { storage } from "@/lib/server/storage";
@@ -37,17 +38,17 @@ function isNonEmptyAnalysis(analysis: MockAnalysis | null) {
     return false;
   }
 
-  const hasExtractedText = analysis.documents.some((document) => {
-    const extractedText = "extractedText" in document ? document.extractedText : undefined;
-    return typeof extractedText === "string" && extractedText.trim().length > 0;
+  const hasExpenses = analysis.expenses.some((expense) => {
+    const monthlyAmount = Number(expense.monthlyAmount);
+    const yearlyAmount = Number(expense.yearlyAmount);
+    return (
+      (Number.isFinite(monthlyAmount) && monthlyAmount > 0) ||
+      (Number.isFinite(yearlyAmount) && yearlyAmount > 0)
+    );
   });
-  const hasExpenses = analysis.expenses.length > 0;
   const hasMonthlyAmount = analysis.totalMonthlyAmount > 0;
-  const hasUsefulDetectedDocument = Object.values(analysis.detectedParties?.documents ?? {}).some(
-    (document) => Boolean(document.invoiceAmount || document.customer)
-  );
 
-  return hasExtractedText || hasExpenses || hasMonthlyAmount || hasUsefulDetectedDocument;
+  return hasExpenses || hasMonthlyAmount;
 }
 
 function getPhysicalFileName(keyCode: string, document: UploadedDocument) {
@@ -79,7 +80,9 @@ export async function POST(request: Request) {
     }
 
     // 1. Validation de la clé
-    const key = await findKeyByCode(code);
+    const key =
+      (await findKeyByCode(code)) ??
+      (isAdminAccessCode(code) ? createAdminAccessKey() : undefined);
     if (!key) {
       return NextResponse.json({ error: "Clé invalide" }, { status: 403 });
     }
@@ -206,6 +209,21 @@ export async function POST(request: Request) {
       return analyzeDocumentsWithAI(documentsWithContent, code);
     });
 
+    logger.info("Diagnostic analyse après IA", {
+      service: "Analysis",
+      action: "analysis_after_ai",
+      keyCode: code,
+      metadata: {
+        expensesCount: analysis.expenses.length,
+        documents: Object.values(analysis.detectedParties?.documents ?? {}).map((document) => ({
+          documentId: document.documentId,
+          providerName: document.providerName,
+          invoiceAmount: document.invoiceAmount,
+          documentType: document.documentType
+        }))
+      }
+    });
+
     if (!isNonEmptyAnalysis(analysis)) {
       logger.error("Analyse vide non sauvegardée", {
         service: "Analysis",
@@ -230,8 +248,13 @@ export async function POST(request: Request) {
     await saveAnalysis(code, analysis);
 
     // 5. Décrémenter le quota
-    const updatedKey = { ...key, usesRemaining: key.usesRemaining - 1 };
-    await saveKey(updatedKey);
+    const updatedKey = isAdminAccessCode(key.code)
+      ? key
+      : { ...key, usesRemaining: key.usesRemaining - 1 };
+
+    if (!isAdminAccessCode(key.code)) {
+      await saveKey(updatedKey);
+    }
 
     logger.info("Analyse IA terminée avec succès", {
       service: "Analysis",
@@ -284,7 +307,9 @@ export async function DELETE(request: Request) {
     return NextResponse.json({ error: "Code manquant" }, { status: 400 });
   }
 
-  const key = await findKeyByCode(code);
+  const key =
+    (await findKeyByCode(code)) ??
+    (isAdminAccessCode(code) ? createAdminAccessKey() : undefined);
   if (!key) {
     return NextResponse.json({ error: "Clé invalide" }, { status: 403 });
   }
