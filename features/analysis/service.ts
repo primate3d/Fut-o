@@ -111,6 +111,22 @@ const templatesByDocumentType: Record<UploadedDocument["documentType"], ExpenseT
       }
     }
   ],
+  two_wheeler_insurance: [
+    {
+      label: "Assurance deux roues",
+      provider: "Assureur deux roues",
+      category: ExpenseCategory.INSURANCE,
+      subcategory: ExpenseSubcategory.TWO_WHEELER_INSURANCE,
+      monthlyAmount: 18,
+      anomaly: {
+        title: "Assurance deux roues a verifier",
+        description:
+          "Ce poste est pris en compte, mais les offres deux roues doivent etre comparees avec les garanties et franchises reelles.",
+        severity: "medium",
+        category: ExpenseCategory.INSURANCE
+      }
+    }
+  ],
   home_insurance: [
     {
       label: "Assurance habitation",

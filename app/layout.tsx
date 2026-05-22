@@ -10,6 +10,9 @@ const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || "https://futeo.fr";
 
 export const metadata: Metadata = {
   metadataBase: new URL(baseUrl),
+  verification: {
+    google: "yMo2Nl2YDactgaNpw-3WiNq4cyxKcWT55Jz5IIL2g2I"
+  },
   title: {
     default: "Futéo | Comparer ses contrats et réduire ses dépenses",
     template: "%s | Futéo"

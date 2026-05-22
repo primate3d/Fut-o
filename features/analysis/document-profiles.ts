@@ -653,6 +653,7 @@ function getSubscriptionType(documentType: UploadedDocumentType) {
     gas_invoice: "Contrat gaz",
     internet_invoice: "Box internet",
     mobile_invoice: "Forfait mobile",
+    two_wheeler_insurance: "Assurance deux roues",
     car_insurance: "Assurance auto",
     home_insurance: "Assurance habitation",
     health_insurance: "Assurance sante",
