@@ -32,6 +32,8 @@ import { expenseCategoryLabels } from "@/lib/expense-summary";
 import { getProviderBranding } from "@/lib/provider-branding";
 import { formatCurrency } from "@/lib/utils";
 import { getSelectedAlternativeOffer } from "@/features/recommendations/selected-offer";
+import { addAuditActionLog } from "@/features/privacy/action-log";
+import { purgeSourceDocuments } from "@/features/privacy/lifecycle";
 import type { CustomerProfile, GeneratedLetter, LetterPersonalization, MockAnalysis } from "@/types";
 import { generateLettersFromAnalysis, renderLetter } from "./service";
 
@@ -235,7 +237,50 @@ export function LettersPanel() {
   const [copyMessage, setCopyMessage] = useState<string | null>(null);
   const [letters, setLetters] = useState<GeneratedLetter[]>([]);
   const [serviceMessage, setServiceMessage] = useState<string | null>(null);
+  const [sourcePurgeMessage, setSourcePurgeMessage] = useState<string | null>(null);
   const [isReloading, setIsReloading] = useState(false);
+
+  async function purgeSourcesAfterDownload() {
+    const purged = await purgeSourceDocuments();
+    if (purged) {
+      setSourcePurgeMessage(
+        "Sécurité : vos documents sources ont été définitivement effacés de nos serveurs. Pour toute modification ou nouvelle démarche, il vous suffit de réimporter votre document."
+      );
+    } else {
+      setServiceMessage(
+        "Le téléchargement est prêt, mais la suppression automatique du document source n'a pas pu être confirmée."
+      );
+    }
+  }
+
+  async function downloadLetterPdf(letter: GeneratedLetter, content: string) {
+    generatePDF(
+      `${letter.provider}-${letter.type}.pdf`.replaceAll(" ", "-"),
+      letter.title,
+      content
+    );
+    addAuditActionLog({
+      type: "letter_downloaded",
+      label: `Courrier généré : ${letter.title}`,
+      documentName: analysis?.documents.map((document) => document.fileName).join(", "),
+      provider: letter.provider
+    });
+    await purgeSourcesAfterDownload();
+  }
+
+  async function downloadLetterText(letter: GeneratedLetter, content: string) {
+    downloadTextFile(
+      `${letter.provider}-${letter.type}.txt`.replaceAll(" ", "-"),
+      content
+    );
+    addAuditActionLog({
+      type: "letter_downloaded",
+      label: `Courrier généré : ${letter.title}`,
+      documentName: analysis?.documents.map((document) => document.fileName).join(", "),
+      provider: letter.provider
+    });
+    await purgeSourcesAfterDownload();
+  }
 
   async function handleForceAnalysis() {
     setIsReloading(true);
@@ -407,6 +452,12 @@ export function LettersPanel() {
         </div>
       ) : null}
 
+      {sourcePurgeMessage ? (
+        <div className="rounded-xl border border-sage-200 bg-sage-50 px-4 py-3 text-sm font-medium leading-6 text-sage-900">
+          {sourcePurgeMessage}
+        </div>
+      ) : null}
+
       {!hasDetectedCustomer ? (
         <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm leading-6 text-amber-900 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <p>
@@ -499,11 +550,7 @@ export function LettersPanel() {
                 </Button>
                 <Button
                   onClick={() =>
-                    generatePDF(
-                      `${letter.provider}-${letter.type}.pdf`.replaceAll(" ", "-"),
-                      letter.title,
-                      renderLetter(letter, personalization)
-                    )
+                    void downloadLetterPdf(letter, renderLetter(letter, personalization))
                   }
                   type="button"
                   variant="ghost"
@@ -588,11 +635,7 @@ export function LettersPanel() {
                   </Button>
                   <Button
                     onClick={() =>
-                      generatePDF(
-                        `${selectedLetter.provider}-${selectedLetter.type}.pdf`.replaceAll(" ", "-"),
-                        selectedLetter.title,
-                        renderedLetter
-                      )
+                      void downloadLetterPdf(selectedLetter, renderedLetter)
                     }
                     type="button"
                     variant="ghost"
@@ -610,13 +653,7 @@ export function LettersPanel() {
                   </Button>
                   <Button
                     onClick={() =>
-                      downloadTextFile(
-                        `${selectedLetter.provider}-${selectedLetter.type}.txt`.replaceAll(
-                          " ",
-                          "-"
-                        ),
-                        renderedLetter
-                      )
+                      void downloadLetterText(selectedLetter, renderedLetter)
                     }
                     type="button"
                     variant="ghost"

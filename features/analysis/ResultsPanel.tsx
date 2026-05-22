@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import {
   AlertTriangle,
@@ -25,8 +25,14 @@ import {
   type SelectedAlternativeOffer
 } from "@/features/recommendations/selected-offer";
 import {
+  documentTypeOptions,
+  getCategoryForDocumentType,
+  getDocumentTypeLabel
+} from "@/features/upload/document-types";
+import {
   getStoredUploadedDocuments,
-  getStoredUploadedDocumentsServer
+  getStoredUploadedDocumentsServer,
+  storeUploadedDocuments
 } from "@/features/upload/storage";
 import {
   expenseCategoryLabels,
@@ -35,7 +41,13 @@ import {
 } from "@/lib/expense-summary";
 import { getProviderBranding } from "@/lib/provider-branding";
 import { formatCurrency } from "@/lib/utils";
-import type { MockAnalysis } from "@/types";
+import {
+  ExpenseSubcategory,
+  type DocumentUserCorrections,
+  type MockAnalysis,
+  type UploadedDocument,
+  type UploadedDocumentType
+} from "@/types";
 import {
   getStoredAnalysisServer,
   getStoredMockAnalysis,
@@ -152,6 +164,73 @@ function formatFrequencyWarning(expense: MockAnalysis["expenses"][number]) {
   return `Fréquence à confirmer : montant détecté ${formatCurrency(expense.yearlyAmount)}.`;
 }
 
+type ManualEntryForm = {
+  provider: string;
+  documentType: UploadedDocumentType;
+  amount: string;
+  frequency: NonNullable<DocumentUserCorrections["frequency"]>;
+  clientFirstName: string;
+  clientLastName: string;
+  clientAddress: string;
+  providerAddress: string;
+};
+
+const manualInputClass =
+  "mt-2 w-full rounded-lg border border-navy-100 bg-white px-3 py-2 text-sm font-medium text-navy-900 outline-none transition focus:border-sage-400 focus:ring-2 focus:ring-sage-200";
+
+const manualFrequencyOptions: Array<{
+  value: NonNullable<DocumentUserCorrections["frequency"]>;
+  label: string;
+}> = [
+  { value: "monthly", label: "Mensuel" },
+  { value: "bimonthly", label: "Bimestriel" },
+  { value: "quarterly", label: "Trimestriel" },
+  { value: "yearly", label: "Annuel" },
+  { value: "one_time", label: "Ponctuel" },
+  { value: "schedule", label: "Echeancier" }
+];
+
+function getManualSubcategory(documentType: UploadedDocumentType) {
+  if (documentType === "electricity_invoice") return ExpenseSubcategory.ELECTRICITY;
+  if (documentType === "gas_invoice") return ExpenseSubcategory.GAS;
+  if (documentType === "internet_invoice") return ExpenseSubcategory.INTERNET;
+  if (documentType === "mobile_invoice") return ExpenseSubcategory.MOBILE;
+  if (documentType === "home_insurance") return ExpenseSubcategory.HOME_INSURANCE;
+  if (documentType === "health_insurance") return ExpenseSubcategory.MUTUAL_HEALTH;
+  if (documentType === "bank_statement" || documentType === "credit") {
+    return ExpenseSubcategory.BANK_FEES;
+  }
+
+  return ExpenseSubcategory.OTHER;
+}
+
+function getManualAmounts(
+  amount: number,
+  frequency: NonNullable<DocumentUserCorrections["frequency"]>
+) {
+  if (frequency === "bimonthly") {
+    return { monthlyAmount: amount / 2, yearlyAmount: amount * 6 };
+  }
+
+  if (frequency === "quarterly") {
+    return { monthlyAmount: amount / 3, yearlyAmount: amount * 4 };
+  }
+
+  if (frequency === "yearly" || frequency === "one_time") {
+    return { monthlyAmount: amount / 12, yearlyAmount: amount };
+  }
+
+  return { monthlyAmount: amount, yearlyAmount: amount * 12 };
+}
+
+function getManualRecurrence(
+  frequency: NonNullable<DocumentUserCorrections["frequency"]>
+): "monthly" | "yearly" | "one_time" {
+  if (frequency === "yearly") return "yearly";
+  if (frequency === "one_time") return "one_time";
+  return "monthly";
+}
+
 export function ResultsPanel() {
   const router = useRouter();
   const [analysis, setAnalysis] = useState<MockAnalysis | null>(null);
@@ -160,6 +239,140 @@ export function ResultsPanel() {
   const [alternativesUpdatedAt, setAlternativesUpdatedAt] = useState<string | null>(null);
   const [selectedOffer, setSelectedOffer] = useState<SelectedAlternativeOffer | null>(null);
   const [serviceMessage, setServiceMessage] = useState<string | null>(null);
+  const [manualForm, setManualForm] = useState<ManualEntryForm>({
+    provider: "",
+    documentType: "home_insurance",
+    amount: "",
+    frequency: "monthly",
+    clientFirstName: "",
+    clientLastName: "",
+    clientAddress: "",
+    providerAddress: ""
+  });
+  const [manualFormMessage, setManualFormMessage] = useState<string | null>(null);
+
+  function updateManualForm<K extends keyof ManualEntryForm>(
+    field: K,
+    value: ManualEntryForm[K]
+  ) {
+    setManualForm((currentForm) => ({
+      ...currentForm,
+      [field]: value
+    }));
+  }
+
+  function handleManualAnalysisSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    const provider = manualForm.provider.trim();
+    const amount = Number(manualForm.amount.replace(",", "."));
+
+    if (!provider || !Number.isFinite(amount) || amount <= 0) {
+      setManualFormMessage("Renseignez au minimum le fournisseur et un montant valide.");
+      return;
+    }
+
+    const documentId = `manual_${Date.now()}`;
+    const now = new Date().toISOString();
+    const documentType = manualForm.documentType;
+    const category = getCategoryForDocumentType(documentType);
+    const label = getDocumentTypeLabel(documentType);
+    const { monthlyAmount, yearlyAmount } = getManualAmounts(
+      amount,
+      manualForm.frequency
+    );
+    const documentName = `Saisie manuelle - ${label}`;
+    const customerFullName = [
+      manualForm.clientFirstName.trim(),
+      manualForm.clientLastName.trim()
+    ]
+      .filter(Boolean)
+      .join(" ");
+    const customerProfile =
+      customerFullName || manualForm.clientAddress.trim()
+        ? {
+            firstName: manualForm.clientFirstName.trim() || undefined,
+            lastName: manualForm.clientLastName.trim() || undefined,
+            fullName: customerFullName || undefined,
+            address: manualForm.clientAddress.trim() || undefined
+          }
+        : undefined;
+    const providerProfile = {
+      name: provider,
+      address: manualForm.providerAddress.trim() || undefined
+    };
+
+    const manualDocument: UploadedDocument = {
+      id: documentId,
+      fileName: documentName,
+      fileSize: 0,
+      mimeType: "manual/input",
+      documentType,
+      detectedCategory: category,
+      status: "ready",
+      uploadedAt: now,
+      provider,
+      userCorrections: {
+        provider,
+        documentType,
+        amount,
+        frequency: manualForm.frequency,
+        isMultiContract: true
+      }
+    };
+
+    const manualAnalysis: MockAnalysis = {
+      id: `analysis_${documentId}`,
+      generatedAt: now,
+      documents: [manualDocument],
+      detectedParties: {
+        customer: customerProfile,
+        providers: {
+          [provider]: providerProfile
+        },
+        documents: {
+          [documentId]: {
+            documentId,
+            fileName: documentName,
+            documentType,
+            providerName: provider,
+            invoiceAmount: amount,
+            customer: customerProfile,
+            provider: providerProfile
+          }
+        }
+      },
+      expenses: [
+        {
+          id: `expense_${documentId}`,
+          label,
+          provider,
+          category,
+          subcategory: getManualSubcategory(documentType),
+          isRecurring: manualForm.frequency !== "one_time",
+          monthlyAmount,
+          yearlyAmount,
+          documentType,
+          sourceDocumentId: documentId,
+          sourceDocumentName: documentName,
+          recurrence: getManualRecurrence(manualForm.frequency),
+          billingAmount: amount,
+          billingFrequency: manualForm.frequency
+        }
+      ],
+      recommendations: [],
+      anomalies: [],
+      totalMonthlyAmount: monthlyAmount,
+      totalYearlyAmount: yearlyAmount,
+      yearlyPotentialSavings: 0
+    };
+
+    storeUploadedDocuments([manualDocument]);
+    storeMockAnalysis(manualAnalysis);
+    setAnalysis(manualAnalysis);
+    setManualFormMessage("Contrat manuel ajoute. Recherche des alternatives en cours.");
+    void loadAlternatives(manualAnalysis);
+  }
 
   function handleSelectOffer(offer: AlternativeOffer) {
     storeSelectedAlternativeOffer(offer);
@@ -339,6 +552,7 @@ export function ResultsPanel() {
 
   if (!analysis || analysis.expenses.length === 0) {
     return (
+      <section className="space-y-6">
       <EmptyState
         actionHref="/importer"
         actionLabel="Ajouter mes documents"
@@ -346,6 +560,144 @@ export function ResultsPanel() {
         icon={<FileSearch size={24} />}
         title="Vos résultats apparaîtront ici"
       />
+        <Card>
+          <div className="flex flex-col gap-2">
+            <Badge tone="green">Saisie manuelle sans televersement</Badge>
+            <h2 className="text-2xl font-semibold text-navy-900">
+              Ajouter un contrat manuellement
+            </h2>
+            <p className="text-sm leading-6 text-slate-600">
+              Utilisez ce mode pour un document multi-contrats ou si vous preferez ne pas
+              televerser de fichier. Futeo analysera uniquement la ligne saisie ici.
+            </p>
+          </div>
+
+          {manualFormMessage ? (
+            <div className="mt-4 rounded-lg border border-sage-200 bg-sage-50 px-4 py-3 text-sm font-medium text-sage-900">
+              {manualFormMessage}
+            </div>
+          ) : null}
+
+          <form className="mt-5 grid gap-4" onSubmit={handleManualAnalysisSubmit}>
+            <div className="grid gap-4 md:grid-cols-3">
+              <label className="text-sm font-semibold text-navy-900">
+                Fournisseur
+                <input
+                  className={manualInputClass}
+                  onChange={(event) => updateManualForm("provider", event.target.value)}
+                  placeholder="Ex : MACIF, EDF, SFR"
+                  value={manualForm.provider}
+                />
+              </label>
+
+              <label className="text-sm font-semibold text-navy-900">
+                Type de contrat
+                <select
+                  className={manualInputClass}
+                  onChange={(event) =>
+                    updateManualForm("documentType", event.target.value as UploadedDocumentType)
+                  }
+                  value={manualForm.documentType}
+                >
+                  {documentTypeOptions.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <label className="text-sm font-semibold text-navy-900">
+                Montant
+                <input
+                  className={manualInputClass}
+                  inputMode="decimal"
+                  onChange={(event) => updateManualForm("amount", event.target.value)}
+                  placeholder="Ex : 187,80"
+                  value={manualForm.amount}
+                />
+              </label>
+            </div>
+
+            <div className="grid gap-4 md:grid-cols-3">
+              <label className="text-sm font-semibold text-navy-900">
+                Frequence
+                <select
+                  className={manualInputClass}
+                  onChange={(event) =>
+                    updateManualForm(
+                      "frequency",
+                      event.target.value as NonNullable<DocumentUserCorrections["frequency"]>
+                    )
+                  }
+                  value={manualForm.frequency}
+                >
+                  {manualFrequencyOptions.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <label className="text-sm font-semibold text-navy-900">
+                Prenom client
+                <input
+                  className={manualInputClass}
+                  onChange={(event) =>
+                    updateManualForm("clientFirstName", event.target.value)
+                  }
+                  placeholder="Optionnel"
+                  value={manualForm.clientFirstName}
+                />
+              </label>
+
+              <label className="text-sm font-semibold text-navy-900">
+                Nom client
+                <input
+                  className={manualInputClass}
+                  onChange={(event) =>
+                    updateManualForm("clientLastName", event.target.value)
+                  }
+                  placeholder="Optionnel"
+                  value={manualForm.clientLastName}
+                />
+              </label>
+            </div>
+
+            <div className="grid gap-4 md:grid-cols-2">
+              <label className="text-sm font-semibold text-navy-900">
+                Adresse client
+                <textarea
+                  className={manualInputClass}
+                  onChange={(event) => updateManualForm("clientAddress", event.target.value)}
+                  placeholder="Optionnel, utile pour les courriers"
+                  rows={3}
+                  value={manualForm.clientAddress}
+                />
+              </label>
+
+              <label className="text-sm font-semibold text-navy-900">
+                Adresse fournisseur
+                <textarea
+                  className={manualInputClass}
+                  onChange={(event) => updateManualForm("providerAddress", event.target.value)}
+                  placeholder="Optionnel, utile pour les courriers"
+                  rows={3}
+                  value={manualForm.providerAddress}
+                />
+              </label>
+            </div>
+
+            <div className="flex flex-wrap gap-3">
+              <Button type="submit">Comparer ce contrat</Button>
+              <Button href="/importer" variant="secondary">
+                Importer un document
+              </Button>
+            </div>
+          </form>
+        </Card>
+      </section>
     );
   }
 

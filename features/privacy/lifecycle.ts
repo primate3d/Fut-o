@@ -30,18 +30,22 @@ function removeAuditLocalStorageResidues() {
  * L'analyse et les courriers restent disponibles.
  */
 export async function purgeSourceDocuments() {
-  if (typeof window === "undefined") return;
+  if (typeof window === "undefined") return false;
+
+  let serverPurged = true;
 
   const activeKey = getStoredAccessKey();
   if (activeKey) {
     try {
-      await fetch("/api/documents", {
+      const response = await fetch("/api/documents", {
         method: "DELETE",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ code: activeKey.code, purge: true })
       });
+      serverPurged = response.ok;
     } catch (error) {
       console.error("Erreur purge serveur:", error);
+      serverPurged = false;
     }
   }
 
@@ -58,6 +62,8 @@ export async function purgeSourceDocuments() {
       console.error("Erreur lors de la purge des documents dans l'analyse", e);
     }
   }
+
+  return serverPurged;
 }
 
 /**

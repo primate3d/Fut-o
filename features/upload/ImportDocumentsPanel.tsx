@@ -31,7 +31,6 @@ import {
   getCategoryForDocumentType
 } from "./document-types";
 import {
-  applyDocumentCorrections,
   clearStoredDocumentCorrections,
   deleteDocumentServer,
   getStoredDocumentCorrections,
@@ -154,20 +153,6 @@ function isLikelyMultiContractInsuranceDocument(document: UploadedDocument) {
       fileName.includes("avis d'echeance") ||
       fileName.includes("sociétaire") ||
       fileName.includes("societaire"))
-  );
-}
-
-function hasUserCorrections(document: UploadedDocument) {
-  const corrections = document.userCorrections;
-  if (!corrections) return false;
-
-  return Boolean(
-    corrections.provider?.trim() ||
-      corrections.documentType ||
-      corrections.amount ||
-      corrections.frequency ||
-      corrections.isMultiContract ||
-      corrections.notes?.trim()
   );
 }
 
@@ -311,7 +296,6 @@ export function ImportDocumentsPanel() {
           : document
       )
     );
-    updateDocumentCorrection(id, { documentType });
     clearStoredAnalysis();
   }
 
@@ -349,9 +333,7 @@ export function ImportDocumentsPanel() {
   }
 
   async function launchAnalysis() {
-    const usableDocuments = applyDocumentCorrections(
-      documents.filter((document) => document.status === "ready")
-    );
+    const usableDocuments = documents.filter((document) => document.status === "ready");
 
     if (usableDocuments.length === 0 || isAnalyzing) {
       setStatusMessage("Ajoutez au moins un fichier utilisable avant de lancer l'analyse.");
@@ -407,18 +389,13 @@ export function ImportDocumentsPanel() {
       storeMockAnalysis(payload.analysis);
       router.push("/analyse");
     } catch (error) {
-      const hasCorrectedDocuments = usableDocuments.some(hasUserCorrections);
       const hasMultiContractInsurance = usableDocuments.some(
         isLikelyMultiContractInsuranceDocument
       );
 
-      if (hasCorrectedDocuments || hasMultiContractInsurance) {
+      if (hasMultiContractInsurance) {
         clearStoredAnalysis();
-        setStatusMessage(
-          hasCorrectedDocuments
-            ? "Analyse serveur nécessaire pour appliquer vos corrections."
-            : "Analyse serveur nécessaire pour ce document multi-contrats."
-        );
+        setStatusMessage("Analyse serveur nécessaire pour ce document multi-contrats.");
         console.warn("[FUTEO_ANALYSIS_BLOCKED]", error);
         return;
       }
@@ -437,6 +414,7 @@ export function ImportDocumentsPanel() {
   const usableDocumentCount = documents.filter(
     (document) => document.status === "ready"
   ).length;
+  const showImportCorrections = false;
 
   return (
     <div className="space-y-6">
@@ -455,6 +433,28 @@ export function ImportDocumentsPanel() {
           </div>
         </div>
       </div>
+
+      <Card className="border-amber-200 bg-amber-50">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+          <div>
+            <h2 className="text-lg font-semibold text-navy-900">
+              Document multi-contrats ?
+            </h2>
+            <p className="mt-2 text-sm leading-6 text-amber-900">
+              Attention : si votre document comporte plusieurs contrats, par exemple
+              un avis d'échéance assurance habitation + auto, la saisie manuelle est
+              obligatoire pour ne pas fausser l'analyse.
+            </p>
+            <p className="mt-1 text-sm leading-6 text-amber-900">
+              Vous pouvez aussi utiliser ce mode si vous préférez ne pas téléverser
+              votre document sur nos serveurs.
+            </p>
+          </div>
+          <Button href="/resultats" type="button" variant="secondary">
+            Saisie manuelle (sans téléverser)
+          </Button>
+        </div>
+      </Card>
 
       <div
         className={cn(
@@ -673,7 +673,7 @@ export function ImportDocumentsPanel() {
           )}
         </div>
 
-        {documents.some((document) => document.status === "ready") ? (
+        {showImportCorrections && documents.some((document) => document.status === "ready") ? (
           <div className="mt-6 space-y-3">
             {documents
               .filter((document) => document.status === "ready")

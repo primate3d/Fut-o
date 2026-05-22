@@ -23,6 +23,12 @@ import {
   type SelectedAlternativeOffer
 } from "@/features/recommendations/selected-offer";
 import {
+  addAuditActionLog,
+  getAuditActionLogs,
+  type AuditActionLog
+} from "@/features/privacy/action-log";
+import { purgeSourceDocuments } from "@/features/privacy/lifecycle";
+import {
   getStoredUploadedDocuments,
   getStoredUploadedDocumentsServer
 } from "@/features/upload/storage";
@@ -91,6 +97,10 @@ function getSyntheticPreparedLetters(letters: GeneratedLetter[], maxItems = 5) {
   };
 }
 
+function formatActionDate(createdAt: string) {
+  return new Date(createdAt).toLocaleDateString("fr-FR");
+}
+
 export function ReportPanel() {
   const [analysis, setAnalysis] = useState<MockAnalysis | null>(null);
   const [alternatives, setAlternatives] = useState<AlternativeOffer[]>([]);
@@ -98,8 +108,12 @@ export function ReportPanel() {
   const [recommendedLetters, setRecommendedLetters] = useState<GeneratedLetter[]>([]);
   const [isDownloading, setIsDownloading] = useState(false);
   const [serviceMessage, setServiceMessage] = useState<string | null>(null);
+  const [sourcePurgeMessage, setSourcePurgeMessage] = useState<string | null>(null);
+  const [actionLogs, setActionLogs] = useState<AuditActionLog[]>([]);
 
   useEffect(() => {
+    setActionLogs(getAuditActionLogs());
+
     const retainedOffer = getSelectedAlternativeOffer();
     setSelectedOffer(retainedOffer);
 
@@ -193,7 +207,30 @@ export function ReportPanel() {
     if (!analysis) return;
     setIsDownloading(true);
     try {
-      await generatePdfReport(analysis, alternatives, recommendedLetters, selectedOffer);
+      await generatePdfReport(
+        analysis,
+        alternatives,
+        recommendedLetters,
+        selectedOffer,
+        actionLogs
+      );
+      setActionLogs(
+        addAuditActionLog({
+          type: "report_downloaded",
+          label: "Rapport téléchargé",
+          documentName: analysis.documents.map((document) => document.fileName).join(", ")
+        })
+      );
+      const purged = await purgeSourceDocuments();
+      if (purged) {
+        setSourcePurgeMessage(
+          "Sécurité : vos documents sources ont été définitivement effacés de nos serveurs. Pour toute modification ou nouvelle démarche, il vous suffit de réimporter votre document."
+        );
+      } else {
+        setServiceMessage(
+          "Le rapport a été généré, mais la suppression automatique du document source n'a pas pu être confirmée."
+        );
+      }
     } catch (error) {
       console.error("Erreur PDF:", error);
       setServiceMessage("Le PDF n'a pas pu être généré. Vous pouvez utiliser l'impression navigateur.");
@@ -261,6 +298,12 @@ export function ReportPanel() {
       {serviceMessage ? (
         <div className="rounded-xl border border-sage-200 bg-sage-50 px-4 py-3 text-sm leading-6 text-sage-900 print:hidden">
           {serviceMessage}
+        </div>
+      ) : null}
+
+      {sourcePurgeMessage ? (
+        <div className="rounded-xl border border-sage-200 bg-sage-50 px-4 py-3 text-sm font-medium leading-6 text-sage-900 print:hidden">
+          {sourcePurgeMessage}
         </div>
       ) : null}
 
@@ -508,6 +551,34 @@ export function ReportPanel() {
             + {preparedLettersSummary.hiddenCount} autres courriers disponibles dans l'espace Courriers
           </p>
         ) : null}
+      </Card>
+
+      <Card className="print:shadow-none">
+        <h2 className="text-xl font-semibold text-navy-900">
+          Historique de vos démarches
+        </h2>
+        <p className="mt-2 text-sm leading-6 text-slate-600">
+          Les actions réalisées pendant cette session apparaissent ici pour garder
+          une trace claire des courriers et rapports générés.
+        </p>
+        <div className="mt-4 space-y-3">
+          {actionLogs.length > 0 ? (
+            actionLogs.map((action) => (
+              <div className="rounded-lg border border-navy-100 bg-white p-4" key={action.id}>
+                <p className="font-semibold text-navy-900">{action.label}</p>
+                <p className="mt-1 text-sm text-slate-500">
+                  {formatActionDate(action.createdAt)}
+                  {action.provider ? ` - ${action.provider}` : ""}
+                  {action.documentName ? ` - ${action.documentName}` : ""}
+                </p>
+              </div>
+            ))
+          ) : (
+            <p className="text-sm text-slate-600">
+              Aucun téléchargement enregistré pendant cette session.
+            </p>
+          )}
+        </div>
       </Card>
     </section>
   );

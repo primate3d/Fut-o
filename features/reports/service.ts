@@ -2,6 +2,7 @@ import { jsPDF } from "jspdf";
 import type { GeneratedLetter, MockAnalysis } from "@/types";
 import type { AlternativeOffer } from "@/features/recommendations/service";
 import type { SelectedAlternativeOffer } from "@/features/recommendations/selected-offer";
+import type { AuditActionLog } from "@/features/privacy/action-log";
 import { expenseCategoryLabels } from "@/lib/expense-summary";
 import { formatCurrency } from "@/lib/utils";
 
@@ -60,7 +61,8 @@ export async function generatePdfReport(
   analysis: MockAnalysis,
   _alternatives: AlternativeOffer[] = [],
   letters: GeneratedLetter[] = [],
-  selectedOffer?: SelectedAlternativeOffer | null
+  selectedOffer?: SelectedAlternativeOffer | null,
+  actionLogs: AuditActionLog[] = []
 ): Promise<void> {
   const doc = new jsPDF({
     orientation: "portrait",
@@ -303,6 +305,47 @@ export async function generatePdfReport(
         y
       );
     }
+  }
+
+  if (actionLogs.length > 0) {
+    y += 8;
+    if (y > 220) {
+      doc.addPage();
+      y = 20;
+    }
+
+    doc.setTextColor(navy[0], navy[1], navy[2]);
+    doc.setFontSize(16);
+    doc.setFont("helvetica", "bold");
+    doc.text("Historique de vos demarches", 20, y);
+
+    y += 10;
+    actionLogs.slice(0, 8).forEach((action) => {
+      if (y > 265) {
+        doc.addPage();
+        y = 20;
+      }
+
+      doc.setFontSize(10);
+      doc.setFont("helvetica", "bold");
+      doc.setTextColor(navy[0], navy[1], navy[2]);
+      doc.text(truncateText(action.label, 95), 25, y);
+      y += 6;
+
+      doc.setFont("helvetica", "normal");
+      doc.setTextColor(80, 80, 80);
+      doc.text(
+        truncateText(
+          `${new Date(action.createdAt).toLocaleDateString("fr-FR")}${
+            action.provider ? ` - ${action.provider}` : ""
+          }${action.documentName ? ` - ${action.documentName}` : ""}`,
+          100
+        ),
+        30,
+        y
+      );
+      y += 9;
+    });
   }
 
   const pageCount = (doc as JsPdfWithPages).internal.getNumberOfPages();
