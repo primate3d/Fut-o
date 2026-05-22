@@ -25,9 +25,9 @@ import {
   type SelectedAlternativeOffer
 } from "@/features/recommendations/selected-offer";
 import {
-  documentTypeOptions,
   getCategoryForDocumentType,
-  getDocumentTypeLabel
+  getDocumentTypeLabel,
+  visibleDocumentTypeOptions
 } from "@/features/upload/document-types";
 import {
   getStoredUploadedDocuments,
@@ -195,6 +195,9 @@ function getManualSubcategory(documentType: UploadedDocumentType) {
   if (documentType === "gas_invoice") return ExpenseSubcategory.GAS;
   if (documentType === "internet_invoice") return ExpenseSubcategory.INTERNET;
   if (documentType === "mobile_invoice") return ExpenseSubcategory.MOBILE;
+  if (documentType === "two_wheeler_insurance") {
+    return ExpenseSubcategory.TWO_WHEELER_INSURANCE;
+  }
   if (documentType === "home_insurance") return ExpenseSubcategory.HOME_INSURANCE;
   if (documentType === "health_insurance") return ExpenseSubcategory.MUTUAL_HEALTH;
   if (documentType === "bank_statement" || documentType === "credit") {
@@ -599,7 +602,7 @@ export function ResultsPanel() {
                   }
                   value={manualForm.documentType}
                 >
-                  {documentTypeOptions.map((option) => (
+                  {visibleDocumentTypeOptions.map((option) => (
                     <option key={option.value} value={option.value}>
                       {option.label}
                     </option>

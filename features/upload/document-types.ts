@@ -40,6 +40,11 @@ export const documentTypeOptions: Array<{
     category: ExpenseCategory.TELECOM
   },
   {
+    value: "two_wheeler_insurance",
+    label: "Assurance deux roues",
+    category: ExpenseCategory.INSURANCE
+  },
+  {
     value: "car_insurance",
     label: "Assurance auto",
     category: ExpenseCategory.INSURANCE
@@ -70,6 +75,16 @@ export const documentTypeOptions: Array<{
     category: ExpenseCategory.OTHER
   }
 ];
+
+export const visibleDocumentTypeOptions = documentTypeOptions.filter(
+  (option) =>
+    ![
+      "bank_statement",
+      "health_insurance",
+      "subscription",
+      "credit"
+    ].includes(option.value)
+);
 
 export function getDocumentTypeLabel(documentType: UploadedDocumentType) {
   return (

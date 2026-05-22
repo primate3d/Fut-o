@@ -55,6 +55,7 @@ export type UploadedDocumentType =
   | "gas_invoice"
   | "internet_invoice"
   | "mobile_invoice"
+  | "two_wheeler_insurance"
   | "car_insurance"
   | "home_insurance"
   | "health_insurance"
@@ -82,6 +83,7 @@ export enum ExpenseSubcategory {
   MOBILE = "MOBILE",
   INTERNET = "INTERNET",
   HOME_INSURANCE = "HOME_INSURANCE",
+  TWO_WHEELER_INSURANCE = "TWO_WHEELER_INSURANCE",
   STREAMING = "STREAMING",
   BANK_FEES = "BANK_FEES",
   RENT = "RENT",
