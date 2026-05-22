@@ -3,17 +3,14 @@ import { Logo } from "@/components/layout/Logo";
 
 const productLinks = [
   { label: "Guides", href: "/guides" },
-  { label: "Résilier une box", href: "/resilier-box-internet" },
-  { label: "Négocier internet", href: "/negocier-forfait-internet" },
-  { label: "Énergie", href: "/changer-fournisseur-energie" },
-  { label: "À propos", href: "/a-propos" },
+  { label: "A propos", href: "/a-propos" },
   { label: "FAQ", href: "/faq" },
   { label: "Contact", href: "/contact" }
 ];
 
 const legalLinks = [
-  { label: "Mentions légales", href: "/mentions-legales" },
-  { label: "Confidentialité", href: "/confidentialite" },
+  { label: "Mentions legales", href: "/mentions-legales" },
+  { label: "Confidentialite", href: "/confidentialite" },
   { label: "Cookies", href: "/cookies" },
   { label: "CGV", href: "/cgv" }
 ];
@@ -26,8 +23,14 @@ export function Footer() {
           <div className="flex items-center gap-3">
             <Logo className="h-6" variant="icon" />
             <div>
-              <p className="font-semibold text-navy-900">Futéo</p>
+              <p className="font-semibold text-navy-900">Futeo</p>
               <p className="mt-1">Service en ligne, sans abonnement.</p>
+              <a
+                className="mt-1 inline-flex font-semibold text-slate-600 hover:underline"
+                href="mailto:contact@futeo.fr"
+              >
+                contact@futeo.fr
+              </a>
             </div>
           </div>
           <div className="grid gap-4 sm:grid-cols-2 md:text-right">
@@ -46,7 +49,7 @@ export function Footer() {
               </div>
             </div>
             <div>
-              <p className="font-semibold text-navy-900">Légal</p>
+              <p className="font-semibold text-navy-900">Legal</p>
               <div className="mt-2 flex flex-wrap gap-x-4 gap-y-2 md:justify-end">
                 {legalLinks.map((link) => (
                   <Link

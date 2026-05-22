@@ -33,8 +33,20 @@ type AlternativeTemplate = {
   url: string;
   monthlyPrice: number;
   subcategories?: Expense["subcategory"][];
+  accessTechnology?: "fiber" | "adsl" | "unknown";
+  requiresBundle?: {
+    category: string;
+    provider: string;
+  };
   reason: string;
   action: string;
+};
+
+type InternetAwareExpense = Expense & {
+  internetAccessTechnology?: "fiber" | "adsl" | "unknown";
+  internetPromoDetected?: boolean;
+  internetTvIncluded?: boolean;
+  internetBundledMobile?: boolean;
 };
 
 const alternativesByCategory: Partial<Record<ExpenseCategory, AlternativeTemplate[]>> = {
@@ -44,6 +56,7 @@ const alternativesByCategory: Partial<Record<ExpenseCategory, AlternativeTemplat
       name: "Offre électricité verte 100% connectée",
       url: "https://www.mint-energie.com/",
       monthlyPrice: 65,
+      subcategories: [ExpenseSubcategory.ELECTRICITY],
       reason: "Fournisseur alternatif souvent moins cher que le tarif réglementé.",
       action: "Comparer le prix du kWh par rapport à votre contrat actuel."
     },
@@ -52,6 +65,7 @@ const alternativesByCategory: Partial<Record<ExpenseCategory, AlternativeTemplat
       name: "Offre Heures Eco",
       url: "https://www.totalenergies.fr/",
       monthlyPrice: 70,
+      subcategories: [ExpenseSubcategory.ELECTRICITY],
       reason: "Permet de réaliser des économies si vous consommez pendant les heures creuses.",
       action: "Vérifier la compatibilité avec vos habitudes de consommation."
     },
@@ -60,6 +74,7 @@ const alternativesByCategory: Partial<Record<ExpenseCategory, AlternativeTemplat
       name: "Électricité ajustable",
       url: "https://particuliers.alpiq.fr/",
       monthlyPrice: 68,
+      subcategories: [ExpenseSubcategory.ELECTRICITY],
       reason: "Offre modulable permettant de choisir la part d'énergie verte.",
       action: "Demander une simulation personnalisée basée sur vos factures passées."
     },
@@ -68,6 +83,7 @@ const alternativesByCategory: Partial<Record<ExpenseCategory, AlternativeTemplat
       name: "Offre Éco-responsable",
       url: "https://www.octopusenergy.fr/",
       monthlyPrice: 66,
+      subcategories: [ExpenseSubcategory.ELECTRICITY],
       reason: "Bonne alternative avec un service client reconnu et de l'énergie verte.",
       action: "Comparer les frais fixes d'abonnement mensuels."
     }
@@ -80,6 +96,7 @@ const alternativesByCategory: Partial<Record<ExpenseCategory, AlternativeTemplat
       url: "https://www.red-by-sfr.fr/offre-internet/",
       monthlyPrice: 24.99,
       subcategories: [ExpenseSubcategory.INTERNET],
+      accessTechnology: "fiber",
       reason: "Offre fibre simple, sans engagement et souvent à prix fixe.",
       action: "Vérifier l'éligibilité fibre de votre logement."
     },
@@ -89,6 +106,7 @@ const alternativesByCategory: Partial<Record<ExpenseCategory, AlternativeTemplat
       url: "https://shop.sosh.fr/box-internet",
       monthlyPrice: 25.99,
       subcategories: [ExpenseSubcategory.INTERNET],
+      accessTechnology: "unknown",
       reason: "Réseau Orange avec une offre simplifiée sans TV incluse (en option).",
       action: "Idéal si vous n'avez pas besoin du décodeur TV traditionnel."
     },
@@ -98,6 +116,7 @@ const alternativesByCategory: Partial<Record<ExpenseCategory, AlternativeTemplat
       url: "https://www.free.fr/freebox/",
       monthlyPrice: 29.99,
       subcategories: [ExpenseSubcategory.INTERNET],
+      accessTechnology: "fiber",
       reason: "Débit ultra-rapide et services inclus très compétitifs pour la première année.",
       action: "Vérifier le prix hors promotion après la 1ère année."
     },
@@ -144,6 +163,7 @@ const alternativesByCategory: Partial<Record<ExpenseCategory, AlternativeTemplat
       url: "https://mobile.free.fr/",
       monthlyPrice: 2.00,
       subcategories: [ExpenseSubcategory.MOBILE],
+      requiresBundle: { category: "INTERNET", provider: "free" },
       reason: "Imbattable pour les très petits besoins (peu d'appels, peu de data).",
       action: "Attention au hors-forfait si vous utilisez beaucoup internet."
     },
@@ -163,6 +183,7 @@ const alternativesByCategory: Partial<Record<ExpenseCategory, AlternativeTemplat
       name: "Assurance Auto/Habitation directe",
       url: "https://www.directassurance.fr/",
       monthlyPrice: 15,
+      subcategories: [ExpenseSubcategory.HOME_INSURANCE],
       reason: "Modèle 100% en ligne permettant de réduire les coûts de gestion.",
       action: "Comparer les franchises et les exclusions de garanties."
     },
@@ -171,6 +192,7 @@ const alternativesByCategory: Partial<Record<ExpenseCategory, AlternativeTemplat
       name: "Assurance 100% mobile",
       url: "https://leocare.eu/fr/",
       monthlyPrice: 12,
+      subcategories: [ExpenseSubcategory.HOME_INSURANCE],
       reason: "Gestion entièrement via l'application, tarifs très agressifs.",
       action: "Vérifier les avis sur la gestion des sinistres."
     },
@@ -179,6 +201,7 @@ const alternativesByCategory: Partial<Record<ExpenseCategory, AlternativeTemplat
       name: "Formule Essentielle",
       url: "https://www.lolivier.fr/",
       monthlyPrice: 14,
+      subcategories: [ExpenseSubcategory.HOME_INSURANCE],
       reason: "Alternative économique avec un parcours client simplifié.",
       action: "Demander un devis en ajustant vos options réelles."
     },
@@ -187,6 +210,7 @@ const alternativesByCategory: Partial<Record<ExpenseCategory, AlternativeTemplat
       name: "Assurance habitation connectée",
       url: "https://www.luko.eu/fr/",
       monthlyPrice: 10,
+      subcategories: [ExpenseSubcategory.HOME_INSURANCE],
       reason: "Remboursement rapide et contrat transparent et solidaire.",
       action: "Idéal pour les petits appartements ou locataires."
     }
@@ -229,19 +253,63 @@ const alternativesByCategory: Partial<Record<ExpenseCategory, AlternativeTemplat
   ]
 };
 
+function normalizeBundleProvider(provider: string) {
+  return provider.toLowerCase().replace(/\s+/g, " ").trim();
+}
+
+function hasRequiredBundle(template: AlternativeTemplate, expenses: Expense[]) {
+  if (!template.requiresBundle) return true;
+
+  const requiredCategory = template.requiresBundle.category.toLowerCase();
+  const requiredProvider = normalizeBundleProvider(template.requiresBundle.provider);
+
+  return expenses.some(
+    (expense) =>
+      expense.category.toLowerCase() === requiredCategory &&
+      normalizeBundleProvider(expense.provider).includes(requiredProvider)
+  );
+}
+
 export function findAlternativeOffers(expenses: Expense[]): AlternativeOffer[] {
+
   return expenses
     .flatMap((expense) => {
+      const internetExpense = expense as InternetAwareExpense;
       const templates = (alternativesByCategory[expense.category] ?? []).filter(
         (template) =>
-          !template.subcategories ||
-          !expense.subcategory ||
-          template.subcategories.includes(expense.subcategory)
+          hasRequiredBundle(template, expenses) &&
+          (!template.subcategories ||
+            (expense.subcategory && template.subcategories.includes(expense.subcategory))) &&
+          !(
+            expense.subcategory === ExpenseSubcategory.INTERNET &&
+            internetExpense.internetAccessTechnology === "adsl" &&
+            template.accessTechnology === "fiber"
+          )
       );
 
-      return templates.map((template, index) => {
+      return templates.flatMap((template, index) => {
         const yearlyPrice = template.monthlyPrice * 12;
         const estimatedYearlySaving = Math.max(0, expense.yearlyAmount - yearlyPrice);
+        if (estimatedYearlySaving <= 0) {
+          return [];
+        }
+        const cautionNotes =
+          expense.subcategory === ExpenseSubcategory.INTERNET
+            ? [
+                internetExpense.internetPromoDetected
+                  ? "Prix promotionnel detecte : comparer le tarif hors promotion."
+                  : null,
+                internetExpense.internetTvIncluded
+                  ? "Verifier si la TV ou le decodeur sont necessaires."
+                  : null,
+                internetExpense.internetBundledMobile
+                  ? "Offre groupee possible : separer box et mobile avant decision."
+                  : null,
+                internetExpense.internetAccessTechnology === "adsl"
+                  ? "Ligne ADSL detectee : verifier les offres compatibles avec votre logement."
+                  : null
+              ].filter((note): note is string => Boolean(note))
+            : [];
 
         return {
           id: `alternative_${expense.id}_${index}`,
@@ -255,9 +323,11 @@ export function findAlternativeOffers(expenses: Expense[]): AlternativeOffer[] {
           estimatedYearlySaving,
           reason:
             estimatedYearlySaving > 0
-              ? `${template.reason} Ecart estime : ${formatCurrency(estimatedYearlySaving)} / an.`
-              : template.reason,
-          action: template.action
+              ? `${template.reason} Ecart estime : ${formatCurrency(estimatedYearlySaving)} / an.${cautionNotes.length ? ` ${cautionNotes.join(" ")}` : ""}`
+              : `${template.reason}${cautionNotes.length ? ` ${cautionNotes.join(" ")}` : ""}`,
+          action:
+            template.action +
+            (cautionNotes.length ? " Confirmer les points a verifier avant toute demarche." : "")
         };
       });
     })

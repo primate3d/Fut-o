@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { createAdminAccessKey, isAdminAccessCode } from "@/features/billing/access-keys";
-import { findKeyByCode } from "@/lib/server/db";
+import { findFreeTrialByKeyCode, findKeyByCode, getOrderByGeneratedKey } from "@/lib/server/db";
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
@@ -27,9 +27,13 @@ export async function GET(request: Request) {
 
   const isAdmin = isAdminAccessCode(key.code);
   const hasQuota = isAdmin || key.usesRemaining > 0;
+  const order = await getOrderByGeneratedKey(key.code);
+  const freeTrial = order?.customerEmail ? undefined : await findFreeTrialByKeyCode(key.code);
+  const customerEmail = order?.customerEmail ?? freeTrial?.email ?? null;
 
   return NextResponse.json({
     key,
+    customerEmail,
     hasQuota,
     usesRemaining: key.usesRemaining,
     quotaExceeded: !hasQuota

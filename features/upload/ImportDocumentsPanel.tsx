@@ -18,6 +18,7 @@ import { expenseCategoryLabels } from "@/lib/expense-summary";
 import { cn, formatBytes } from "@/lib/utils";
 import {
   ExpenseCategory,
+  type DocumentUserCorrections,
   type MockAnalysis,
   type UploadedDocument,
   type UploadedDocumentType
@@ -30,9 +31,14 @@ import {
   getCategoryForDocumentType
 } from "./document-types";
 import {
+  applyDocumentCorrections,
+  clearStoredDocumentCorrections,
   deleteDocumentServer,
+  getStoredDocumentCorrections,
   getStoredUploadedDocumentsServer,
+  removeStoredDocumentCorrection,
   storeUploadedDocumentServer,
+  storeDocumentCorrections,
   storeUploadedDocuments
 } from "./storage";
 
@@ -104,6 +110,7 @@ async function resetCurrentAuditDocuments() {
   await deleteStoredAnalysisServer();
   await purgeStoredDocumentsServer();
   clearStoredAnalysis();
+  clearStoredDocumentCorrections();
   storeUploadedDocuments([]);
 }
 
@@ -138,6 +145,32 @@ function createDocumentFromFile(file: File): UploadedDocument {
   };
 }
 
+function isLikelyMultiContractInsuranceDocument(document: UploadedDocument) {
+  const fileName = document.fileName.toLowerCase();
+  return (
+    document.detectedCategory === ExpenseCategory.INSURANCE &&
+    (fileName.includes("macif") ||
+      fileName.includes("avis d echeance") ||
+      fileName.includes("avis d'echeance") ||
+      fileName.includes("sociétaire") ||
+      fileName.includes("societaire"))
+  );
+}
+
+function hasUserCorrections(document: UploadedDocument) {
+  const corrections = document.userCorrections;
+  if (!corrections) return false;
+
+  return Boolean(
+    corrections.provider?.trim() ||
+      corrections.documentType ||
+      corrections.amount ||
+      corrections.frequency ||
+      corrections.isMultiContract ||
+      corrections.notes?.trim()
+  );
+}
+
 export function ImportDocumentsPanel() {
   const router = useRouter();
   const inputRef = useRef<HTMLInputElement>(null);
@@ -148,6 +181,9 @@ export function ImportDocumentsPanel() {
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [hasExistingAudit, setHasExistingAudit] = useState(false);
   const [pendingFiles, setPendingFiles] = useState<File[] | null>(null);
+  const [documentCorrections, setDocumentCorrections] = useState<
+    Record<string, DocumentUserCorrections>
+  >({});
 
   useEffect(() => {
     async function load() {
@@ -155,6 +191,7 @@ export function ImportDocumentsPanel() {
       const localAnalysis = getStoredMockAnalysis();
       const serverAnalysis = await getStoredAnalysisServer();
       setDocuments(storedDocuments);
+      setDocumentCorrections(getStoredDocumentCorrections());
       setHasExistingAudit(Boolean(localAnalysis || serverAnalysis));
       setHasLoadedDocuments(true);
     }
@@ -206,6 +243,7 @@ export function ImportDocumentsPanel() {
     if (mode === "replace") {
       await resetCurrentAuditDocuments();
       setDocuments([]);
+      setDocumentCorrections({});
       setHasExistingAudit(false);
     }
 
@@ -273,6 +311,26 @@ export function ImportDocumentsPanel() {
           : document
       )
     );
+    updateDocumentCorrection(id, { documentType });
+    clearStoredAnalysis();
+  }
+
+  function updateDocumentCorrection(
+    id: string,
+    patch: Partial<DocumentUserCorrections>
+  ) {
+    setDocumentCorrections((currentCorrections) => {
+      const nextCorrections = {
+        ...currentCorrections,
+        [id]: {
+          ...(currentCorrections[id] ?? {}),
+          ...patch
+        }
+      };
+
+      storeDocumentCorrections(nextCorrections);
+      return nextCorrections;
+    });
     clearStoredAnalysis();
   }
 
@@ -280,12 +338,20 @@ export function ImportDocumentsPanel() {
     setDocuments((currentDocuments) =>
       currentDocuments.filter((document) => document.id !== id)
     );
+    setDocumentCorrections((currentCorrections) => {
+      const nextCorrections = { ...currentCorrections };
+      delete nextCorrections[id];
+      return nextCorrections;
+    });
+    removeStoredDocumentCorrection(id);
     void deleteDocumentServer(id);
     clearStoredAnalysis();
   }
 
   async function launchAnalysis() {
-    const usableDocuments = documents.filter((document) => document.status === "ready");
+    const usableDocuments = applyDocumentCorrections(
+      documents.filter((document) => document.status === "ready")
+    );
 
     if (usableDocuments.length === 0 || isAnalyzing) {
       setStatusMessage("Ajoutez au moins un fichier utilisable avant de lancer l'analyse.");
@@ -296,6 +362,11 @@ export function ImportDocumentsPanel() {
 
     try {
       const activeKey = getStoredAccessKey();
+      console.info("[FUTEO_ANALYSIS_POST]", {
+        code: activeKey?.code,
+        documentCount: usableDocuments.length,
+        force: true
+      });
       const response = await fetch("/api/analyse", {
         method: "POST",
         headers: {
@@ -303,18 +374,55 @@ export function ImportDocumentsPanel() {
         },
         body: JSON.stringify({
           documents: usableDocuments,
-          code: activeKey?.code
+          code: activeKey?.code,
+          force: true
         })
       });
-      const payload = (await response.json()) as { analysis?: MockAnalysis };
+      const payload = (await response.json()) as {
+        analysis?: MockAnalysis;
+        error?: string;
+        details?: string;
+      };
 
       if (!response.ok || !payload.analysis) {
-        throw new Error("Service d'analyse serveur indisponible.");
+        const message =
+          payload.details ||
+          payload.error ||
+          `Service d'analyse serveur indisponible (${response.status}).`;
+        console.warn("[FUTEO_ANALYSIS_POST_ERROR]", {
+          code: activeKey?.code,
+          documentCount: usableDocuments.length,
+          message,
+          status: response.status
+        });
+        throw new Error(message);
       }
 
+      console.info("[FUTEO_ANALYSIS_POST_OK]", {
+        code: activeKey?.code,
+        documentCount: usableDocuments.length,
+        expensesCount: payload.analysis.expenses.length,
+        status: response.status
+      });
       storeMockAnalysis(payload.analysis);
       router.push("/analyse");
-    } catch {
+    } catch (error) {
+      const hasCorrectedDocuments = usableDocuments.some(hasUserCorrections);
+      const hasMultiContractInsurance = usableDocuments.some(
+        isLikelyMultiContractInsuranceDocument
+      );
+
+      if (hasCorrectedDocuments || hasMultiContractInsurance) {
+        clearStoredAnalysis();
+        setStatusMessage(
+          hasCorrectedDocuments
+            ? "Analyse serveur nécessaire pour appliquer vos corrections."
+            : "Analyse serveur nécessaire pour ce document multi-contrats."
+        );
+        console.warn("[FUTEO_ANALYSIS_BLOCKED]", error);
+        return;
+      }
+
       const localAnalysis = generateMockAnalysisFromDocuments(usableDocuments);
       storeMockAnalysis(localAnalysis);
       setStatusMessage(
@@ -383,6 +491,11 @@ export function ImportDocumentsPanel() {
         <Button className="mt-6" onClick={() => inputRef.current?.click()} type="button">
           Sélectionner des fichiers
         </Button>
+        <p className="mt-3 max-w-xl text-xs leading-5 text-slate-500">
+          🔒 Confidentialité garantie : Vos documents servent uniquement à calculer vos
+          économies. Vous pouvez les supprimer définitivement de nos serveurs en un clic
+          depuis votre espace.
+        </p>
       </div>
 
       {pendingFiles ? (
@@ -559,6 +672,147 @@ export function ImportDocumentsPanel() {
             </table>
           )}
         </div>
+
+        {documents.some((document) => document.status === "ready") ? (
+          <div className="mt-6 space-y-3">
+            {documents
+              .filter((document) => document.status === "ready")
+              .map((document) => {
+                const correction = documentCorrections[document.id] ?? {};
+
+                return (
+                  <div
+                    className="rounded-xl border border-navy-100 bg-navy-50/40 p-4"
+                    key={`corrections-${document.id}`}
+                  >
+                    <div className="flex flex-col gap-1 sm:flex-row sm:items-start sm:justify-between">
+                      <div>
+                        <p className="text-sm font-semibold text-navy-900">
+                          Vérifier les infos
+                        </p>
+                        <p className="mt-1 text-xs leading-5 text-slate-600">
+                          Nous avons prérempli ces informations automatiquement.
+                          Corrigez uniquement si nécessaire.
+                        </p>
+                      </div>
+                      <p className="max-w-sm truncate text-xs text-slate-500">
+                        {document.fileName}
+                      </p>
+                    </div>
+
+                    <div className="mt-4 grid gap-3 md:grid-cols-3">
+                      <label className="text-xs font-semibold text-slate-600">
+                        Fournisseur
+                        <input
+                          className="mt-1 h-10 w-full rounded-lg border border-navy-100 bg-white px-3 text-sm text-navy-900 outline-none focus:border-sage-500 focus:ring-2 focus:ring-sage-500/20"
+                          onChange={(event) =>
+                            updateDocumentCorrection(document.id, {
+                              provider: event.target.value
+                            })
+                          }
+                          placeholder={document.provider ?? "Fournisseur"}
+                          type="text"
+                          value={correction.provider ?? ""}
+                        />
+                      </label>
+
+                      <label className="text-xs font-semibold text-slate-600">
+                        Type de dépense
+                        <select
+                          className="mt-1 h-10 w-full rounded-lg border border-navy-100 bg-white px-3 text-sm text-navy-900 outline-none focus:border-sage-500 focus:ring-2 focus:ring-sage-500/20"
+                          onChange={(event) =>
+                            updateDocumentType(
+                              document.id,
+                              event.target.value as UploadedDocumentType
+                            )
+                          }
+                          value={correction.documentType ?? document.documentType}
+                        >
+                          {documentTypeOptions.map((option) => (
+                            <option key={option.value} value={option.value}>
+                              {option.label}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+
+                      <label className="text-xs font-semibold text-slate-600">
+                        Montant
+                        <input
+                          className="mt-1 h-10 w-full rounded-lg border border-navy-100 bg-white px-3 text-sm text-navy-900 outline-none focus:border-sage-500 focus:ring-2 focus:ring-sage-500/20"
+                          min="0"
+                          onChange={(event) =>
+                            updateDocumentCorrection(document.id, {
+                              amount: event.target.value
+                                ? Number(event.target.value)
+                                : undefined
+                            })
+                          }
+                          placeholder="Ex : 39,98"
+                          step="0.01"
+                          type="number"
+                          value={correction.amount ?? ""}
+                        />
+                      </label>
+
+                      <label className="text-xs font-semibold text-slate-600">
+                        Fréquence
+                        <select
+                          className="mt-1 h-10 w-full rounded-lg border border-navy-100 bg-white px-3 text-sm text-navy-900 outline-none focus:border-sage-500 focus:ring-2 focus:ring-sage-500/20"
+                          onChange={(event) =>
+                            updateDocumentCorrection(document.id, {
+                              frequency:
+                                event.target.value === ""
+                                  ? undefined
+                                  : (event.target.value as DocumentUserCorrections["frequency"])
+                            })
+                          }
+                          value={correction.frequency ?? ""}
+                        >
+                          <option value="">Automatique</option>
+                          <option value="monthly">Mensuel</option>
+                          <option value="bimonthly">Bimestriel</option>
+                          <option value="quarterly">Trimestriel</option>
+                          <option value="yearly">Annuel</option>
+                          <option value="one_time">Ponctuel</option>
+                          <option value="schedule">Échéancier</option>
+                        </select>
+                      </label>
+
+                      <label className="flex items-center gap-2 self-end rounded-lg border border-navy-100 bg-white px-3 py-2 text-sm font-semibold text-navy-900">
+                        <input
+                          checked={Boolean(correction.isMultiContract)}
+                          className="h-4 w-4 rounded border-navy-200 text-sage-700"
+                          onChange={(event) =>
+                            updateDocumentCorrection(document.id, {
+                              isMultiContract: event.target.checked
+                            })
+                          }
+                          type="checkbox"
+                        />
+                        Document multi-contrats
+                      </label>
+
+                      <label className="text-xs font-semibold text-slate-600 md:col-span-3">
+                        Notes
+                        <input
+                          className="mt-1 h-10 w-full rounded-lg border border-navy-100 bg-white px-3 text-sm text-navy-900 outline-none focus:border-sage-500 focus:ring-2 focus:ring-sage-500/20"
+                          onChange={(event) =>
+                            updateDocumentCorrection(document.id, {
+                              notes: event.target.value
+                            })
+                          }
+                          placeholder="Ex : facture groupée, échéancier, contrat à vérifier"
+                          type="text"
+                          value={correction.notes ?? ""}
+                        />
+                      </label>
+                    </div>
+                  </div>
+                );
+              })}
+          </div>
+        ) : null}
       </Card>
     </div>
   );

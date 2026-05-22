@@ -88,6 +88,29 @@ function isUsableExtractedText(text: string) {
   return text.trim().replace(/\s+/g, " ").length >= 40;
 }
 
+function cleanOcrText(text: string) {
+  return text
+    .replace(/^```(?:text|plaintext)?\s*/i, "")
+    .replace(/```$/i, "")
+    .trim();
+}
+
+function isImageOcrRefusal(text: string) {
+  const normalizedText = text
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
+
+  return (
+    normalizedText.includes("je suis desole") ||
+    normalizedText.includes("je ne peux pas") ||
+    normalizedText.includes("cannot extract") ||
+    normalizedText.includes("can't extract") ||
+    normalizedText.includes("unable to extract") ||
+    normalizedText.includes("ocr_image_illisible")
+  );
+}
+
 async function extractTextFromImage(
   physicalFileName: string,
   declaredMimeType?: string
@@ -109,32 +132,47 @@ async function extractTextFromImage(
 
   try {
     const openai = getOpenAI();
-    const response = await openai.chat.completions.create({
-      model: "gpt-4o",
-      messages: [
-        {
-          role: "system",
-          content: "Tu extrais uniquement le texte visible dans l'image, sans commentaire.",
-        },
-        {
-          role: "user",
-          content: [
-            {
-              type: "text",
-              text: "Extrait tout le texte de cette image.",
-            },
-            {
-              type: "image_url",
-              image_url: {
-                url: `data:${mimeType};base64,${base64Image}`,
-              },
-            },
-          ],
-        },
-      ],
-    });
+    const prompts = [
+      "Effectue un OCR technique du document fourni par l'utilisateur. Transcris tout le texte lisible, y compris montants, dates, adresses et references. Reponds uniquement avec le texte brut. Si l'image est vraiment illisible, reponds exactement OCR_IMAGE_ILLISIBLE.",
+      "Lis cette facture comme un moteur OCR. Recopie tout le texte visible sans commentaire, sans resume et sans refuser. Inclus les montants en euros. Si aucun texte n'est lisible, reponds exactement OCR_IMAGE_ILLISIBLE."
+    ];
 
-    return response.choices[0].message.content || "";
+    for (const prompt of prompts) {
+      const response = await openai.chat.completions.create({
+        model: "gpt-4o",
+        messages: [
+          {
+            role: "system",
+            content:
+              "Tu es un moteur OCR pour documents administratifs fournis par l'utilisateur. Tu renvoies uniquement le texte visible.",
+          },
+          {
+            role: "user",
+            content: [
+              {
+                type: "text",
+                text: prompt,
+              },
+              {
+                type: "image_url",
+                image_url: {
+                  url: `data:${mimeType};base64,${base64Image}`,
+                  detail: "high",
+                },
+              },
+            ],
+          },
+        ],
+      });
+
+      const text = cleanOcrText(response.choices[0].message.content || "");
+      if (isUsableExtractedText(text) && !isImageOcrRefusal(text)) {
+        return text;
+      }
+    }
+
+    console.warn(`OCR image insuffisant pour ${physicalFileName}.`);
+    return "";
   } catch (error) {
     console.error("Erreur Vision OCR:", error);
     return "";

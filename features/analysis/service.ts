@@ -330,19 +330,37 @@ function buildExpense(
   };
 }
 
+function isLikelyInsuranceDocument(document: UploadedDocument) {
+  const normalizedName = document.fileName
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
+
+  return (
+    (normalizedName.includes("macif") ||
+      normalizedName.includes("avis d echeance") ||
+      normalizedName.includes("assurance") ||
+      normalizedName.includes("societaire"))
+  );
+}
+
 export function generateMockAnalysisFromDocuments(
   documents: UploadedDocument[]
 ): MockAnalysis {
   const readyDocuments = documents.filter((document) => document.status !== "error");
   const expenses = readyDocuments.flatMap((document) =>
-    templatesByDocumentType[document.documentType].map((template, index) =>
-      buildExpense(template, document, index)
-    )
+    isLikelyInsuranceDocument(document)
+      ? []
+      : templatesByDocumentType[document.documentType].map((template, index) =>
+          buildExpense(template, document, index)
+        )
   );
 
   const recommendations = readyDocuments.flatMap((document) =>
-    templatesByDocumentType[document.documentType].flatMap((template, index) =>
-      template.recommendation
+    isLikelyInsuranceDocument(document)
+      ? []
+      : templatesByDocumentType[document.documentType].flatMap((template, index) =>
+          template.recommendation
         ? [
             {
               id: `recommendation_${document.id}_${index}`,
@@ -354,8 +372,19 @@ export function generateMockAnalysisFromDocuments(
   );
 
   const anomalies = readyDocuments.flatMap((document) =>
-    templatesByDocumentType[document.documentType].flatMap((template, index) =>
-      template.anomaly
+    isLikelyInsuranceDocument(document)
+      ? [
+          {
+            id: `anomaly_${document.id}_multi_insurance`,
+            title: "Document assurance multi-contrats",
+            description:
+              "Ce document semble contenir plusieurs contrats. Une analyse serveur complète est nécessaire pour séparer les postes sans inventer d'économie.",
+            severity: "medium" as const,
+            category: ExpenseCategory.INSURANCE
+          }
+        ]
+      : templatesByDocumentType[document.documentType].flatMap((template, index) =>
+          template.anomaly
         ? [
             {
               id: `anomaly_${document.id}_${index}`,

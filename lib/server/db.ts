@@ -110,6 +110,15 @@ export async function findFreeTrialByEmail(email: string): Promise<FreeTrialReco
   return records[0];
 }
 
+export async function findFreeTrialByKeyCode(keyCode: string): Promise<FreeTrialRecord | undefined> {
+  const records = await db
+    .select()
+    .from(freeTrials)
+    .where(eq(freeTrials.keyCode, keyCode.trim().toUpperCase()));
+
+  return records[0];
+}
+
 export async function saveFreeTrial(record: FreeTrialRecord): Promise<void> {
   await db.insert(freeTrials).values({
     ...record,
@@ -292,6 +301,42 @@ export async function getOrderBySessionId(sessionId: string): Promise<OrderRecor
         expiresAt: "",
         isActive: true,
         createdAt: record.createdAt || new Date().toISOString()
+      }
+      : undefined
+  };
+}
+
+export async function getOrderByGeneratedKey(keyCode: string): Promise<OrderRecord | undefined> {
+  const records = await db
+    .select()
+    .from(orders)
+    .where(eq(orders.generatedKey, keyCode.trim().toUpperCase()));
+  const record = records[0];
+  if (!record) return undefined;
+
+  return {
+    id: record.id,
+    planId: record.planId || undefined,
+    planName: record.planName || undefined,
+    status: record.status || undefined,
+    generatedKey: record.generatedKey,
+    completedAt: record.completedAt,
+    customerEmail: record.customerEmail,
+    emailSent: Boolean(record.emailSent),
+    emailSentAt: record.emailSentAt,
+    createdAt: record.createdAt || undefined,
+    key: record.generatedKey
+      ? {
+        id: `key_${record.id}`,
+        code: record.generatedKey,
+        plan:
+          record.planId === "simple" || record.planId === "premium"
+            ? record.planId
+            : "foyer",
+        usesRemaining: 1,
+        expiresAt: record.completedAt || "",
+        isActive: record.status === "completed",
+        createdAt: record.createdAt || record.completedAt || new Date().toISOString()
       }
       : undefined
   };

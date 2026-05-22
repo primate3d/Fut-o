@@ -37,6 +37,16 @@ export type UploadedDocument = {
   status: "ready" | "pending" | "error" | "uploading";
   uploadedAt: string;
   provider?: string;
+  userCorrections?: DocumentUserCorrections;
+};
+
+export type DocumentUserCorrections = {
+  provider?: string;
+  documentType?: UploadedDocumentType;
+  amount?: number;
+  frequency?: "monthly" | "bimonthly" | "quarterly" | "yearly" | "one_time" | "schedule";
+  isMultiContract?: boolean;
+  notes?: string;
 };
 
 export type UploadedDocumentType =
@@ -99,6 +109,8 @@ export type Expense = {
   invoiceNumber?: string;
   phone?: string;
   recurrence: "monthly" | "yearly" | "one_time";
+  billingAmount?: number;
+  billingFrequency?: DocumentUserCorrections["frequency"];
 };
 
 export type Recommendation = {

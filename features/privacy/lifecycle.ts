@@ -1,7 +1,29 @@
 import { ACCESS_KEY_STORAGE_KEY, getStoredAccessKey } from "@/features/billing/access-keys";
 import { MOCK_ANALYSIS_STORAGE_KEY } from "@/features/analysis/storage";
-import { UPLOADED_DOCUMENTS_STORAGE_KEY } from "@/features/upload/storage";
+import {
+  DOCUMENT_CORRECTIONS_STORAGE_KEY,
+  UPLOADED_DOCUMENTS_STORAGE_KEY
+} from "@/features/upload/storage";
 import { SELECTED_ALTERNATIVE_OFFER_STORAGE_KEY } from "@/features/recommendations/selected-offer";
+
+function removeAuditLocalStorageResidues() {
+  const prefixesToRemove = ["futeo_savings_"];
+  const exactKeysToRemove = [
+    UPLOADED_DOCUMENTS_STORAGE_KEY,
+    MOCK_ANALYSIS_STORAGE_KEY,
+    SELECTED_ALTERNATIVE_OFFER_STORAGE_KEY,
+    DOCUMENT_CORRECTIONS_STORAGE_KEY,
+    "futeo.uploadedDocumentsOwner"
+  ];
+
+  exactKeysToRemove.forEach((key) => window.localStorage.removeItem(key));
+
+  Object.keys(window.localStorage).forEach((key) => {
+    if (prefixesToRemove.some((prefix) => key.startsWith(prefix))) {
+      window.localStorage.removeItem(key);
+    }
+  });
+}
 
 /**
  * Supprime uniquement les fichiers sources importés.
@@ -64,10 +86,7 @@ export async function purgeFullAudit() {
     }
   }
 
-  window.localStorage.removeItem(UPLOADED_DOCUMENTS_STORAGE_KEY);
-  window.localStorage.removeItem(MOCK_ANALYSIS_STORAGE_KEY);
-  window.localStorage.removeItem(SELECTED_ALTERNATIVE_OFFER_STORAGE_KEY);
-  window.localStorage.removeItem("futeo.uploadedDocumentsOwner");
+  removeAuditLocalStorageResidues();
 }
 
 /**

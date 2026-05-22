@@ -17,6 +17,7 @@ import { Card } from "@/components/ui/Card";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { ProviderLogo } from "@/components/ui/ProviderLogo";
 import { StatCard } from "@/components/ui/StatCard";
+import { getStoredAccessKey } from "@/features/billing/access-keys";
 import type { AlternativeOffer } from "@/features/recommendations/service";
 import {
   getSelectedAlternativeOffer,
@@ -57,6 +58,100 @@ function hasUsableAmounts(analysis: MockAnalysis | null) {
   );
 }
 
+function getExpenseIdFromAlternativeId(offer: AlternativeOffer, analysis: MockAnalysis) {
+  return analysis.expenses.find((expense) =>
+    offer.id.startsWith(`alternative_${expense.id}_`)
+  )?.id;
+}
+
+function computeAlternativeSavings(analysis: MockAnalysis, alternatives: AlternativeOffer[]) {
+  const bestSavingByExpense = alternatives.reduce<Record<string, number>>((savings, offer) => {
+    const expenseId = getExpenseIdFromAlternativeId(offer, analysis);
+    if (!expenseId) return savings;
+
+    savings[expenseId] = Math.max(
+      savings[expenseId] ?? 0,
+      offer.estimatedYearlySaving
+    );
+    return savings;
+  }, {});
+
+  return Object.values(bestSavingByExpense).reduce(
+    (total, saving) => total + Math.max(0, saving),
+    0
+  );
+}
+
+function computeVerifiedOfferSaving(offer: AlternativeOffer, analysis: MockAnalysis) {
+  const expense = analysis.expenses.find((candidate) =>
+    offer.id.startsWith(`alternative_${candidate.id}_`)
+  );
+
+  if (!expense) return offer.estimatedYearlySaving;
+
+  return Math.max(0, expense.yearlyAmount - offer.yearlyPrice);
+}
+
+function getExpenseForAlternative(offer: AlternativeOffer, analysis: MockAnalysis) {
+  return analysis.expenses.find((expense) =>
+    offer.id.startsWith(`alternative_${expense.id}_`)
+  );
+}
+
+function getSavingsStorageKey(auditKey: string) {
+  return `futeo_savings_${auditKey}`;
+}
+
+function persistYearlyPotentialSavings(yearlyPotentialSavings: number) {
+  const activeKey = getStoredAccessKey();
+  if (!activeKey || yearlyPotentialSavings <= 0) return;
+
+  try {
+    window.localStorage.setItem(
+      getSavingsStorageKey(activeKey.code),
+      String(yearlyPotentialSavings)
+    );
+  } catch (error) {
+    console.warn("Impossible de persister les pistes d'economies", error);
+  }
+}
+
+const billingFrequencyLabels = {
+  monthly: "mois",
+  bimonthly: "bimestre",
+  quarterly: "trimestre",
+  yearly: "an",
+  one_time: "ponctuel",
+  schedule: "échéancier"
+} as const;
+
+function formatBillingHint(expense: MockAnalysis["expenses"][number]) {
+  if (
+    !expense.billingFrequency ||
+    expense.billingFrequency === "monthly" ||
+    typeof expense.billingAmount !== "number" ||
+    !Number.isFinite(expense.billingAmount) ||
+    expense.billingAmount <= 0
+  ) {
+    return null;
+  }
+
+  return `${formatCurrency(expense.billingAmount)} / ${billingFrequencyLabels[expense.billingFrequency]} saisis, soit ${formatCurrency(expense.monthlyAmount)} / mois pour comparer.`;
+}
+
+function formatFrequencyWarning(expense: MockAnalysis["expenses"][number]) {
+  if (
+    expense.billingFrequency ||
+    expense.monthlyAmount > 0 ||
+    expense.yearlyAmount <= 0 ||
+    expense.recurrence !== "one_time"
+  ) {
+    return null;
+  }
+
+  return `Fréquence à confirmer : montant détecté ${formatCurrency(expense.yearlyAmount)}.`;
+}
+
 export function ResultsPanel() {
   const router = useRouter();
   const [analysis, setAnalysis] = useState<MockAnalysis | null>(null);
@@ -93,8 +188,25 @@ export function ResultsPanel() {
       const payload = (await response.json()) as {
         alternatives?: AlternativeOffer[];
       };
+      const nextAlternatives = payload.alternatives ?? [];
+      const alternativeSavings = computeAlternativeSavings(
+        analysisToLoad,
+        nextAlternatives
+      );
+      const analysisWithSavings =
+        alternativeSavings > analysisToLoad.yearlyPotentialSavings
+          ? {
+              ...analysisToLoad,
+              yearlyPotentialSavings: alternativeSavings
+            }
+          : analysisToLoad;
 
-      setAlternatives(payload.alternatives ?? []);
+      if (analysisWithSavings !== analysisToLoad) {
+        setAnalysis(analysisWithSavings);
+        storeMockAnalysis(analysisWithSavings);
+        persistYearlyPotentialSavings(alternativeSavings);
+      }
+      setAlternatives(nextAlternatives);
       setAlternativesUpdatedAt(new Date().toISOString());
     } catch {
       setAlternatives([]);
@@ -143,6 +255,40 @@ export function ResultsPanel() {
     () => (analysis ? summarizeExpensesByCategory(analysis.expenses) : []),
     [analysis]
   );
+  const firstManualExpenseByCategory = useMemo(() => {
+    if (!analysis) return {};
+
+    return analysis.expenses.reduce<Partial<Record<string, MockAnalysis["expenses"][number]>>>(
+      (manualExpenses, expense) => {
+        if (!expense.billingFrequency || expense.billingFrequency === "monthly") {
+          return manualExpenses;
+        }
+
+        return {
+          ...manualExpenses,
+          [expense.category]: manualExpenses[expense.category] ?? expense
+        };
+      },
+      {}
+    );
+  }, [analysis]);
+  const firstUncertainExpenseByCategory = useMemo(() => {
+    if (!analysis) return {};
+
+    return analysis.expenses.reduce<Partial<Record<string, MockAnalysis["expenses"][number]>>>(
+      (uncertainExpenses, expense) => {
+        if (!formatFrequencyWarning(expense)) {
+          return uncertainExpenses;
+        }
+
+        return {
+          ...uncertainExpenses,
+          [expense.category]: uncertainExpenses[expense.category] ?? expense
+        };
+      },
+      {}
+    );
+  }, [analysis]);
   const topExpenses = useMemo(
     () => (analysis ? getTopExpenses(analysis.expenses, 5) : []),
     [analysis]
@@ -151,9 +297,16 @@ export function ResultsPanel() {
     return alternatives.reduce<Partial<Record<string, AlternativeOffer>>>(
       (bestOffers, offer) => {
         const currentOffer = bestOffers[offer.category];
+        const verifiedSaving = analysis
+          ? computeVerifiedOfferSaving(offer, analysis)
+          : offer.estimatedYearlySaving;
+        const currentVerifiedSaving =
+          currentOffer && analysis
+            ? computeVerifiedOfferSaving(currentOffer, analysis)
+            : currentOffer?.estimatedYearlySaving;
         if (
           !currentOffer ||
-          offer.estimatedYearlySaving > currentOffer.estimatedYearlySaving
+          verifiedSaving > (currentVerifiedSaving ?? 0)
         ) {
           bestOffers[offer.category] = offer;
         }
@@ -162,7 +315,27 @@ export function ResultsPanel() {
       },
       {}
     );
-  }, [alternatives]);
+  }, [alternatives, analysis]);
+  const bestAlternativeByExpense = useMemo(() => {
+    return alternatives.reduce<Record<string, AlternativeOffer>>(
+      (bestOffers, offer) => {
+        const expenseId = analysis ? getExpenseIdFromAlternativeId(offer, analysis) : undefined;
+        if (!analysis || !expenseId) return bestOffers;
+
+        const currentOffer = bestOffers[expenseId];
+        const verifiedSaving = computeVerifiedOfferSaving(offer, analysis);
+        const currentVerifiedSaving = currentOffer
+          ? computeVerifiedOfferSaving(currentOffer, analysis)
+          : 0;
+        if (!currentOffer || verifiedSaving > currentVerifiedSaving) {
+          bestOffers[expenseId] = offer;
+        }
+
+        return bestOffers;
+      },
+      {}
+    );
+  }, [alternatives, analysis]);
 
   if (!analysis || analysis.expenses.length === 0) {
     return (
@@ -176,6 +349,8 @@ export function ResultsPanel() {
     );
   }
 
+  const hasMeaningfulSavings = analysis.yearlyPotentialSavings > 0;
+
   return (
     <section className="space-y-6">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
@@ -187,8 +362,30 @@ export function ResultsPanel() {
             Lecture préparée à partir des documents que vous avez ajoutés.
           </p>
         </div>
-        <Button href="/courriers">Préparer mes courriers</Button>
+        {hasMeaningfulSavings ? (
+          <Button href="/courriers">Préparer mes courriers</Button>
+        ) : (
+          <div className="flex flex-wrap gap-3">
+            <Button href="/rapport">Voir mon rapport</Button>
+            <Button href="/importer" variant="secondary">
+              Ajouter un document
+            </Button>
+          </div>
+        )}
       </div>
+
+      {!hasMeaningfulSavings ? (
+        <Card className="border-sage-200 bg-sage-50">
+          <h2 className="text-lg font-semibold text-navy-900">
+            Aucune économie significative détectée
+          </h2>
+          <p className="mt-2 text-sm leading-6 text-slate-600">
+            Le montant analysé ne fait pas ressortir d'offre clairement plus avantageuse.
+            Vous pouvez conserver ce constat dans le rapport, ajouter d'autres documents
+            ou vérifier la fréquence et le montant saisis.
+          </p>
+        </Card>
+      ) : null}
 
       {serviceMessage ? (
         <div className="rounded-xl border border-sage-200 bg-sage-50 px-4 py-3 text-sm leading-6 text-sage-900">
@@ -250,6 +447,14 @@ export function ResultsPanel() {
           <div className="mt-4 space-y-3">
             {categorySummaries.map((summary) => {
               const bestOffer = bestAlternativeByCategory[summary.category];
+              const bestOfferExpense =
+                bestOffer && analysis ? getExpenseForAlternative(bestOffer, analysis) : undefined;
+              const manualExpense = firstManualExpenseByCategory[summary.category];
+              const uncertainExpense = firstUncertainExpenseByCategory[summary.category];
+              const billingHint = manualExpense ? formatBillingHint(manualExpense) : null;
+              const frequencyWarning = uncertainExpense
+                ? formatFrequencyWarning(uncertainExpense)
+                : null;
 
               return (
                 <div className="rounded-lg border border-navy-100 p-4" key={summary.category}>
@@ -262,11 +467,30 @@ export function ResultsPanel() {
                   <p className="mt-1 text-sm text-slate-500">
                     {formatCurrency(summary.yearlyTotal)} / an
                   </p>
+                  {billingHint ? (
+                    <p className="mt-2 text-xs font-medium text-slate-500">
+                      {billingHint}
+                    </p>
+                  ) : (
+                    <p className="mt-3 text-xs font-medium text-slate-500">
+                      Aucune alternative fiable disponible pour ce type de contrat.
+                    </p>
+                  )}
+                  {frequencyWarning ? (
+                    <p className="mt-2 text-xs font-medium text-amber-700">
+                      {frequencyWarning}
+                    </p>
+                  ) : null}
                   {bestOffer ? (
                     <div className="mt-4 rounded-lg bg-sage-50 p-3">
                       <p className="text-xs font-semibold uppercase tracking-wide text-sage-700">
                         Meilleure offre repérée
                       </p>
+                      {bestOfferExpense ? (
+                        <p className="mt-1 text-xs font-medium text-slate-600">
+                          Sur : {bestOfferExpense.label}
+                        </p>
+                      ) : null}
                       <div className="mt-2 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                         <div className="flex items-center gap-3">
                           <ProviderLogo
@@ -303,7 +527,7 @@ export function ResultsPanel() {
           </h2>
           <div className="mt-4 space-y-3">
             {topExpenses.map((expense) => {
-              const bestOffer = bestAlternativeByCategory[expense.category];
+              const bestOffer = bestAlternativeByExpense[expense.id];
 
               return (
                 <div className="rounded-lg border border-transparent bg-white p-3" key={expense.id}>
@@ -318,6 +542,16 @@ export function ResultsPanel() {
                         <p className="text-sm text-slate-500">
                           {expenseCategoryLabels[expense.category]} - {expense.provider}
                         </p>
+                        {formatBillingHint(expense) ? (
+                          <p className="mt-1 text-xs font-medium text-slate-500">
+                            {formatBillingHint(expense)}
+                          </p>
+                        ) : null}
+                        {formatFrequencyWarning(expense) ? (
+                          <p className="mt-1 text-xs font-medium text-amber-700">
+                            {formatFrequencyWarning(expense)}
+                          </p>
+                        ) : null}
                       </div>
                     </div>
                     <p className="font-semibold text-navy-900">
@@ -417,15 +651,18 @@ export function ResultsPanel() {
               Recherche des offres concurrentes...
             </div>
           ) : alternatives.length > 0 ? (
-            alternatives.map((offer) => (
-              <div
-                className={
-                  selectedOffer?.id === offer.id
-                    ? "rounded-lg border border-sage-400 bg-sage-50 p-4"
-                    : "rounded-lg border border-navy-100 p-4"
-                }
-                key={offer.id}
-              >
+            alternatives.map((offer) => {
+              const verifiedSaving = computeVerifiedOfferSaving(offer, analysis);
+
+              return (
+                <div
+                  className={
+                    selectedOffer?.id === offer.id
+                      ? "rounded-lg border border-sage-400 bg-sage-50 p-4"
+                      : "rounded-lg border border-navy-100 p-4"
+                  }
+                  key={offer.id}
+                >
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div className="flex flex-wrap gap-2">
                     <Badge tone="green">{expenseCategoryLabels[offer.category]}</Badge>
@@ -434,7 +671,7 @@ export function ResultsPanel() {
                     ) : null}
                   </div>
                   <p className="font-semibold text-sage-700">
-                    {formatCurrency(offer.estimatedYearlySaving)} / an
+                    {formatCurrency(verifiedSaving)} / an
                   </p>
                 </div>
                 <div className="mt-3 flex items-center gap-3">
@@ -465,8 +702,9 @@ export function ResultsPanel() {
                     Voir l'offre <ExternalLink size={15} />
                   </a>
                 </div>
-              </div>
-            ))
+                </div>
+              );
+            })
           ) : (
             <p className="text-sm text-slate-600">
               Aucune alternative détaillée disponible pour l'instant.

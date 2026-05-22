@@ -102,13 +102,56 @@ function getProviderAddress(provider: string) {
   );
 }
 
+function normalizeProviderLookupKey(provider?: string) {
+  const normalized = (provider ?? "").toLowerCase().replace(/\s+/g, " ").trim();
+  const synonyms: Array<[string, string]> = [
+    ["red by sfr", "sfr"],
+    ["nrj mobile", "nrj"],
+    ["bouygues telecom", "bouygues"],
+    ["sosh", "orange"],
+    ["engie", "engie"],
+    ["edf", "edf"],
+    ["sfr", "sfr"],
+    ["orange", "orange"],
+    ["free", "free"]
+  ];
+
+  return synonyms.find(([alias]) => normalized.includes(alias))?.[1] ?? normalized;
+}
+
+function findProviderProfileByNormalizedKey(
+  providers: NonNullable<MockAnalysis["detectedParties"]>["providers"] | undefined,
+  provider: string
+) {
+  const searchedKey = normalizeProviderLookupKey(provider);
+  return Object.entries(providers ?? {}).find(
+    ([key, profile]) =>
+      normalizeProviderLookupKey(key) === searchedKey ||
+      normalizeProviderLookupKey(profile.name) === searchedKey
+  )?.[1];
+}
+
 function getDocumentProfileForExpense(
   analysis: MockAnalysis,
   expense: Expense
 ): DocumentPartyProfile | undefined {
-  return expense.sourceDocumentId
-    ? analysis.detectedParties?.documents?.[expense.sourceDocumentId]
-    : undefined;
+  if (expense.sourceDocumentId) {
+    return analysis.detectedParties?.documents?.[expense.sourceDocumentId];
+  }
+
+  const expenseProviderKey = normalizeProviderLookupKey(expense.provider);
+  if (!expenseProviderKey) return undefined;
+
+  return Object.values(analysis.detectedParties?.documents ?? {}).find((documentProfile) => {
+    const providerNames = [
+      documentProfile.providerName,
+      documentProfile.provider?.name
+    ];
+
+    return providerNames.some(
+      (providerName) => normalizeProviderLookupKey(providerName) === expenseProviderKey
+    );
+  });
 }
 
 const commercialProviderNames = ["NRJ Mobile", "Sosh", "RED by SFR", "B&You"];
@@ -136,11 +179,13 @@ function getDetectedProviderProfile(
   provider: string
 ): ProviderProfile | undefined {
   const documentProfile = getDocumentProfileForExpense(analysis, expense);
+  const detectedProvider =
+    findProviderProfileByNormalizedKey(analysis.detectedParties?.providers, provider) ||
+    findProviderProfileByNormalizedKey(analysis.detectedParties?.providers, expense.provider);
 
   return (
     documentProfile?.provider ||
-    analysis.detectedParties?.providers?.[provider] ||
-    analysis.detectedParties?.providers?.[expense.provider]
+    detectedProvider
   );
 }
 

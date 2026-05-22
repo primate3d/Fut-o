@@ -36,7 +36,18 @@ function maskKeyForLog(keyCode: string) {
   return `****${keyCode.slice(-4)}`;
 }
 
+function getEmailActivationBaseUrl() {
+  const appUrl = process.env.NEXT_PUBLIC_APP_URL?.trim();
+  if (!appUrl && process.env.NODE_ENV === "production") {
+    throw new Error("NEXT_PUBLIC_APP_URL est obligatoire en production pour les emails.");
+  }
+
+  return appUrl || "http://localhost:3000";
+}
+
 function buildAccessKeyEmail(keyCode: string, planName: string) {
+  const activationBaseUrl = getEmailActivationBaseUrl();
+
   return `
     <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #eadfce; border-radius: 16px; background-color: #fffaf2;">
       <h1 style="color: #12243d; font-size: 24px;">Votre accès Futéo est prêt</h1>
@@ -54,7 +65,7 @@ function buildAccessKeyEmail(keyCode: string, planName: string) {
         Ajoutez uniquement les documents utiles à votre audit. Vous gardez la main sur les éléments transmis et les démarches à lancer.
       </p>
 
-      <a href="${process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"}/activer-cle"
+      <a href="${activationBaseUrl}/activer-cle"
          style="display: block; background-color: #12243d; color: #ffffff; text-align: center; padding: 16px; border-radius: 12px; text-decoration: none; font-weight: bold; font-size: 16px;">
         Activer ma clé
       </a>

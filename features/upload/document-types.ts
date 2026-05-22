@@ -115,6 +115,15 @@ export function detectDocumentType(fileName: string): UploadedDocumentType {
     return "mobile_invoice";
   }
 
+  if (
+    normalizedName.includes("macif") ||
+    normalizedName.includes("avis d echeance") ||
+    normalizedName.includes("assurance") ||
+    normalizedName.includes("societaire")
+  ) {
+    return "home_insurance";
+  }
+
   if (normalizedName.includes("habitation")) {
     return "home_insurance";
   }

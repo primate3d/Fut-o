@@ -18,6 +18,7 @@ import {
   getStoredAnalysisServer,
   getStoredMockAnalysis
 } from "@/features/analysis";
+import { getStoredAccessKey } from "@/features/billing/access-keys";
 import {
   getStoredUploadedDocuments,
   getStoredUploadedDocumentsServer
@@ -35,9 +36,19 @@ const dashboardImage =
 const emptyExpenses: MockAnalysis["expenses"] = [];
 const emptyRecommendations: MockAnalysis["recommendations"] = [];
 
+function getStoredSavingsFallback() {
+  const activeKey = getStoredAccessKey();
+  if (!activeKey) return 0;
+
+  const storedValue = window.localStorage.getItem(`futeo_savings_${activeKey.code}`);
+  const storedSavings = Number(storedValue);
+  return Number.isFinite(storedSavings) && storedSavings > 0 ? storedSavings : 0;
+}
+
 export default function DashboardPage() {
   const [analysis, setAnalysis] = useState<MockAnalysis | null>(null);
   const [documents, setDocuments] = useState<UploadedDocument[]>([]);
+  const [savingsFallback, setSavingsFallback] = useState(0);
 
   useEffect(() => {
     async function load() {
@@ -57,6 +68,9 @@ export default function DashboardPage() {
           : null;
 
       setAnalysis(nextAnalysis);
+      setSavingsFallback(
+        !nextAnalysis?.yearlyPotentialSavings ? getStoredSavingsFallback() : 0
+      );
       setDocuments(serverDocuments);
     }
     void load();
@@ -66,7 +80,7 @@ export default function DashboardPage() {
   const recommendations = analysis?.recommendations ?? emptyRecommendations;
   const monthlyTotal = analysis?.totalMonthlyAmount ?? 0;
   const yearlyTotal = analysis?.totalYearlyAmount ?? monthlyTotal * 12;
-  const yearlyPotentialSavings = analysis?.yearlyPotentialSavings ?? 0;
+  const yearlyPotentialSavings = analysis?.yearlyPotentialSavings || savingsFallback;
   const hasDocuments = documents.length > 0;
   const hasAnalysis = Boolean(analysis);
 

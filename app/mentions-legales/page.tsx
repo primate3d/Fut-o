@@ -1,9 +1,9 @@
 const editorFields = [
-  ["Éditeur du site", "Futéo - Informations légales de l'éditeur à renseigner"],
-  ["Forme juridique", "À compléter avant mise en ligne publique"],
-  ["Adresse du siège", "À compléter avant mise en ligne publique"],
-  ["SIREN / SIRET", "À compléter avant mise en ligne publique"],
-  ["Directeur de publication", "À compléter avant mise en ligne publique"],
+  ["Editeur du site", "homservices"],
+  ["Forme juridique", "Auto-entrepreneur"],
+  ["Adresse du siege", "1 allee de Lartigot, 64100 Bayonne"],
+  ["SIREN / SIRET", "90490233500010"],
+  ["Directeur de publication", "Yannick TEJOU"],
   ["Contact", "contact@futeo.fr"]
 ];
 
@@ -13,22 +13,21 @@ export default function LegalNoticePage() {
       <section className="border-b border-[#e9dece] bg-[#fffaf2]">
         <div className="mx-auto max-w-4xl px-4 py-14 sm:px-6 lg:px-8 lg:py-20">
           <p className="text-sm font-semibold uppercase tracking-wide text-sage-700">
-            Informations légales
+            Informations legales
           </p>
           <h1 className="mt-3 text-4xl font-bold tracking-tight text-[#12243d]">
-            Mentions légales
+            Mentions legales
           </h1>
           <p className="mt-4 text-base leading-8 text-slate-600">
-            Cette page rassemble les informations d'identification de l'éditeur
-            du site Futéo. Les champs marqués “à compléter” doivent être
-            remplacés par les informations officielles avant publication.
+            Cette page rassemble les informations d'identification de l'editeur
+            du site Futeo.
           </p>
         </div>
       </section>
 
       <section className="mx-auto max-w-4xl px-4 py-12 sm:px-6 lg:px-8">
         <div className="rounded-2xl border border-[#e5d8c6] bg-white/90 p-6 shadow-sm">
-          <h2 className="text-xl font-bold text-[#12243d]">Éditeur</h2>
+          <h2 className="text-xl font-bold text-[#12243d]">Editeur</h2>
           <dl className="mt-6 grid gap-4">
             {editorFields.map(([label, value]) => (
               <div
@@ -43,22 +42,20 @@ export default function LegalNoticePage() {
         </div>
 
         <div className="mt-6 rounded-2xl border border-[#e5d8c6] bg-white/90 p-6 shadow-sm">
-          <h2 className="text-xl font-bold text-[#12243d]">Hébergement</h2>
+          <h2 className="text-xl font-bold text-[#12243d]">Hebergement</h2>
           <p className="mt-4 leading-7 text-slate-600">
-            Le site est hébergé par Railway. Les informations exactes de
-            l'hébergeur et l'adresse du prestataire doivent être confirmées dans
-            le compte Railway avant lancement public.
+            Le site est heberge par Railway.
           </p>
         </div>
 
         <div className="mt-6 rounded-2xl border border-[#e5d8c6] bg-white/90 p-6 shadow-sm">
           <h2 className="text-xl font-bold text-[#12243d]">
-            Propriété intellectuelle
+            Propriete intellectuelle
           </h2>
           <p className="mt-4 leading-7 text-slate-600">
-            Les textes, interfaces, éléments graphiques, logos et contenus du
-            site Futéo sont protégés. Toute reproduction ou réutilisation non
-            autorisée est interdite, sauf accord écrit préalable.
+            Les textes, interfaces, elements graphiques, logos et contenus du
+            site Futeo sont proteges. Toute reproduction ou reutilisation non
+            autorisee est interdite, sauf accord ecrit prealable.
           </p>
         </div>
       </section>

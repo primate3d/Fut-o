@@ -26,7 +26,7 @@ const faqItems = [
   {
     question: "Le paiement réel est-il déjà connecté ?",
     answer:
-      "Pas encore sur cette version de test. Stripe sera branché avant la vente publique. Pour l'instant, les boutons génèrent une clé temporaire locale afin de tester le parcours."
+      "Oui. Le paiement est sécurisé par Stripe. Votre clé d'accès est générée après paiement et envoyée par e-mail."
   }
 ];
 
@@ -95,6 +95,20 @@ export default function PricingPage() {
             L'activer maintenant
           </Button>
         </p>
+
+        <div className="mx-auto mt-8 max-w-3xl rounded-2xl border border-[#e5d8c6] bg-white/80 px-5 py-4 text-center shadow-sm">
+          <p className="text-sm font-semibold text-[#12243d]">
+            Prochainement dans Futéo
+          </p>
+          <div className="mt-3 flex flex-wrap justify-center gap-2 text-sm font-semibold text-slate-500/80">
+            <span className="rounded-full border border-slate-200 bg-slate-50 px-4 py-2">
+              🏥 Mutuelle & Prévoyance · Bientôt disponible
+            </span>
+            <span className="rounded-full border border-slate-200 bg-slate-50 px-4 py-2">
+              💳 Assurance Emprunteur & Crédit · Bientôt disponible
+            </span>
+          </div>
+        </div>
       </section>
 
       <section className="border-t border-[#e9dece] bg-[#fffaf2]">
@@ -125,8 +139,8 @@ export default function PricingPage() {
             Choisissez une clé et ouvrez votre espace.
           </h2>
           <p className="mt-3 text-sm leading-7 text-white/70">
-            La version actuelle permet de tester le parcours avec une clé temporaire.
-            Le paiement réel sera connecté avant la vente publique.
+            Choisissez votre formule, réglez votre accès de façon sécurisée,
+            puis activez votre clé reçue par e-mail.
           </p>
           <Button className="mt-7" href="#plans" variant="secondary">
             Voir les plans <ArrowRight size={18} />

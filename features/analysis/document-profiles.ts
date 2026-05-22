@@ -24,6 +24,40 @@ type EnergyBillingInfo = {
   hasGas?: boolean;
 };
 
+type EnergyServiceLineInfo = {
+  label: string;
+  subcategory: ExpenseSubcategory.GAS | ExpenseSubcategory.ELECTRICITY;
+  monthlyAmount: number;
+  yearlyAmount: number;
+};
+
+type InsuranceContractInfo = {
+  label: string;
+  documentType: UploadedDocumentType;
+  subcategory?: ExpenseSubcategory;
+  yearlyAmount: number;
+  monthlyAmount: number;
+  provider?: string;
+  customerNumber?: string;
+};
+
+type InternetBoxInfo = {
+  technology: "fiber" | "adsl" | "unknown";
+  hasPromo: boolean;
+  hasCommitment: boolean;
+  hasTvIncluded: boolean;
+  isBundledMobile: boolean;
+};
+
+type ManualBillingInfo = {
+  amount: number;
+  monthlyAmount: number;
+  yearlyAmount: number;
+  recurrence: Expense["recurrence"];
+  frequency: NonNullable<UploadedDocument["userCorrections"]>["frequency"];
+  isMultiContract?: boolean;
+};
+
 function normalize(value?: string) {
   return (value ?? "")
     .toLowerCase()
@@ -49,6 +83,80 @@ function parseAmount(value?: string) {
   const normalized = value.replace(/\s/g, "").replace(",", ".");
   const amount = Number.parseFloat(normalized);
   return Number.isFinite(amount) ? amount : undefined;
+}
+
+function normalizeAmount(amount: number) {
+  return Math.round(amount * 100) / 100;
+}
+
+function normalizeManualAmount(amount?: number) {
+  if (typeof amount !== "number" || !Number.isFinite(amount) || amount <= 0) {
+    return undefined;
+  }
+
+  return normalizeAmount(amount);
+}
+
+function buildManualBillingInfo(
+  corrections?: UploadedDocument["userCorrections"]
+): ManualBillingInfo | undefined {
+  const amount = normalizeManualAmount(corrections?.amount);
+  if (!amount || !corrections?.frequency) {
+    return undefined;
+  }
+
+  if (corrections.frequency === "yearly") {
+    return {
+      amount,
+      monthlyAmount: normalizeAmount(amount / 12),
+      yearlyAmount: amount,
+      recurrence: "yearly",
+      frequency: corrections.frequency,
+      isMultiContract: corrections.isMultiContract
+    };
+  }
+
+  if (corrections.frequency === "bimonthly") {
+    return {
+      amount,
+      monthlyAmount: normalizeAmount(amount / 2),
+      yearlyAmount: normalizeAmount(amount * 6),
+      recurrence: "one_time",
+      frequency: corrections.frequency,
+      isMultiContract: corrections.isMultiContract
+    };
+  }
+
+  if (corrections.frequency === "quarterly") {
+    return {
+      amount,
+      monthlyAmount: normalizeAmount(amount / 3),
+      yearlyAmount: normalizeAmount(amount * 4),
+      recurrence: "one_time",
+      frequency: corrections.frequency,
+      isMultiContract: corrections.isMultiContract
+    };
+  }
+
+  if (corrections.frequency === "one_time") {
+    return {
+      amount,
+      monthlyAmount: 0,
+      yearlyAmount: amount,
+      recurrence: "one_time",
+      frequency: corrections.frequency,
+      isMultiContract: corrections.isMultiContract
+    };
+  }
+
+  return {
+    amount,
+    monthlyAmount: amount,
+    yearlyAmount: normalizeAmount(amount * 12),
+    recurrence: "monthly",
+    frequency: corrections.frequency,
+    isMultiContract: corrections.isMultiContract
+  };
 }
 
 function firstAmountNearLabel(text: string, labels: RegExp[]) {
@@ -80,6 +188,47 @@ function mostRepeatedAmount(amounts: number[]) {
     .sort((a, b) => b[1] - a[1] || b[0] - a[0]);
 
   return repeatedAmounts[0]?.[0];
+}
+
+function extractEnergyServiceLines(
+  text: string,
+  documentType?: UploadedDocumentType,
+  providerName?: string
+): EnergyServiceLineInfo[] {
+  if (!isEnergyDocument(documentType, providerName)) return [];
+
+  const normalizedText = normalize(clean(text));
+  const scheduleMatch = normalizedText.match(
+    /\bgaz\b([\s\S]{0,260}?)\belectricite\b([\s\S]{0,260}?)\btotal\s+prelevement\b/i
+  );
+
+  if (!scheduleMatch) return [];
+
+  const gasMonthlyAmount = mostRepeatedAmount(extractAmounts(scheduleMatch[1]));
+  const electricityMonthlyAmount = mostRepeatedAmount(
+    extractAmounts(scheduleMatch[2])
+  );
+  const lines: EnergyServiceLineInfo[] = [];
+
+  if (gasMonthlyAmount) {
+    lines.push({
+      label: "Gaz",
+      subcategory: ExpenseSubcategory.GAS,
+      monthlyAmount: normalizeAmount(gasMonthlyAmount),
+      yearlyAmount: normalizeAmount(gasMonthlyAmount * 12)
+    });
+  }
+
+  if (electricityMonthlyAmount) {
+    lines.push({
+      label: "Electricite",
+      subcategory: ExpenseSubcategory.ELECTRICITY,
+      monthlyAmount: normalizeAmount(electricityMonthlyAmount),
+      yearlyAmount: normalizeAmount(electricityMonthlyAmount * 12)
+    });
+  }
+
+  return lines.length >= 2 ? lines : [];
 }
 
 function extractEnergyScheduleMonthlyAmount(normalizedText: string) {
@@ -226,6 +375,165 @@ function extractEnergyBillingInfo(
   };
 }
 
+function isInternetDocument(documentType?: UploadedDocumentType) {
+  return documentType === "internet_invoice";
+}
+
+function extractInternetBoxInfo(
+  text: string,
+  documentType?: UploadedDocumentType
+): InternetBoxInfo | undefined {
+  if (!isInternetDocument(documentType)) return undefined;
+
+  const normalizedText = normalize(clean(text));
+  const technology: InternetBoxInfo["technology"] =
+    /\b(fibre|fiber|ftth)\b/.test(normalizedText)
+      ? "fiber"
+      : /\b(adsl|xdsl|vdsl)\b/.test(normalizedText)
+        ? "adsl"
+        : "unknown";
+  const hasPromo =
+    /\b(promo|promotion|remise|offert|offerte|prix\s+special|avantage)\b/.test(normalizedText) ||
+    /\bpendant\s+(?:6|12)\s+mois\b/.test(normalizedText);
+  const hasCommitment =
+    /\b(engagement|fin\s+d\s+engagement|date\s+de\s+fin|jusqu\s+au|jusqu'a)\b/.test(normalizedText);
+  const hasTvIncluded =
+    /\b(tv|television|decodeur|bouquet|canal\+?|netflix|bein)\b/.test(normalizedText);
+  const hasBoxSignal = /\b(box|internet|fibre|fiber|adsl|wifi|livebox|freebox|bbox)\b/.test(normalizedText);
+  const hasMobileSignal = /\b(mobile|ligne\s+mobile|forfait\s+mobile|sim|5g|4g|go\b)\b/.test(normalizedText);
+
+  return {
+    technology,
+    hasPromo,
+    hasCommitment,
+    hasTvIncluded,
+    isBundledMobile: hasBoxSignal && hasMobileSignal
+  };
+}
+
+function lastAmountBeforeMarker(text: string, marker: string) {
+  const markerIndex = text.indexOf(marker);
+  if (markerIndex < 0) return undefined;
+
+  const beforeMarker = text.slice(Math.max(0, markerIndex - 260), markerIndex);
+  const amounts = extractAmounts(beforeMarker)
+    .filter((amount) => amount > 0 && amount < 10000);
+
+  return amounts.at(-1);
+}
+
+function extractInsuranceCustomerNumber(text: string) {
+  const normalizedText = normalize(text);
+  const normalizedMatch = normalizedText.match(/n\W{0,4}de\s+societaire\s*:?\s*([0-9]{4,})/i);
+  if (normalizedMatch?.[1]) return normalizedMatch[1];
+
+  return firstMatch(text, [
+    /n[Â°o]\s+de\s+soci[Ã©e]taire\s*:?\s*([A-Z0-9 -]{4,})/i,
+    /soci[Ã©e]taire\s*:?\s*([A-Z0-9 -]{4,})/i
+  ]);
+}
+
+function extractMacifInsuranceContracts(text: string): InsuranceContractInfo[] {
+  const normalizedText = normalize(clean(text));
+  if (!/\bmacif\b/.test(normalizedText)) return [];
+
+  const customerNumber = extractInsuranceCustomerNumber(text);
+  const contracts: InsuranceContractInfo[] = [];
+  const twoWheelsAmount = lastAmountBeforeMarker(normalizedText, "votre deux roues");
+  const homeAmount =
+    lastAmountBeforeMarker(normalizedText, "votre bien immobilier") ??
+    lastAmountBeforeMarker(normalizedText, "votre habitation");
+  const prevoyanceAmount = lastAmountBeforeMarker(normalizedText, "votre prevoyance");
+
+  if (twoWheelsAmount) {
+    contracts.push({
+      label: "Assurance deux roues",
+      documentType: "car_insurance",
+      subcategory: ExpenseSubcategory.OTHER,
+      yearlyAmount: twoWheelsAmount,
+      monthlyAmount: normalizeAmount(twoWheelsAmount / 12),
+      provider: "MACIF",
+      customerNumber
+    });
+  }
+
+  if (homeAmount) {
+    contracts.push({
+      label: "Assurance habitation",
+      documentType: "home_insurance",
+      subcategory: ExpenseSubcategory.HOME_INSURANCE,
+      yearlyAmount: homeAmount,
+      monthlyAmount: normalizeAmount(homeAmount / 12),
+      provider: "MACIF",
+      customerNumber
+    });
+  }
+
+  if (prevoyanceAmount) {
+    contracts.push({
+      label: "Prevoyance familiale",
+      documentType: "health_insurance",
+      subcategory: ExpenseSubcategory.MUTUAL_HEALTH,
+      yearlyAmount: prevoyanceAmount,
+      monthlyAmount: normalizeAmount(prevoyanceAmount / 12),
+      provider: "MACIF",
+      customerNumber
+    });
+  }
+
+  if (contracts.length === 0) {
+    const hasExpectedSections =
+      normalizedText.includes("votre deux roues") &&
+      normalizedText.includes("votre bien immobilier") &&
+      normalizedText.includes("votre prevoyance");
+    const cotisationAmounts = [
+      ...normalizedText.matchAll(/cotisation\s+ttc\s+([0-9][0-9\s.,]*[,.][0-9]{2})\s*(?:€|eur|euros)?/gi)
+    ]
+      .map((match) => parseAmount(match[1]))
+      .filter((amount): amount is number =>
+        typeof amount === "number" &&
+        amount > 50 &&
+        amount < 500
+      );
+
+    if (hasExpectedSections && cotisationAmounts.length === 3) {
+      const [twoWheelsYearlyAmount, homeYearlyAmount, prevoyanceYearlyAmount] = cotisationAmounts;
+
+      contracts.push(
+        {
+          label: "Assurance deux roues",
+          documentType: "car_insurance",
+          subcategory: ExpenseSubcategory.OTHER,
+          yearlyAmount: twoWheelsYearlyAmount,
+          monthlyAmount: normalizeAmount(twoWheelsYearlyAmount / 12),
+          provider: "MACIF",
+          customerNumber
+        },
+        {
+          label: "Assurance habitation",
+          documentType: "home_insurance",
+          subcategory: ExpenseSubcategory.HOME_INSURANCE,
+          yearlyAmount: homeYearlyAmount,
+          monthlyAmount: normalizeAmount(homeYearlyAmount / 12),
+          provider: "MACIF",
+          customerNumber
+        },
+        {
+          label: "Prevoyance familiale",
+          documentType: "health_insurance",
+          subcategory: ExpenseSubcategory.MUTUAL_HEALTH,
+          yearlyAmount: prevoyanceYearlyAmount,
+          monthlyAmount: normalizeAmount(prevoyanceYearlyAmount / 12),
+          provider: "MACIF",
+          customerNumber
+        }
+      );
+    }
+  }
+
+  return contracts;
+}
+
 const commercialProviderNames = ["NRJ Mobile", "Sosh", "RED by SFR", "B&You"];
 
 function pickCommercialProvider(...providers: Array<string | undefined>) {
@@ -265,6 +573,9 @@ function detectProvider(document: ExtractedDocument) {
   const rawText = document.extractedText || "";
 
   const providers = [
+    // Insurance
+    { name: "MACIF", aliases: ["macif"] },
+
     // MVNOs / Brands (Highest priority)
     { name: "NRJ Mobile", aliases: ["nrj mobile", "nrjmobile", "nrj"] },
     { name: "Sosh", aliases: ["sosh"] },
@@ -495,7 +806,10 @@ function extractPostalAddress(
 export function extractDocumentPartyProfile(document: ExtractedDocument): DocumentPartyProfile {
   const text = document.extractedText ?? "";
   const compactText = clean(text) ?? "";
-  const providerName = detectProvider(document);
+  const manualCorrections = document.userCorrections;
+  const manualProvider = clean(manualCorrections?.provider);
+  const manualBilling = buildManualBillingInfo(manualCorrections);
+  const providerName = manualProvider || detectProvider(document);
   const fullName = firstMatch(text, [
     /(?:titulaire|client|factur[ée]\s*à|destinataire)\s*:?\s*([A-ZÀ-Ÿ][A-Za-zÀ-ÿ' -]{2,}\s+[A-ZÀ-Ÿ][A-Za-zÀ-ÿ' -]{2,})/i,
     /(?:m\.|mme|madame|monsieur)\s+([A-ZÀ-Ÿ][A-Za-zÀ-ÿ' -]{2,}\s+[A-ZÀ-Ÿ][A-Za-zÀ-ÿ' -]{2,})/i
@@ -548,9 +862,22 @@ export function extractDocumentPartyProfile(document: ExtractedDocument): Docume
     ])
   );
   const providerAddress = extractProviderAddress(compactText);
-  const inferredDocumentType = inferDocumentTypeFromContent(document, providerName);
+  const inferredDocumentType =
+    manualCorrections?.documentType ?? inferDocumentTypeFromContent(document, providerName);
   const profileInvoiceAmount = extractInvoiceAmount(text) ?? invoiceAmount;
   const energyBilling = extractEnergyBillingInfo(text, inferredDocumentType, providerName);
+  const energyServiceLines = extractEnergyServiceLines(text, inferredDocumentType, providerName);
+  const effectiveManualBilling = manualBilling ?? (
+    manualCorrections?.frequency && !manualCorrections?.amount
+      ? buildManualBillingInfo({
+          ...manualCorrections,
+          amount: energyBilling?.amount ?? profileInvoiceAmount
+        })
+      : undefined
+  );
+  const internetBox = extractInternetBoxInfo(text, inferredDocumentType);
+  const insuranceContracts = extractMacifInsuranceContracts(text);
+  const insuranceCustomerNumber = extractInsuranceCustomerNumber(text);
   const postalAddress = extractPostalAddress(text, inferredDocumentType, providerName);
   const energyCustomerName =
     isEnergyDocument(inferredDocumentType, providerName)
@@ -563,7 +890,7 @@ export function extractDocumentPartyProfile(document: ExtractedDocument): Docume
 
   finalCustomer.address = postalAddress;
   finalCustomer.phone = reversePhone ?? phone;
-  finalCustomer.customerNumber = reverseCustomerNumber ?? customerNumber;
+  finalCustomer.customerNumber = insuranceCustomerNumber ?? reverseCustomerNumber ?? customerNumber;
   finalCustomer.contractNumber = reverseContractNumber ?? contractNumber;
   finalCustomer.invoiceNumber = reverseInvoiceNumber ?? invoiceNumber;
 
@@ -577,16 +904,32 @@ export function extractDocumentPartyProfile(document: ExtractedDocument): Docume
       }
     : undefined;
 
-  const profile: DocumentPartyProfile & { energyBilling?: EnergyBillingInfo } = {
+  const profile: DocumentPartyProfile & {
+    energyBilling?: EnergyBillingInfo;
+    energyServiceLines?: EnergyServiceLineInfo[];
+    internetBox?: InternetBoxInfo;
+    insuranceContracts?: InsuranceContractInfo[];
+    manualBilling?: ManualBillingInfo;
+  } = {
     documentId: document.id,
     fileName: document.fileName,
     documentType: inferredDocumentType,
     providerName,
     subscriptionType: getSubscriptionType(inferredDocumentType),
-    invoiceAmount: energyBilling?.amount ?? reverseInvoiceAmount ?? profileInvoiceAmount,
+    invoiceAmount: effectiveManualBilling
+      ? effectiveManualBilling.amount
+      : insuranceContracts.length > 0
+        ? insuranceContracts.reduce((total, contract) => total + contract.yearlyAmount, 0)
+        : manualCorrections?.isMultiContract
+          ? undefined
+          : energyBilling?.amount ?? reverseInvoiceAmount ?? profileInvoiceAmount,
     customer: Object.values(finalCustomer).some(Boolean) ? finalCustomer : undefined,
     provider,
-    energyBilling
+    energyBilling,
+    energyServiceLines: energyServiceLines.length > 0 ? energyServiceLines : undefined,
+    internetBox,
+    manualBilling: effectiveManualBilling,
+    insuranceContracts: insuranceContracts.length > 0 ? insuranceContracts : undefined
   };
 
   return profile;
@@ -648,6 +991,16 @@ function inferDocumentTypeFromContent(
     `${document.fileName} ${document.provider ?? ""} ${providerName ?? ""} ${document.extractedText}`
   );
 
+  if (/\b(macif|avis\s+d\s*echeance|soci[eé]taire|deux\s+roues|bien\s+immobilier|prevoyance|pr[eé]voyance|cotisation\s+ttc)\b/.test(text)) {
+    if (/\b(bien\s+immobilier|habitation|residence\s+principale|logement)\b/.test(text)) {
+      return "home_insurance";
+    }
+    if (/\b(deux\s+roues|vehicule|immatriculation|moto|kawasaki)\b/.test(text)) {
+      return "car_insurance";
+    }
+    return "home_insurance";
+  }
+
   if (
     /\b(edf|electricite|electricit[eé]|enedis|linky|kwh|compteur)\b/.test(text)
   ) {
@@ -666,15 +1019,15 @@ function inferDocumentTypeFromContent(
     return "internet_invoice";
   }
 
-  if (/\b(assurance auto|vehicule|immatriculation|bonus malus)\b/.test(text)) {
+  if (/\b(assurance auto|vehicule|immatriculation|bonus malus|deux roues|moto)\b/.test(text)) {
     return "car_insurance";
   }
 
-  if (/\b(assurance habitation|multirisque habitation|logement)\b/.test(text)) {
+  if (/\b(assurance habitation|multirisque habitation|logement|bien immobilier)\b/.test(text)) {
     return "home_insurance";
   }
 
-  if (/\b(mutuelle|complementaire sante|assurance sante)\b/.test(text)) {
+  if (/\b(mutuelle|complementaire sante|assurance sante|prevoyance|pr[eé]voyance)\b/.test(text)) {
     return "health_insurance";
   }
 
@@ -855,6 +1208,38 @@ export function getEnergyBillingInfoFromProfile(
     ?.energyBilling;
 }
 
+export function getEnergyServiceLinesFromProfile(
+  profile?: DocumentPartyProfile
+) {
+  return (
+    profile as (DocumentPartyProfile & { energyServiceLines?: EnergyServiceLineInfo[] }) | undefined
+  )?.energyServiceLines ?? [];
+}
+
+export function getInsuranceContractsFromProfile(
+  profile?: DocumentPartyProfile
+) {
+  return (
+    profile as (DocumentPartyProfile & { insuranceContracts?: InsuranceContractInfo[] }) | undefined
+  )?.insuranceContracts ?? [];
+}
+
+export function getInternetBoxInfoFromProfile(
+  profile?: DocumentPartyProfile
+) {
+  return (
+    profile as (DocumentPartyProfile & { internetBox?: InternetBoxInfo }) | undefined
+  )?.internetBox;
+}
+
+function getManualBillingInfoFromProfile(
+  profile?: DocumentPartyProfile
+) {
+  return (
+    profile as (DocumentPartyProfile & { manualBilling?: ManualBillingInfo }) | undefined
+  )?.manualBilling;
+}
+
 export function attachDocumentProfileToExpense(
   expense: Expense,
   documentProfiles: Record<string, DocumentPartyProfile>
@@ -873,32 +1258,75 @@ export function attachDocumentProfileToExpense(
     expense.provider && !isGenericProvider(expense.provider) ? expense.provider : undefined,
     expense.provider
   );
-  const inferredCategory = inferExpenseCategoryFromDocumentType(profile.documentType);
-  const inferredSubcategory = inferExpenseSubcategoryFromDocumentType(profile.documentType);
+  const inferenceDocumentType =
+    expense.category === ExpenseCategory.INSURANCE && expense.documentType
+      ? expense.documentType
+      : profile.documentType;
+  const inferredCategory = inferExpenseCategoryFromDocumentType(inferenceDocumentType);
+  const inferredSubcategory = inferExpenseSubcategoryFromDocumentType(inferenceDocumentType);
   const energyBilling = getEnergyBillingInfoFromProfile(profile);
+  const internetBox = getInternetBoxInfoFromProfile(profile);
+  const manualBilling = getManualBillingInfoFromProfile(profile);
+  const shouldApplyManualBilling = Boolean(manualBilling && !manualBilling.isMultiContract);
+  const isSeparatedEnergyExpense =
+    expense.category === ExpenseCategory.ENERGY &&
+    (expense.subcategory === ExpenseSubcategory.GAS ||
+      expense.subcategory === ExpenseSubcategory.ELECTRICITY) &&
+    typeof expense.monthlyAmount === "number" &&
+    Number.isFinite(expense.monthlyAmount) &&
+    expense.monthlyAmount > 0;
   const finalSubcategory =
     inferredCategory === ExpenseCategory.ENERGY &&
     energyBilling?.hasElectricity &&
     energyBilling.hasGas
       ? undefined
+      : inferenceDocumentType === "internet_invoice"
+        ? ExpenseSubcategory.INTERNET
       : inferredSubcategory;
   const monthlyAmount =
-    inferredCategory === ExpenseCategory.ENERGY && energyBilling?.monthlyAmount != null
+    shouldApplyManualBilling && manualBilling?.monthlyAmount != null
+      ? manualBilling.monthlyAmount
+      : isSeparatedEnergyExpense
+      ? expense.monthlyAmount
+      : inferredCategory === ExpenseCategory.ENERGY && energyBilling?.monthlyAmount != null
       ? energyBilling.monthlyAmount
+      : expense.category === ExpenseCategory.INSURANCE
+        ? expense.monthlyAmount
       : profile.invoiceAmount ?? expense.monthlyAmount;
   const safeMonthlyAmount =
     typeof monthlyAmount === "number" && Number.isFinite(monthlyAmount)
       ? monthlyAmount
       : 0;
   const safeYearlyAmount =
-    inferredCategory === ExpenseCategory.ENERGY &&
+    shouldApplyManualBilling &&
+    typeof manualBilling?.yearlyAmount === "number" &&
+    Number.isFinite(manualBilling.yearlyAmount)
+      ? manualBilling.yearlyAmount
+      : isSeparatedEnergyExpense &&
+    typeof expense.yearlyAmount === "number" &&
+    Number.isFinite(expense.yearlyAmount)
+      ? expense.yearlyAmount
+      : inferredCategory === ExpenseCategory.ENERGY &&
     typeof energyBilling?.yearlyAmount === "number" &&
     Number.isFinite(energyBilling.yearlyAmount)
       ? energyBilling.yearlyAmount
+      : expense.category === ExpenseCategory.INSURANCE &&
+          typeof expense.yearlyAmount === "number" &&
+          Number.isFinite(expense.yearlyAmount)
+        ? expense.yearlyAmount
       : safeMonthlyAmount * 12;
 
   return {
     ...expense,
+    ...(internetBox
+      ? {
+          internetAccessTechnology: internetBox.technology,
+          internetPromoDetected: internetBox.hasPromo,
+          internetCommitmentDetected: internetBox.hasCommitment,
+          internetTvIncluded: internetBox.hasTvIncluded,
+          internetBundledMobile: internetBox.isBundledMobile
+        }
+      : {}),
     provider: finalProvider,
     documentType: expense.documentType ?? profile.documentType,
     sourceDocumentId: profile.documentId,
@@ -907,10 +1335,16 @@ export function attachDocumentProfileToExpense(
     contractNumber: expense.contractNumber ?? profile.customer?.contractNumber,
     invoiceNumber: expense.invoiceNumber ?? profile.customer?.invoiceNumber,
     phone: expense.phone ?? profile.customer?.phone,
+    billingAmount: manualBilling?.amount ?? expense.billingAmount,
+    billingFrequency: manualBilling?.frequency ?? expense.billingFrequency,
     monthlyAmount: safeMonthlyAmount,
     yearlyAmount: safeYearlyAmount,
     recurrence:
-      inferredCategory === ExpenseCategory.ENERGY && energyBilling
+      shouldApplyManualBilling && manualBilling
+        ? manualBilling.recurrence
+        : isSeparatedEnergyExpense
+        ? expense.recurrence
+        : inferredCategory === ExpenseCategory.ENERGY && energyBilling
         ? energyBilling.recurrence
         : expense.recurrence,
     category:
@@ -918,7 +1352,11 @@ export function attachDocumentProfileToExpense(
         ? inferredCategory
         : expense.category,
     subcategory:
-      !expense.subcategory || expense.subcategory === ExpenseSubcategory.OTHER
+      inferenceDocumentType === "internet_invoice"
+        ? ExpenseSubcategory.INTERNET
+      : expense.category === ExpenseCategory.INSURANCE && expense.subcategory
+        ? expense.subcategory
+        : !expense.subcategory || expense.subcategory === ExpenseSubcategory.OTHER
         ? finalSubcategory
         : expense.subcategory
   };

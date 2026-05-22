@@ -8,6 +8,7 @@ import { Card } from "@/components/ui/Card";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { getDocumentTypeLabel } from "@/features/upload";
 import {
+  applyDocumentCorrections,
   getStoredUploadedDocuments,
   getStoredUploadedDocumentsServer
 } from "@/features/upload/storage";
@@ -16,7 +17,8 @@ import { formatCurrency } from "@/lib/utils";
 import type { MockAnalysis, UploadedDocument } from "@/types";
 import { generateMockAnalysisFromDocuments } from "./service";
 import {
-  getStoredAnalysisServer,
+  AnalysisServerError,
+  MOCK_ANALYSIS_STORAGE_KEY,
   getStoredMockAnalysis,
   isAnalysisForDocuments,
   refreshStoredAnalysisServer,
@@ -46,6 +48,32 @@ function hasUsableAmounts(analysis: MockAnalysis | null) {
   );
 }
 
+function isLikelyMultiContractInsuranceDocument(document: UploadedDocument) {
+  const fileName = document.fileName.toLowerCase();
+  return (
+    document.detectedCategory === "INSURANCE" &&
+    (fileName.includes("macif") ||
+      fileName.includes("avis d echeance") ||
+      fileName.includes("avis d'echeance") ||
+      fileName.includes("sociétaire") ||
+      fileName.includes("societaire"))
+  );
+}
+
+function hasUserCorrections(document: UploadedDocument) {
+  const corrections = document.userCorrections;
+  if (!corrections) return false;
+
+  return Boolean(
+    corrections.provider?.trim() ||
+      corrections.documentType ||
+      corrections.amount ||
+      corrections.frequency ||
+      corrections.isMultiContract ||
+      corrections.notes?.trim()
+  );
+}
+
 export function AnalysisRunner() {
   const [documents, setDocuments] = useState<UploadedDocument[]>([]);
   const [analysis, setAnalysis] = useState<MockAnalysis | null>(null);
@@ -64,6 +92,7 @@ export function AnalysisRunner() {
       const usableDocuments = storedDocuments.filter(
         (document) => document.status === "ready"
       );
+      const usableDocumentsWithCorrections = applyDocumentCorrections(usableDocuments);
       const storedAnalysis = getStoredMockAnalysis();
 
       setDocuments(storedDocuments);
@@ -81,24 +110,49 @@ export function AnalysisRunner() {
 
         if (index === analysisSteps.length - 1) {
           const hasCurrentAnalysis = isAnalysisForDocuments(storedAnalysis, storedDocuments);
-          const serverAnalysis = await getStoredAnalysisServer();
-          const hasServerAnalysis =
-            isAnalysisForDocuments(serverAnalysis, storedDocuments) &&
-            hasUsableAmounts(serverAnalysis);
-          const refreshedAnalysis =
-            hasServerAnalysis && serverAnalysis
-              ? serverAnalysis
-              : await refreshStoredAnalysisServer(usableDocuments);
+          const hasCorrectedDocuments = usableDocumentsWithCorrections.some(hasUserCorrections);
+          const hasMultiContractInsurance = usableDocumentsWithCorrections.some(
+            isLikelyMultiContractInsuranceDocument
+          );
+          let refreshedAnalysis: MockAnalysis | null = null;
+
+          try {
+            refreshedAnalysis = await refreshStoredAnalysisServer(usableDocumentsWithCorrections, {
+              force: true,
+              throwOnError: true
+            });
+          } catch (error) {
+            if (error instanceof AnalysisServerError) {
+              console.warn("[FUTEO_ANALYSIS_BLOCKED]", error.details);
+            } else {
+              console.warn("[FUTEO_ANALYSIS_BLOCKED]", error);
+            }
+          }
+
+          if (!refreshedAnalysis && (hasCorrectedDocuments || hasMultiContractInsurance)) {
+            window.localStorage.removeItem(MOCK_ANALYSIS_STORAGE_KEY);
+            setAnalysis(null);
+            setServiceMessage(
+              hasCorrectedDocuments
+                ? "Analyse serveur nécessaire pour appliquer vos corrections."
+                : "Analyse serveur nécessaire pour ce document multi-contrats."
+            );
+            setIsComplete(true);
+            return;
+          }
+
           const currentAnalysis =
             refreshedAnalysis ??
             (hasCurrentAnalysis && hasUsableAmounts(storedAnalysis) && storedAnalysis
               ? storedAnalysis
-              : generateMockAnalysisFromDocuments(usableDocuments));
+              : generateMockAnalysisFromDocuments(usableDocumentsWithCorrections));
 
           if (currentAnalysis) {
             storeMockAnalysis(currentAnalysis);
             setServiceMessage(
-              "Analyse locale préparée à partir des documents ajoutés. Les services OCR et IA seront connectés ensuite."
+              refreshedAnalysis
+                ? null
+                : "Analyse locale préparée à partir des documents ajoutés. Les services OCR et IA seront connectés ensuite."
             );
           }
 

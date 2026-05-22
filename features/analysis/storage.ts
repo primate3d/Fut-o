@@ -1,7 +1,25 @@
 import { getStoredAccessKey } from "@/features/billing/access-keys";
+import { applyDocumentCorrections } from "@/features/upload/storage";
 import type { MockAnalysis, UploadedDocument } from "@/types";
 
 export const MOCK_ANALYSIS_STORAGE_KEY = "futeo.mockAnalysis";
+
+export type AnalysisServerErrorDetails = {
+  code?: string;
+  documentCount: number;
+  message: string;
+  status: number;
+};
+
+export class AnalysisServerError extends Error {
+  details: AnalysisServerErrorDetails;
+
+  constructor(details: AnalysisServerErrorDetails) {
+    super(details.message);
+    this.name = "AnalysisServerError";
+    this.details = details;
+  }
+}
 
 export async function getStoredAnalysisServer(): Promise<MockAnalysis | null> {
   const activeKey = getStoredAccessKey();
@@ -84,25 +102,76 @@ export function isEnrichedAnalysisForDocuments(
 }
 
 export async function refreshStoredAnalysisServer(
-  documents: UploadedDocument[]
+  documents: UploadedDocument[],
+  options?: { force?: boolean; throwOnError?: boolean }
 ): Promise<MockAnalysis | null> {
   const activeKey = getStoredAccessKey();
   if (!activeKey || documents.length === 0) return null;
+  const documentsWithCorrections = applyDocumentCorrections(documents);
 
-  const response = await fetch("/api/analyse", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json"
-    },
-    body: JSON.stringify({
-      documents,
-      code: activeKey.code
-    })
+  console.info("[FUTEO_ANALYSIS_POST]", {
+    code: activeKey.code,
+    documentCount: documentsWithCorrections.length,
+    force: options?.force ?? false
   });
 
-  if (!response.ok) return null;
+  let response: Response;
+  try {
+    response = await fetch("/api/analyse", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        documents: documentsWithCorrections,
+        code: activeKey.code,
+        force: options?.force ?? false
+      })
+    });
+  } catch (error) {
+    const message =
+      error instanceof Error ? error.message : "Erreur reseau pendant POST /api/analyse";
+    const details = {
+      code: activeKey.code,
+      documentCount: documentsWithCorrections.length,
+      message,
+      status: 0
+    };
+    console.warn("[FUTEO_ANALYSIS_POST_ERROR]", details);
+    if (options?.throwOnError) {
+      throw new AnalysisServerError(details);
+    }
+    return null;
+  }
+
+  if (!response.ok) {
+    let message = `POST /api/analyse a echoue (${response.status})`;
+    try {
+      const payload = (await response.json()) as { error?: string; details?: string };
+      message = payload.details || payload.error || message;
+    } catch {
+      // Keep the HTTP status message when the body is not JSON.
+    }
+    const details = {
+      code: activeKey.code,
+      documentCount: documentsWithCorrections.length,
+      message,
+      status: response.status
+    };
+    console.warn("[FUTEO_ANALYSIS_POST_ERROR]", details);
+    if (options?.throwOnError) {
+      throw new AnalysisServerError(details);
+    }
+    return null;
+  }
 
   const { analysis } = (await response.json()) as { analysis?: MockAnalysis };
+  console.info("[FUTEO_ANALYSIS_POST_OK]", {
+    code: activeKey.code,
+    documentCount: documentsWithCorrections.length,
+    expensesCount: analysis?.expenses.length ?? 0,
+    status: response.status
+  });
   return analysis ?? null;
 }
 

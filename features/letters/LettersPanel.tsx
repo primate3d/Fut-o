@@ -6,7 +6,6 @@ import {
   Download,
   ExternalLink,
   FileSearch,
-  Mail,
   Printer,
   Send
 } from "lucide-react";
@@ -33,7 +32,7 @@ import { expenseCategoryLabels } from "@/lib/expense-summary";
 import { getProviderBranding } from "@/lib/provider-branding";
 import { formatCurrency } from "@/lib/utils";
 import { getSelectedAlternativeOffer } from "@/features/recommendations/selected-offer";
-import type { GeneratedLetter, LetterPersonalization, MockAnalysis } from "@/types";
+import type { CustomerProfile, GeneratedLetter, LetterPersonalization, MockAnalysis } from "@/types";
 import { generateLettersFromAnalysis, renderLetter } from "./service";
 
 const initialPersonalization: LetterPersonalization = {
@@ -68,14 +67,48 @@ function splitFullName(fullName?: string) {
   };
 }
 
+function hasText(value?: string) {
+  return typeof value === "string" && value.trim().length > 0;
+}
+
+function mergeCustomerWhenMissing(
+  base: CustomerProfile | undefined,
+  fallback: CustomerProfile | undefined
+) {
+  if (!fallback) return base;
+
+  const merged: CustomerProfile = { ...(base ?? {}) };
+  for (const [key, value] of Object.entries(fallback) as Array<
+    [keyof CustomerProfile, CustomerProfile[keyof CustomerProfile]]
+  >) {
+    if (
+      typeof value === "string" &&
+      value.trim().length > 0 &&
+      !hasText(merged[key] as string | undefined)
+    ) {
+      merged[key] = value as never;
+    }
+  }
+
+  return Object.values(merged).some(Boolean) ? merged : undefined;
+}
+
+function getMergedCustomerFromAnalysis(analysis: MockAnalysis | null) {
+  if (!analysis) return undefined;
+
+  return Object.values(analysis.detectedParties?.documents ?? {}).reduce<
+    CustomerProfile | undefined
+  >(
+    (customer, documentProfile) =>
+      mergeCustomerWhenMissing(customer, documentProfile.customer),
+    analysis.detectedParties?.customer
+  );
+}
+
 function getPersonalizationFromAnalysis(
   analysis: MockAnalysis
 ): Partial<LetterPersonalization> {
-  const customer =
-    analysis.detectedParties?.customer ??
-    Object.values(analysis.detectedParties?.documents ?? {}).find(
-      (documentProfile) => documentProfile.customer
-    )?.customer;
+  const customer = getMergedCustomerFromAnalysis(analysis);
   if (!customer) return {};
 
   const nameParts = splitFullName(customer.fullName);
@@ -106,18 +139,11 @@ function mergeDetectedPersonalization(
 }
 
 function hasCustomerDataForLetters(analysis: MockAnalysis | null) {
-  const customer =
-    analysis?.detectedParties?.customer ??
-    Object.values(analysis?.detectedParties?.documents ?? {}).find(
-      (documentProfile) => documentProfile.customer
-    )?.customer;
+  const customer = getMergedCustomerFromAnalysis(analysis);
+  const hasFullName = hasText(customer?.fullName);
+  const hasFirstAndLastName = hasText(customer?.firstName) && hasText(customer?.lastName);
 
-  return Boolean(
-    customer &&
-      Object.values(customer).some((value) =>
-        typeof value === "string" ? value.trim().length > 0 : Boolean(value)
-      )
-  );
+  return Boolean(customer && (hasFullName || hasFirstAndLastName) && hasText(customer.address));
 }
 
 function hasAnalysisDataForLetters(analysis: MockAnalysis | null) {
@@ -165,13 +191,33 @@ function downloadTextFile(fileName: string, content: string) {
 
 function generatePDF(fileName: string, title: string, content: string) {
   const doc = new jsPDF();
+  const pageTop = 20;
+  const pageBottom = 270;
+  const lineHeight = 6;
+  let y = pageTop;
+
+  const ensureSpace = (neededHeight = lineHeight) => {
+    if (y + neededHeight > pageBottom) {
+      doc.addPage();
+      y = pageTop;
+    }
+  };
   doc.setFontSize(20);
-  doc.text(title, 20, 20);
+  ensureSpace(10);
+  doc.text(title, 20, y);
+  y = 40;
   doc.setFontSize(11);
   const splitText = doc.splitTextToSize(content, 170);
-  doc.text(splitText, 20, 40);
+  splitText.forEach((line: string) => {
+    ensureSpace(lineHeight);
+    doc.text(line, 20, y);
+    y += lineHeight;
+  });
   doc.setFontSize(8);
   doc.setTextColor(150, 150, 150);
+  if (y > pageBottom) {
+    doc.addPage();
+  }
   doc.text("Document préparé avec Futéo", 20, 285);
   doc.save(fileName);
 }
@@ -399,16 +445,17 @@ export function LettersPanel() {
         ))}
       </div>
 
-      <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_minmax(360px,480px)]">
-        <div className="space-y-4">
+      <div className="grid gap-6 xl:grid-cols-[minmax(320px,430px)_minmax(0,1fr)]">
+        <div className="space-y-4 xl:sticky xl:top-24 xl:self-start">
           {letters.map((letter) => (
             <Card
               className={
                 selectedLetterId === letter.id
-                  ? "border-sage-500 bg-sage-50"
-                  : "bg-white"
+                  ? "cursor-pointer border-sage-500 bg-sage-50"
+                  : "cursor-pointer bg-white transition hover:border-sage-300 hover:bg-sage-50/40"
               }
               key={letter.id}
+              onClick={() => setSelectedLetterId(letter.id)}
             >
               <div className="flex items-start justify-between gap-3">
                 <div>
@@ -417,10 +464,10 @@ export function LettersPanel() {
                       logoUrl={getProviderBranding(letter.provider).logoUrl}
                       provider={letter.provider}
                     />
-                    <div>
-                      <Mail className="text-sage-700" size={18} />
-                      <Badge tone="green">{getLetterTypeLabel(letter.type)}</Badge>
-                    </div>
+                    <Badge tone="green">{getLetterTypeLabel(letter.type)}</Badge>
+                    {selectedLetterId === letter.id ? (
+                      <Badge tone="blue">Selectionnee</Badge>
+                    ) : null}
                   </div>
                   <h2 className="mt-3 text-lg font-semibold text-navy-900">
                     {letter.title}
@@ -519,9 +566,79 @@ export function LettersPanel() {
             </div>
           </Card>
 
+          {selectedLetter ? (
+            <Card className="bg-white">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                <div>
+                  <p className="text-sm font-semibold uppercase tracking-wide text-sage-700">
+                    Apercu de la demarche
+                  </p>
+                  <h2 className="mt-2 text-xl font-bold text-navy-900">
+                    {selectedLetter.subject}
+                  </h2>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    onClick={() => copyLetter(selectedLetter)}
+                    type="button"
+                    variant="secondary"
+                  >
+                    <Copy className="mr-2" size={17} />
+                    Copier
+                  </Button>
+                  <Button
+                    onClick={() =>
+                      generatePDF(
+                        `${selectedLetter.provider}-${selectedLetter.type}.pdf`.replaceAll(" ", "-"),
+                        selectedLetter.title,
+                        renderedLetter
+                      )
+                    }
+                    type="button"
+                    variant="ghost"
+                  >
+                    <Printer className="mr-2" size={17} />
+                    PDF
+                  </Button>
+                  <Button
+                    onClick={() => sendEmail(selectedLetter.subject, renderedLetter)}
+                    type="button"
+                    variant="ghost"
+                  >
+                    <Send className="mr-2" size={17} />
+                    Email
+                  </Button>
+                  <Button
+                    onClick={() =>
+                      downloadTextFile(
+                        `${selectedLetter.provider}-${selectedLetter.type}.txt`.replaceAll(
+                          " ",
+                          "-"
+                        ),
+                        renderedLetter
+                      )
+                    }
+                    type="button"
+                    variant="ghost"
+                  >
+                    <Download className="mr-2" size={17} />
+                    TXT
+                  </Button>
+                </div>
+              </div>
+              {copyMessage ? (
+                <p className="mt-4 text-sm font-medium text-sage-700">{copyMessage}</p>
+              ) : null}
+              <pre className="mt-6 max-h-[58vh] overflow-auto whitespace-pre-wrap rounded-xl border border-navy-100 bg-white px-5 py-6 font-sans text-sm leading-7 text-navy-900 shadow-sm sm:px-8">
+                {renderedLetter}
+              </pre>
+            </Card>
+          ) : null}
+
         </div>
       </div>
 
+      {/*
       {selectedLetter ? (
             <Card className="bg-white">
               <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
@@ -600,6 +717,7 @@ export function LettersPanel() {
               </pre>
             </Card>
       ) : null}
+      */}
     </section>
   );
 }

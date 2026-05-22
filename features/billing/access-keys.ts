@@ -198,6 +198,24 @@ export function markFreeTrialUsed(date = new Date().toISOString()) {
   window.localStorage.setItem(FREE_TRIAL_USAGE_STORAGE_KEY, date);
 }
 
+export type AccessKeyStatus = {
+  key: AccessKey | null;
+  customerEmail: string | null;
+  hasQuota: boolean;
+  usesRemaining: number;
+  quotaExceeded: boolean;
+};
+
+export async function getAccessKeyStatusServer(code: string): Promise<AccessKeyStatus | null> {
+  try {
+    const response = await fetch(`/api/keys/status?code=${code}`);
+    if (!response.ok) return null;
+    return (await response.json()) as AccessKeyStatus;
+  } catch {
+    return null;
+  }
+}
+
 export async function validateAccessKeyServer(code: string): Promise<AccessKey | null> {
   try {
     const response = await fetch(`/api/keys/status?code=${code}`);

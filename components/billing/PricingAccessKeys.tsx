@@ -172,6 +172,15 @@ export function PricingAccessKeys() {
           />
         ))}
       </div>
+      <Card className="border-sage-200 bg-sage-50/60">
+        <p className="font-semibold text-[#12243d]">💡 Pourquoi Futéo est-il payant ?</p>
+        <p className="mt-2 text-sm leading-6 text-slate-600">
+          Contrairement aux comparateurs "gratuits", nous ne revendons jamais vos données
+          personnelles à des fins commerciales et nous ne touchons aucune commission des
+          fournisseurs. Vous payez votre clé d'accès, et en échange, notre analyse reste 100%
+          neutre, indépendante et sans aucun harcèlement téléphonique.
+        </p>
+      </Card>
     </div>
   );
 }
@@ -310,6 +319,16 @@ function PricingPlanCard({
               ? "Accès gratuit"
               : "Obtenir mon accès"}
         </Button>
+        {plan.plan === "foyer" || plan.plan === "famille" ? (
+          <p
+            className={`mt-3 text-xs leading-5 ${
+              plan.highlighted ? "text-white/65" : "text-slate-500"
+            }`}
+          >
+            💳 Achat 100% sécurisé via Stripe. Accès unique, sans aucun abonnement caché ni
+            prélèvement futur.
+          </p>
+        ) : null}
         {plan.ctaHelper ? (
           <p
             className={`mt-3 text-xs leading-5 ${
