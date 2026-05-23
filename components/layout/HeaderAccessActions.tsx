@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/Button";
 import {
@@ -9,7 +10,7 @@ import {
 } from "@/features/billing";
 import type { AccessKey } from "@/types";
 
-export function HeaderAccessActions() {
+export function HeaderAccessActions({ mobile = false }: { mobile?: boolean }) {
   const [accessKey, setAccessKey] = useState<AccessKey | null>(null);
 
   useEffect(() => {
@@ -50,6 +51,17 @@ export function HeaderAccessActions() {
   const workspaceHref = hasValidatedAccess
     ? "/tableau-de-bord"
     : "/activer-cle?redirect=/tableau-de-bord";
+
+  if (mobile) {
+    return (
+      <Link
+        className="rounded-lg px-3 py-2.5 text-sm font-semibold text-slate-600 hover:bg-sage-50 hover:text-navy-900"
+        href={workspaceHref}
+      >
+        Espace utilisateur
+      </Link>
+    );
+  }
 
   return (
     <div className="hidden items-center gap-4 md:flex">

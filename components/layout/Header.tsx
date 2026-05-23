@@ -36,10 +36,7 @@ export function Header() {
           </summary>
           <div className="absolute right-0 mt-3 w-64 rounded-xl border border-navy-100 bg-white p-3 shadow-soft">
             <nav className="grid gap-1">
-              {[
-                ...siteConfig.mainNav,
-                { label: "Espace utilisateur", href: "/tableau-de-bord" }
-              ].map((item) => (
+              {siteConfig.mainNav.map((item) => (
                 <Link
                   className="rounded-lg px-3 py-2.5 text-sm font-semibold text-slate-600 hover:bg-sage-50 hover:text-navy-900"
                   href={item.href}
@@ -48,6 +45,7 @@ export function Header() {
                   {item.label}
                 </Link>
               ))}
+              <HeaderAccessActions mobile />
             </nav>
           </div>
         </details>
