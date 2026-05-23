@@ -19,7 +19,7 @@ export function DeleteDocumentsButton() {
     // Le bouton est "pret" si l'analyse existe (traitement termine)
     setIsReady(Boolean(analysis));
     // Verifie s'il reste des documents sources a supprimer
-    setHasDocuments(docs.length > 0);
+    setHasDocuments(docs.some((document) => document.status !== "purged"));
   }, []);
 
   function handleDelete() {

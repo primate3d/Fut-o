@@ -19,9 +19,19 @@ const faqItems = [
       "Non. Vous choisissez les éléments utiles à ajouter. Plus le dossier est complet, plus la lecture est précise, mais rien ne vous oblige à tout transmettre."
   },
   {
-    question: "Quelle différence entre les plans ?",
+    question: "Quelle différence entre les formules ?",
     answer:
-      "Le plan Simple donne une première lecture. L'Audit foyer ajoute des pistes de comparaison. Le Premium inclut le rapport complet et les courriers prêts à adapter."
+      "Découverte gratuite permet un premier aperçu limité. Audit Foyer, à 9,90 €, permet une analyse complète des principaux contrats du foyer avec courriers et rapport. Audit Famille, à 19,90 €, est adapté aux foyers comportant plusieurs documents ou plusieurs contrats à examiner."
+  },
+  {
+    question: "Quels secteurs sont réellement couverts ?",
+    answer:
+      "Futéo couvre actuellement le mobile, la box et internet, l'électricité et l'assurance habitation. L'assurance auto ou deux roues reste partiellement couverte. La mutuelle, la prévoyance et l'assurance emprunteur ne sont pas encore disponibles comme catégories comparables."
+  },
+  {
+    question: "Puis-je commencer sans importer de document ?",
+    answer:
+      "Oui. Une saisie manuelle est disponible depuis l'espace Résultats si vous préférez ne pas téléverser de fichier ou si votre document contient plusieurs contrats distincts."
   },
   {
     question: "Le paiement réel est-il déjà connecté ?",

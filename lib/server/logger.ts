@@ -1,9 +1,3 @@
-/**
- * Utilitaire de logging structuré pour Futéo.
- * Conçu pour être exploitable en temps réel par des services comme Vercel Logs, 
- * Datadog ou BetterStack.
- */
-
 type LogLevel = "INFO" | "WARN" | "ERROR" | "DEBUG";
 
 interface LogContext {
@@ -18,45 +12,74 @@ interface LogContext {
   metadata?: Record<string, unknown>;
 }
 
+const SENSITIVE_FIELD_PATTERN =
+  /first500|extractedText|address|fullName|firstName|lastName|customerNumber|contractNumber|invoiceNumber|phone|email|keyCode|physicalFileName|fullPath|fileName|amount|price|saving|error/i;
+
+function maskString(value: string) {
+  return value
+    .replace(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi, "[EMAIL_MASQUE]")
+    .replace(/\b(?:\d[ .-]?){8,14}\b/g, "[NUMERO_MASQUE]")
+    .slice(0, 240);
+}
+
+function sanitizeLogValue(value: unknown, fieldName?: string): unknown {
+  if (fieldName && SENSITIVE_FIELD_PATTERN.test(fieldName)) {
+    return "[MASQUE]";
+  }
+
+  if (Array.isArray(value)) {
+    return value.map((item) => sanitizeLogValue(item));
+  }
+
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value).map(([key, item]) => [key, sanitizeLogValue(item, key)])
+    );
+  }
+
+  return typeof value === "string" ? maskString(value) : value;
+}
+
 export function log(level: LogLevel, message: string, context: LogContext) {
-  const timestamp = new Date().toISOString();
+  const production = process.env.NODE_ENV === "production";
+  const safeContext = production
+    ? (sanitizeLogValue(context) as LogContext)
+    : context;
   const logEntry = {
-    timestamp,
+    timestamp: new Date().toISOString(),
     level,
     message,
-    ...context,
+    ...safeContext,
     env: process.env.NODE_ENV || "development"
   };
 
-  // En production, on utilise JSON.stringify pour le parsing automatique par les collecteurs de logs
-  if (process.env.NODE_ENV === "production") {
+  if (production) {
     console.log(JSON.stringify(logEntry));
-  } else {
-    // En développement, on garde un format lisible
-    const color = level === "ERROR" ? "\x1b[31m" : level === "WARN" ? "\x1b[33m" : "\x1b[32m";
-    const reset = "\x1b[0m";
-    console.log(
-      `${color}[${level}]${reset} ${timestamp} | ${context.service}:${context.action} | ${message}`,
-      context.metadata ? context.metadata : ""
-    );
+    return;
   }
+
+  const color =
+    level === "ERROR" ? "\x1b[31m" : level === "WARN" ? "\x1b[33m" : "\x1b[32m";
+  console.log(
+    `${color}[${level}]\x1b[0m ${logEntry.timestamp} | ${context.service}:${context.action} | ${message}`,
+    context.metadata ?? ""
+  );
 }
 
 export const logger = {
-  info: (msg: string, ctx: LogContext) => log("INFO", msg, ctx),
-  warn: (msg: string, ctx: LogContext) => log("WARN", msg, ctx),
-  error: (msg: string, ctx: LogContext) => log("ERROR", msg, ctx),
-  debug: (msg: string, ctx: LogContext) => log("DEBUG", msg, ctx),
+  info: (message: string, context: LogContext) => log("INFO", message, context),
+  warn: (message: string, context: LogContext) => log("WARN", message, context),
+  error: (message: string, context: LogContext) => log("ERROR", message, context),
+  debug: (message: string, context: LogContext) => log("DEBUG", message, context)
 };
 
-/**
- * Helper pour mesurer la latence d'une opération
- */
 export async function withLatency<T>(
   action: () => Promise<T>
 ): Promise<{ result: T; latencyMs: number }> {
   const start = performance.now();
   const result = await action();
-  const end = performance.now();
-  return { result, latencyMs: Math.round(end - start) };
+  return {
+    result,
+    latencyMs: Math.round(performance.now() - start)
+  };
 }

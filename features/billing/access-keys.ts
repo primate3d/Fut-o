@@ -119,6 +119,10 @@ export function isAdminAccessCode(code?: string | null) {
   return code?.trim().toUpperCase() === ADMIN_ACCESS_CODE;
 }
 
+export function isBlockedProductionAdminCode(code?: string | null) {
+  return process.env.NODE_ENV === "production" && isAdminAccessCode(code);
+}
+
 export function createAdminAccessKey(): AccessKey {
   return {
     id: "key_admin_dev",

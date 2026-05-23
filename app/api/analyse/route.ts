@@ -1,7 +1,11 @@
 import { NextResponse } from "next/server";
 import { findKeyByCode, getAnalysisByKey, saveAnalysis, saveKey, deleteAnalysisByKey } from "@/lib/server/db";
 import { analyzeDocumentsWithAI } from "@/features/analysis/ai-service";
-import { createAdminAccessKey, isAdminAccessCode } from "@/features/billing/access-keys";
+import {
+  createAdminAccessKey,
+  isAdminAccessCode,
+  isBlockedProductionAdminCode
+} from "@/features/billing/access-keys";
 import { mockAccessKeys } from "@/data/mock";
 import { allowDevOnlyMocks, env } from "@/lib/env";
 import { logger, withLatency } from "@/lib/server/logger";
@@ -86,7 +90,6 @@ type ExtractionDiagnostic = {
   fileExists: boolean;
   fileSizeBytes: number;
   textLength: number;
-  first500: string;
 };
 
 export async function POST(request: Request) {
@@ -96,6 +99,10 @@ export async function POST(request: Request) {
       code?: string;
       force?: boolean;
     };
+
+    if (isBlockedProductionAdminCode(code)) {
+      return NextResponse.json({ error: "Cle invalide ou non autorisee" }, { status: 403 });
+    }
 
     if (!code) {
       return NextResponse.json({ error: "Code d'accès manquant" }, { status: 400 });
@@ -149,8 +156,7 @@ export async function POST(request: Request) {
         mimeType: doc.mimeType,
         fileExists: Boolean(buffer),
         fileSizeBytes: buffer?.length ?? 0,
-        textLength: 0,
-        first500: ""
+        textLength: 0
       };
 
       logger.info("Diagnostic document avant extraction", {
@@ -178,7 +184,6 @@ export async function POST(request: Request) {
       }
 
       diagnostic.textLength = text.length;
-      diagnostic.first500 = text.slice(0, 500);
       extractionDiagnostics.push(diagnostic);
 
       logger.info("Diagnostic document après extraction", {
@@ -312,6 +317,22 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: "Code manquant" }, { status: 400 });
   }
 
+  if (isBlockedProductionAdminCode(code)) {
+    return NextResponse.json({ error: "Cle invalide ou non autorisee" }, { status: 403 });
+  }
+
+  const key =
+    getLocalAnalysisAccessKey(code) ??
+    (await findKeyByCode(code)) ??
+    (isAdminAccessCode(code) ? createAdminAccessKey() : undefined);
+  if (!key || !key.isActive) {
+    return NextResponse.json({ error: "Cle invalide ou inactive" }, { status: 403 });
+  }
+
+  if (key.expiresAt && new Date(key.expiresAt) < new Date()) {
+    return NextResponse.json({ error: "Cle expiree", expired: true }, { status: 403 });
+  }
+
   const analysis = await getAnalysisByKey(code);
   if (!analysis) {
     return NextResponse.json({ error: "Aucune analyse trouvée" }, { status: 404 });
@@ -331,11 +352,23 @@ export async function DELETE(request: Request) {
     return NextResponse.json({ error: "Code manquant" }, { status: 400 });
   }
 
+  if (isBlockedProductionAdminCode(code)) {
+    return NextResponse.json({ error: "Cle invalide ou non autorisee" }, { status: 403 });
+  }
+
   const key =
     (await findKeyByCode(code)) ??
     (isAdminAccessCode(code) ? createAdminAccessKey() : undefined);
   if (!key) {
     return NextResponse.json({ error: "Clé invalide" }, { status: 403 });
+  }
+
+  if (!key.isActive) {
+    return NextResponse.json({ error: "Cle non active" }, { status: 403 });
+  }
+
+  if (key.expiresAt && new Date(key.expiresAt) < new Date()) {
+    return NextResponse.json({ error: "Cle expiree", expired: true }, { status: 403 });
   }
 
   await deleteAnalysisByKey(code);

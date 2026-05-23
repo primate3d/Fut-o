@@ -1,38 +1,33 @@
 const faqs = [
   {
-    question: "Qui voit mes documents ?",
+    question: "Quelles formules Futéo propose-t-il ?",
     answer:
-      "Futéo utilise uniquement les documents que vous choisissez d'ajouter pour construire votre parcours. Ils ne sont pas affichés publiquement, ni revendus. Les accès techniques dépendent des prestataires réellement connectés au service, qui doivent être listés dans la politique de confidentialité avant lancement."
+      "Futéo propose trois accès personnels : Découverte gratuite à 0 €, Audit Foyer à 9,90 € et Audit Famille à 19,90 €. Chaque accès est sans abonnement et limité dans le temps selon la formule choisie."
   },
   {
-    question: "Quels types de contrats sont pris en charge ?",
+    question: "Quels contrats puis-je analyser aujourd'hui ?",
     answer:
-      "Le service est pensé pour les contrats et dépenses récurrentes du foyer : énergie, internet, mobile, assurances, abonnements, banque, logement, transport ou autres postes réguliers."
+      "Futéo prend actuellement en charge les factures mobiles, les offres box et internet, les documents d'électricité et d'énergie ainsi que l'assurance habitation. L'assurance auto ou deux roues peut être identifiée, mais les alternatives dédiées restent partielles. La mutuelle, la prévoyance et l'assurance emprunteur ne sont pas encore proposées comme secteurs actifs."
   },
   {
-    question: "Combien de temps dure l'accès par clé ?",
+    question: "Puis-je utiliser Futéo sans téléverser un document ?",
     answer:
-      "L'accès par clé est prévu pour un usage personnel et ponctuel. La durée exacte dépend de l'offre affichée au moment de l'achat, avec une logique simple : paiement unique, sans abonnement."
+      "Oui. Vous pouvez utiliser la saisie manuelle depuis l'espace Résultats pour indiquer un fournisseur, un type de contrat, un montant, une fréquence et les coordonnées utiles. Cette option est adaptée si vous préférez ne pas déposer de fichier ou si votre document regroupe plusieurs contrats."
   },
   {
-    question: "Que se passe-t-il si je ne fais aucune démarche après l'analyse ?",
+    question: "Mes documents sont-ils conservés ?",
     answer:
-      "Rien n'est envoyé automatiquement. Futéo vous aide à comprendre, comparer et préparer des courriers. Vous restez libre de ne rien faire, de relire plus tard ou de choisir uniquement certaines démarches."
+      "Les documents que vous choisissez d'importer servent uniquement à préparer votre analyse et vos démarches. Vous pouvez supprimer les fichiers sources depuis votre espace. Les résultats textuels utiles restent accessibles pendant la durée de validité de votre clé."
   },
   {
-    question: "Futéo garantit-il des économies ?",
+    question: "Futéo garantit-il une économie ?",
     answer:
-      "Non. Futéo ne promet pas d'économie automatique. Le service aide à repérer ce qui mérite d'être vérifié et à préparer les actions possibles, mais la décision finale vous appartient."
+      "Non. Futéo affiche une piste d'économie uniquement lorsqu'une alternative moins chère et exploitable est identifiée. Vous restez libre de vérifier l'offre, de la choisir ou de ne réaliser aucune démarche."
   },
   {
     question: "Les courriers sont-ils envoyés automatiquement ?",
     answer:
-      "Non. Les courriers sont préparés pour être relus, adaptés puis utilisés si vous le souhaitez. Aucun courrier n'est envoyé sans action de votre part."
-  },
-  {
-    question: "Dois-je transmettre tous mes documents ?",
-    answer:
-      "Non. Vous pouvez commencer avec les éléments que vous jugez utiles. Plus les documents sont clairs et complets, plus le parcours peut être précis, mais vous gardez toujours le contrôle."
+      "Non. Futéo prépare des courriers personnalisables. Vous devez toujours les relire et décider vous-même de les utiliser ou non."
   }
 ];
 

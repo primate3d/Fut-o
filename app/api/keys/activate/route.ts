@@ -3,6 +3,7 @@ import {
   createAdminAccessKey,
   getAccessDurationDays,
   isAdminAccessCode,
+  isBlockedProductionAdminCode,
   isDiscoveryPlan,
   normalizeAccessKeyPlan
 } from "@/features/billing/access-keys";
@@ -16,6 +17,10 @@ export async function POST(request: Request) {
 
     if (!code) {
       return NextResponse.json({ error: "Code manquant" }, { status: 400 });
+    }
+
+    if (isBlockedProductionAdminCode(code)) {
+      return NextResponse.json({ error: "Cle invalide ou non autorisee" }, { status: 403 });
     }
 
     let key = (await findKeyByCode(code)) ?? (isAdminAccessCode(code) ? createAdminAccessKey() : undefined);

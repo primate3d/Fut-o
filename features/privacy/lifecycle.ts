@@ -2,7 +2,9 @@ import { ACCESS_KEY_STORAGE_KEY, getStoredAccessKey } from "@/features/billing/a
 import { MOCK_ANALYSIS_STORAGE_KEY } from "@/features/analysis/storage";
 import {
   DOCUMENT_CORRECTIONS_STORAGE_KEY,
-  UPLOADED_DOCUMENTS_STORAGE_KEY
+  UPLOADED_DOCUMENTS_STORAGE_KEY,
+  getStoredUploadedDocuments,
+  storeUploadedDocuments
 } from "@/features/upload/storage";
 import { SELECTED_ALTERNATIVE_OFFER_STORAGE_KEY } from "@/features/recommendations/selected-offer";
 
@@ -49,19 +51,9 @@ export async function purgeSourceDocuments() {
     }
   }
 
-  window.localStorage.removeItem(UPLOADED_DOCUMENTS_STORAGE_KEY);
-
-  // On nettoie aussi la référence dans l'analyse pour la cohérence
-  const storedAnalysis = window.localStorage.getItem(MOCK_ANALYSIS_STORAGE_KEY);
-  if (storedAnalysis) {
-    try {
-      const analysis = JSON.parse(storedAnalysis);
-      analysis.documents = [];
-      window.localStorage.setItem(MOCK_ANALYSIS_STORAGE_KEY, JSON.stringify(analysis));
-    } catch (e) {
-      console.error("Erreur lors de la purge des documents dans l'analyse", e);
-    }
-  }
+  storeUploadedDocuments(
+    getStoredUploadedDocuments().map((document) => ({ ...document, status: "purged" }))
+  );
 
   return serverPurged;
 }
@@ -85,7 +77,7 @@ export async function purgeFullAudit() {
       await fetch("/api/documents", {
         method: "DELETE",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ code: activeKey.code, purge: true })
+        body: JSON.stringify({ code: activeKey.code, purge: true, clearRecords: true })
       });
     } catch (error) {
       console.error("Erreur suppression complète serveur:", error);

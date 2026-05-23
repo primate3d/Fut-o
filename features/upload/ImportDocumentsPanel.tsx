@@ -7,7 +7,6 @@ import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import {
-  generateMockAnalysisFromDocuments,
   getStoredAnalysisServer,
   getStoredMockAnalysis,
   MOCK_ANALYSIS_STORAGE_KEY,
@@ -101,7 +100,7 @@ async function purgeStoredDocumentsServer() {
   await fetch("/api/documents", {
     method: "DELETE",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ code: activeKey.code, purge: true })
+    body: JSON.stringify({ code: activeKey.code, purge: true, clearRecords: true })
   });
 }
 
@@ -192,7 +191,7 @@ export function ImportDocumentsPanel() {
   }, [documents, hasLoadedDocuments]);
 
   function shouldAskAuditMode() {
-    return hasExistingAudit && documents.some((document) => document.status === "ready");
+    return hasExistingAudit && documents.some((document) => document.status !== "error");
   }
 
   function getDuplicateFileNames(filesArray: File[]) {
@@ -389,23 +388,13 @@ export function ImportDocumentsPanel() {
       storeMockAnalysis(payload.analysis);
       router.push("/analyse");
     } catch (error) {
-      const hasMultiContractInsurance = usableDocuments.some(
-        isLikelyMultiContractInsuranceDocument
-      );
-
-      if (hasMultiContractInsurance) {
-        clearStoredAnalysis();
-        setStatusMessage("Analyse serveur nécessaire pour ce document multi-contrats.");
-        console.warn("[FUTEO_ANALYSIS_BLOCKED]", error);
-        return;
-      }
-
-      const localAnalysis = generateMockAnalysisFromDocuments(usableDocuments);
-      storeMockAnalysis(localAnalysis);
+      clearStoredAnalysis();
       setStatusMessage(
-        "Analyse locale préparée à partir des documents ajoutés. Les services OCR et IA seront connectés ensuite."
+        usableDocuments.some(isLikelyMultiContractInsuranceDocument)
+          ? "Analyse serveur nécessaire pour ce document multi-contrats."
+          : "L'analyse complète n'a pas abouti. Aucun courrier incomplet n'a été généré. Relancez l'analyse."
       );
-      router.push("/analyse");
+      console.warn("[FUTEO_ANALYSIS_BLOCKED]", error);
     } finally {
       setIsAnalyzing(false);
     }
@@ -441,13 +430,8 @@ export function ImportDocumentsPanel() {
               Document multi-contrats ?
             </h2>
             <p className="mt-2 text-sm leading-6 text-amber-900">
-              Attention : si votre document comporte plusieurs contrats, par exemple
-              un avis d'échéance assurance habitation + auto, la saisie manuelle est
-              obligatoire pour ne pas fausser l'analyse.
-            </p>
-            <p className="mt-1 text-sm leading-6 text-amber-900">
-              Vous pouvez aussi utiliser ce mode si vous préférez ne pas téléverser
-              votre document sur nos serveurs.
+              Document simple : importez votre facture. Document multi-contrats ou
+              confidentialité renforcée : passez par la saisie manuelle.
             </p>
           </div>
           <Button href="/resultats" type="button" variant="secondary">
@@ -635,6 +619,8 @@ export function ImportDocumentsPanel() {
                         tone={
                           document.status === "ready"
                             ? "green"
+                            : document.status === "purged"
+                              ? "neutral"
                             : document.status === "uploading"
                               ? "blue"
                               : document.status === "pending"
@@ -649,6 +635,8 @@ export function ImportDocumentsPanel() {
                           </span>
                         ) : document.status === "ready" ? (
                           "Prêt"
+                        ) : document.status === "purged" ? (
+                          "Source supprimée"
                         ) : document.status === "pending" ? (
                           "En attente"
                         ) : (

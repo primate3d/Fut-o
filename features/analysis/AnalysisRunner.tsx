@@ -15,11 +15,11 @@ import {
 import { expenseCategoryLabels, summarizeExpensesByCategory } from "@/lib/expense-summary";
 import { formatCurrency } from "@/lib/utils";
 import type { MockAnalysis, UploadedDocument } from "@/types";
-import { generateMockAnalysisFromDocuments } from "./service";
 import {
   AnalysisServerError,
   MOCK_ANALYSIS_STORAGE_KEY,
   getStoredMockAnalysis,
+  hasDocumentProfiles,
   isAnalysisForDocuments,
   refreshStoredAnalysisServer,
   storeMockAnalysis
@@ -110,11 +110,21 @@ export function AnalysisRunner() {
 
         if (index === analysisSteps.length - 1) {
           const hasCurrentAnalysis = isAnalysisForDocuments(storedAnalysis, storedDocuments);
+          const hasEnrichedCurrentAnalysis =
+            hasCurrentAnalysis &&
+            hasUsableAmounts(storedAnalysis) &&
+            hasDocumentProfiles(storedAnalysis);
           const hasCorrectedDocuments = usableDocumentsWithCorrections.some(hasUserCorrections);
           const hasMultiContractInsurance = usableDocumentsWithCorrections.some(
             isLikelyMultiContractInsuranceDocument
           );
           let refreshedAnalysis: MockAnalysis | null = null;
+
+          if (hasEnrichedCurrentAnalysis && !hasCorrectedDocuments) {
+            setAnalysis(storedAnalysis);
+            setIsComplete(true);
+            return;
+          }
 
           try {
             refreshedAnalysis = await refreshStoredAnalysisServer(usableDocumentsWithCorrections, {
@@ -129,32 +139,24 @@ export function AnalysisRunner() {
             }
           }
 
-          if (!refreshedAnalysis && (hasCorrectedDocuments || hasMultiContractInsurance)) {
+          if (!refreshedAnalysis) {
             window.localStorage.removeItem(MOCK_ANALYSIS_STORAGE_KEY);
             setAnalysis(null);
             setServiceMessage(
               hasCorrectedDocuments
                 ? "Analyse serveur nécessaire pour appliquer vos corrections."
-                : "Analyse serveur nécessaire pour ce document multi-contrats."
+                : hasMultiContractInsurance
+                  ? "Analyse serveur nécessaire pour ce document multi-contrats."
+                  : "L'analyse complète n'a pas abouti. Aucun résultat incomplet n'a été conservé."
             );
             setIsComplete(true);
             return;
           }
 
-          const currentAnalysis =
-            refreshedAnalysis ??
-            (hasCurrentAnalysis && hasUsableAmounts(storedAnalysis) && storedAnalysis
-              ? storedAnalysis
-              : generateMockAnalysisFromDocuments(usableDocumentsWithCorrections));
+          const currentAnalysis = refreshedAnalysis;
 
-          if (currentAnalysis) {
-            storeMockAnalysis(currentAnalysis);
-            setServiceMessage(
-              refreshedAnalysis
-                ? null
-                : "Analyse locale préparée à partir des documents ajoutés. Les services OCR et IA seront connectés ensuite."
-            );
-          }
+          storeMockAnalysis(currentAnalysis);
+          setServiceMessage(null);
 
           setAnalysis(currentAnalysis);
           setIsComplete(true);

@@ -1,5 +1,9 @@
 import { NextResponse } from "next/server";
-import { createAdminAccessKey, isAdminAccessCode } from "@/features/billing/access-keys";
+import {
+  createAdminAccessKey,
+  isAdminAccessCode,
+  isBlockedProductionAdminCode
+} from "@/features/billing/access-keys";
 import { findFreeTrialByKeyCode, findKeyByCode, getOrderByGeneratedKey } from "@/lib/server/db";
 
 export async function GET(request: Request) {
@@ -8,6 +12,10 @@ export async function GET(request: Request) {
 
   if (!code) {
     return NextResponse.json({ error: "Code manquant" }, { status: 400 });
+  }
+
+  if (isBlockedProductionAdminCode(code)) {
+    return NextResponse.json({ error: "Cle invalide ou non autorisee" }, { status: 403 });
   }
 
   const key = (await findKeyByCode(code)) ?? (isAdminAccessCode(code) ? createAdminAccessKey() : undefined);

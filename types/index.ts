@@ -34,7 +34,7 @@ export type UploadedDocument = {
   mimeType: string;
   documentType: UploadedDocumentType;
   detectedCategory: ExpenseCategory;
-  status: "ready" | "pending" | "error" | "uploading";
+  status: "ready" | "pending" | "error" | "uploading" | "purged";
   uploadedAt: string;
   provider?: string;
   userCorrections?: DocumentUserCorrections;

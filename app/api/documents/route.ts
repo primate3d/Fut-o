@@ -1,7 +1,11 @@
 import crypto from "crypto";
 import path from "path";
 import { NextResponse } from "next/server";
-import { createAdminAccessKey, isAdminAccessCode } from "@/features/billing/access-keys";
+import {
+  createAdminAccessKey,
+  isAdminAccessCode,
+  isBlockedProductionAdminCode
+} from "@/features/billing/access-keys";
 import { findKeyByCode, getDocumentsByKey, saveDocuments } from "@/lib/server/db";
 import { storage } from "@/lib/server/storage";
 import type { UploadedDocument } from "@/types";
@@ -18,9 +22,17 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: "Code clé manquant" }, { status: 400 });
   }
 
+  if (isBlockedProductionAdminCode(code)) {
+    return NextResponse.json({ error: "Cle invalide ou non autorisee" }, { status: 403 });
+  }
+
   const key = (await findKeyByCode(code)) ?? (isAdminAccessCode(code) ? createAdminAccessKey() : undefined);
   if (!key) {
     return NextResponse.json({ error: "Clé invalide" }, { status: 403 });
+  }
+
+  if (!key.isActive) {
+    return NextResponse.json({ error: "Cle non active" }, { status: 403 });
   }
 
   if (key.expiresAt && new Date(key.expiresAt) < new Date()) {
@@ -40,6 +52,10 @@ export async function POST(request: Request) {
 
     if (typeof code !== "string" || typeof documentJson !== "string" || !(file instanceof File)) {
       return NextResponse.json({ error: "Données d'upload manquantes" }, { status: 400 });
+    }
+
+    if (isBlockedProductionAdminCode(code)) {
+      return NextResponse.json({ error: "Cle invalide ou non autorisee" }, { status: 403 });
     }
 
     const document = JSON.parse(documentJson) as UploadedDocument;
@@ -98,11 +114,16 @@ export async function DELETE(request: Request) {
       code?: string;
       documentId?: string;
       purge?: boolean;
+      clearRecords?: boolean;
     };
-    const { code, documentId, purge } = body;
+    const { code, documentId, purge, clearRecords } = body;
 
     if (!code) {
       return NextResponse.json({ error: "Code manquant" }, { status: 400 });
+    }
+
+    if (isBlockedProductionAdminCode(code)) {
+      return NextResponse.json({ error: "Cle invalide ou non autorisee" }, { status: 403 });
     }
 
     const key = (await findKeyByCode(code)) ?? (isAdminAccessCode(code) ? createAdminAccessKey() : undefined);
@@ -120,7 +141,10 @@ export async function DELETE(request: Request) {
         const physicalFileName = doc.physicalFileName || `${code}_${doc.id}_${doc.fileName}`;
         await storage.delete(physicalFileName);
       }
-      await saveDocuments(code, []);
+      await saveDocuments(
+        code,
+        clearRecords ? [] : docs.map((document) => ({ ...document, status: "purged" }))
+      );
       return NextResponse.json({ success: true, purged: true });
     }
 

@@ -1,6 +1,7 @@
 import path from "path";
 import { OpenAI } from "openai";
 import PDFParser from "pdf2json";
+import { logger } from "@/lib/server/logger";
 import { storage } from "@/lib/server/storage";
 import type { UploadedDocument } from "@/types";
 
@@ -79,7 +80,11 @@ async function extractTextFromPDF(physicalFileName: string): Promise<string> {
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    console.error(`Erreur extraction texte PDF pour ${physicalFileName}:`, message, error);
+    logger.error("Extraction texte PDF impossible", {
+      service: "OCR",
+      action: "pdf_extraction_error",
+      metadata: { error: message }
+    });
     throw error;
   }
 }
@@ -171,10 +176,19 @@ async function extractTextFromImage(
       }
     }
 
-    console.warn(`OCR image insuffisant pour ${physicalFileName}.`);
+    logger.warn("OCR image insuffisant", {
+      service: "OCR",
+      action: "image_ocr_insufficient"
+    });
     return "";
   } catch (error) {
-    console.error("Erreur Vision OCR:", error);
+    logger.error("Erreur Vision OCR", {
+      service: "OCR",
+      action: "vision_ocr_error",
+      metadata: {
+        error: error instanceof Error ? error.message : "Erreur inconnue"
+      }
+    });
     return "";
   }
 }
@@ -189,7 +203,10 @@ export async function extractTextFromDocument(
 
   const buffer = await storage.get(physicalFileName);
   if (!buffer) {
-    console.warn(`Fichier non trouvé dans le stockage: ${physicalFileName}`);
+    logger.warn("Fichier introuvable dans le stockage", {
+      service: "OCR",
+      action: "storage_file_missing"
+    });
     return "";
   }
 
@@ -201,9 +218,10 @@ export async function extractTextFromDocument(
       return nativeText;
     }
 
-    console.warn(
-      `Extraction texte PDF native insuffisante pour ${physicalFileName}. Fallback OCR requis si le PDF est scanné.`
-    );
+    logger.warn("Extraction PDF native insuffisante", {
+      service: "OCR",
+      action: "pdf_native_text_insufficient"
+    });
     return nativeText;
   }
 

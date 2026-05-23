@@ -1,4 +1,5 @@
 import { OpenAI } from "openai";
+import { logger } from "@/lib/server/logger";
 import {
   attachDocumentProfileToExpense,
   buildDocumentPartyProfiles,
@@ -72,10 +73,13 @@ function prepareDocumentsForAi(documents: ExtractedDocument[]) {
       return document;
     }
 
-    console.warn("Texte extrait tronque avant appel IA", {
-      fileName: document.fileName,
-      originalCharacters: extractedText.length,
-      truncatedCharacters: MAX_DOCUMENT_TEXT_CHARS
+    logger.warn("Texte extrait tronque avant appel IA", {
+      service: "AI",
+      action: "input_truncated",
+      metadata: {
+        originalCharacters: extractedText.length,
+        truncatedCharacters: MAX_DOCUMENT_TEXT_CHARS
+      }
     });
 
     return {
@@ -273,16 +277,20 @@ REGLES MULTI-LIGNES / MULTI-CONTRATS - EXEMPLES CONCRETS OBLIGATOIRES :
     let rawResult: AiAnalysisPayload;
 
     if (finishReason !== "stop") {
-      console.warn("Reponse IA terminee avec un finish_reason inattendu", {
-        finishReason
+      logger.warn("Reponse IA terminee avec un finish_reason inattendu", {
+        service: "AI",
+        action: "unexpected_finish_reason",
+        metadata: { finishReason }
       });
     }
 
     try {
       rawResult = JSON.parse(responseContent) as AiAnalysisPayload;
       if (finishReason !== "stop") {
-        console.warn("JSON IA parse malgre un finish_reason inattendu", {
-          finishReason
+        logger.warn("JSON IA parse malgre un finish_reason inattendu", {
+          service: "AI",
+          action: "parsed_unexpected_finish_reason",
+          metadata: { finishReason }
         });
       }
     } catch (error) {
@@ -507,7 +515,13 @@ REGLES MULTI-LIGNES / MULTI-CONTRATS - EXEMPLES CONCRETS OBLIGATOIRES :
       yearlyPotentialSavings
     };
   } catch (error: unknown) {
-    console.error("Erreur OpenAI:", error);
+    logger.error("Erreur OpenAI", {
+      service: "AI",
+      action: "analysis_error",
+      metadata: {
+        error: error instanceof Error ? error.message : "Erreur inconnue"
+      }
+    });
     const message = error instanceof Error ? error.message : "Erreur inconnue";
     throw new Error(`Echec de l'analyse IA: ${message}`);
   }
