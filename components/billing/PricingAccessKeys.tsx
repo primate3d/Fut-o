@@ -37,10 +37,7 @@ export function PricingAccessKeys() {
       }
 
       if (payload.url) {
-        const checkoutWindow = window.open(payload.url, "_blank", "noopener,noreferrer");
-        if (!checkoutWindow) {
-          setPurchaseMessage("Votre navigateur a bloqué l'ouverture de Stripe. Autorisez les popups ou réessayez.");
-        }
+        window.location.assign(payload.url);
         return;
       }
 
