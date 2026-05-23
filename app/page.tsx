@@ -11,6 +11,9 @@ import Image from "next/image";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 
+const startAuditHref = "/activer-cle?redirect=/importer";
+const lettersAccessHref = "/activer-cle?redirect=/courriers";
+
 const narrativeSteps = [
   {
     alt: "Documents et factures poses sur une table de maison",
@@ -109,10 +112,10 @@ export default function HomePage() {
               À partir des documents que vous choisissez de partager, vous voyez clair sur vos dépenses, les offres adaptées sont identifiées, et les démarches sont prêtes quand vous décidez d'agir.
             </p>
             <div className="mt-8 flex flex-col gap-3 sm:flex-row sm:items-center">
-              <Button href="/importer">
+              <Button href={startAuditHref}>
                 Voir mes dépenses clairement <ArrowRight size={18} />
               </Button>
-              <Button href="/importer" variant="secondary" className="bg-transparent text-white border border-white/20 hover:bg-white/10">
+              <Button href={startAuditHref} variant="secondary" className="bg-transparent text-white border border-white/20 hover:bg-white/10">
                 Commencer maintenant
               </Button>
             </div>
@@ -188,7 +191,7 @@ export default function HomePage() {
                 </p>
               </div>
 
-              <Button className="mt-5" href="/courriers" variant="ghost">
+              <Button className="mt-5" href={lettersAccessHref} variant="ghost">
                 Voir un exemple complet <ArrowRight size={16} />
               </Button>
             </div>
@@ -244,7 +247,7 @@ export default function HomePage() {
             <p className="mt-6 text-lg font-semibold leading-8 text-[#12243d]">
               On vous mache le travail, vous gardez la decision.
             </p>
-            <Button className="mt-7" href="/importer">
+            <Button className="mt-7" href={startAuditHref}>
               Preparer mes demarches <ArrowRight size={18} />
             </Button>
           </div>
@@ -384,7 +387,7 @@ export default function HomePage() {
             Ajoutez vos documents, regardez ce qui peut être amélioré, puis
             choisissez ce que vous voulez faire.
           </p>
-          <Button className="mt-7" href="/importer">
+          <Button className="mt-7" href={startAuditHref}>
             Commencer maintenant <ArrowRight size={18} />
           </Button>
         </div>
