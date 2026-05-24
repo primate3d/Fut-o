@@ -1,4 +1,3 @@
-import { formatCurrency } from "@/lib/utils";
 import { findAlternativeOffers } from "@/features/recommendations/service";
 import type { SelectedAlternativeOffer } from "@/features/recommendations/selected-offer";
 import { ExpenseCategory, ExpenseSubcategory } from "@/types";
@@ -14,6 +13,15 @@ import type {
   ProviderProfile,
   Recommendation
 } from "@/types";
+
+function formatCurrency(value: number) {
+  return new Intl.NumberFormat("fr-FR", {
+    style: "currency",
+    currency: "EUR",
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2
+  }).format(value);
+}
 
 type LetterContextCategory =
   | "mobile"
@@ -47,6 +55,34 @@ const defaultPersonalization: LetterPersonalization = {
   invoiceNumber: "",
   phone: ""
 };
+
+function hasText(value?: string) {
+  return typeof value === "string" && value.trim().length > 0;
+}
+
+function sanitizeDetectedCustomerIdentity(customer: CustomerProfile | undefined) {
+  if (!customer) return undefined;
+
+  const identityText = [customer.fullName, customer.firstName, customer.lastName]
+    .filter(hasText)
+    .join(" ")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
+  const looksLikeDocumentText =
+    /\b(souscrit|offre|abonnement|contrat|facture|forfait|adsl|fibre|internet|mobile|sfr)\b/.test(
+      identityText
+    );
+
+  if (!looksLikeDocumentText) return customer;
+
+  return {
+    ...customer,
+    fullName: undefined,
+    firstName: undefined,
+    lastName: undefined
+  };
+}
 
 function getDocumentCustomerProfile(
   analysis: MockAnalysis,
@@ -699,9 +735,9 @@ function createLetter(
       ? selectedOffer
       : findAlternativeOffers([expense])[0];
   const potentialSaving =
-    selectedOffer?.category === expense.category
-      ? selectedOffer.estimatedYearlySaving
-      : Math.max(getPotentialSavingForExpense(analysis, expense), 48);
+    bestOffer && typeof bestOffer.monthlyPrice === "number"
+      ? Math.max(0, expense.yearlyAmount - bestOffer.monthlyPrice * 12)
+      : bestOffer?.estimatedYearlySaving ?? Math.max(getPotentialSavingForExpense(analysis, expense), 48);
   const provider = getCommercialProviderName(analysis, expense);
   const providerAddress = getDetectedProviderAddress(analysis, expense, provider);
 
@@ -758,29 +794,59 @@ export function generateLettersFromAnalysis(
   return letters.sort((a, b) => b.potentialSaving - a.potentialSaving).slice(0, 50);
 }
 
+export function createFollowupLetterFromSnapshot(
+  sourceLetter: GeneratedLetter,
+  sourceActionDate: string
+): GeneratedLetter {
+  const originalDate = new Date(sourceActionDate).toLocaleDateString("fr-FR");
+
+  return {
+    ...sourceLetter,
+    id: `letter_provider_followup_${sourceLetter.id}_${Date.now()}`,
+    type: "provider_followup",
+    title: `Relance - ${sourceLetter.title}`,
+    subject: `Relance concernant ma demande du ${originalDate}`,
+    bodyTemplate: buildBodyTemplate({
+      provider: sourceLetter.provider,
+      monthlyAmount: sourceLetter.monthlyAmount,
+      yearlyAmount: sourceLetter.yearlyAmount,
+      potentialSaving: sourceLetter.potentialSaving,
+      providerAddress: sourceLetter.providerAddress ?? sourceLetter.provider,
+      offerName: sourceLetter.offerName,
+      offerProvider: sourceLetter.offerProvider,
+      offerMonthlyPrice: sourceLetter.offerMonthlyPrice,
+      offerUrl: sourceLetter.offerUrl,
+      reason: `Je me permets de revenir vers vous concernant ma demande initiale "${sourceLetter.title}", preparee le ${originalDate}.`,
+      request:
+        "Je vous remercie de bien vouloir m'indiquer la suite donnee a cette demande."
+    })
+  };
+}
+
 export function renderLetter(
   letter: GeneratedLetter,
   personalization: Partial<LetterPersonalization>
 ) {
-  const fullNameParts = letter.customerProfile?.fullName
+  const detectedCustomer = sanitizeDetectedCustomerIdentity(letter.customerProfile);
+  const fullNameParts = detectedCustomer?.fullName
     ?.trim()
     .split(/\s+/)
     .filter(Boolean);
   const values = {
     ...defaultPersonalization,
-    firstName: letter.customerProfile?.firstName || fullNameParts?.[0],
-    lastName: letter.customerProfile?.lastName || fullNameParts?.slice(1).join(" "),
-    address: letter.customerProfile?.address,
+    firstName: detectedCustomer?.firstName || fullNameParts?.[0],
+    lastName: detectedCustomer?.lastName || fullNameParts?.slice(1).join(" "),
+    address: detectedCustomer?.address,
     customerNumber:
-      letter.customerProfile?.customerNumber || letter.customerProfile?.contractNumber,
-    contractNumber: isUsableReference(letter.customerProfile?.contractNumber)
-      ? letter.customerProfile?.contractNumber
+      detectedCustomer?.customerNumber || detectedCustomer?.contractNumber,
+    contractNumber: isUsableReference(detectedCustomer?.contractNumber)
+      ? detectedCustomer?.contractNumber
       : "",
-    invoiceNumber: isUsableReference(letter.customerProfile?.invoiceNumber)
-      ? letter.customerProfile?.invoiceNumber
+    invoiceNumber: isUsableReference(detectedCustomer?.invoiceNumber)
+      ? detectedCustomer?.invoiceNumber
       : "",
-    phone: letter.customerProfile?.phone,
-    email: letter.customerProfile?.email,
+    phone: detectedCustomer?.phone,
+    email: detectedCustomer?.email,
     ...Object.fromEntries(
       Object.entries(personalization).filter(([, value]) => Boolean(value))
     )

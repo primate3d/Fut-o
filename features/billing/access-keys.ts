@@ -41,7 +41,7 @@ export const accessKeyPlans: AccessKeyPlanDefinition[] = [
     priceValue: 0,
     description: "Pour découvrir Futéo en quelques minutes.",
     items: [
-      "Analyse de 1 à 2 documents",
+      "Analyse d'un seul document",
       "Comparatif simple des économies possibles",
       "Aperçu des résultats",
       "Aperçu des démarches et courriers",
@@ -113,6 +113,20 @@ export function isDiscoveryPlan(plan?: AccessKeyPlan | null) {
 
 export function isAuditFoyerPlan(plan?: AccessKeyPlan | null) {
   return plan ? normalizeAccessKeyPlan(plan) === "foyer" : false;
+}
+
+export function requiresHouseholdProfile(plan?: AccessKeyPlan | null) {
+  if (!plan) return false;
+  const normalizedPlan = normalizeAccessKeyPlan(plan);
+  return normalizedPlan === "foyer" || normalizedPlan === "famille";
+}
+
+export function hasLockedHouseholdProfile(key?: AccessKey | null) {
+  return Boolean(
+    key?.profileLockedAt &&
+      key.profilePostalAddress?.trim() &&
+      key.allowedNames?.some((name) => name.trim())
+  );
 }
 
 export function isAdminAccessCode(code?: string | null) {
@@ -208,7 +222,33 @@ export type AccessKeyStatus = {
   hasQuota: boolean;
   usesRemaining: number;
   quotaExceeded: boolean;
+  profileRequired: boolean;
+  profileCompleted: boolean;
 };
+
+export type AccessKeyStatusLookup =
+  | { state: "valid"; status: AccessKeyStatus }
+  | { state: "invalid" }
+  | { state: "unavailable" };
+
+export async function lookupAccessKeyStatusServer(code: string): Promise<AccessKeyStatusLookup> {
+  try {
+    const response = await fetch(`/api/keys/status?code=${encodeURIComponent(code)}`);
+
+    if (response.status === 403 || response.status === 404) {
+      return { state: "invalid" };
+    }
+
+    if (!response.ok) {
+      return { state: "unavailable" };
+    }
+
+    const status = (await response.json()) as AccessKeyStatus;
+    return status.key ? { state: "valid", status } : { state: "invalid" };
+  } catch {
+    return { state: "unavailable" };
+  }
+}
 
 export async function getAccessKeyStatusServer(code: string): Promise<AccessKeyStatus | null> {
   try {

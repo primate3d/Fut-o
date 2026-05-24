@@ -8,7 +8,7 @@ import { Card } from "@/components/ui/Card";
 import {
   ACCESS_KEY_STORAGE_KEY,
   getStoredAccessKey,
-  validateAccessKeyServer
+  lookupAccessKeyStatusServer,
 } from "@/features/billing";
 
 export function AccessGate({ children }: { children: React.ReactNode }) {
@@ -16,6 +16,7 @@ export function AccessGate({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const [isAllowed, setIsAllowed] = useState(false);
   const [hasCheckedAccess, setHasCheckedAccess] = useState(false);
+  const [isCheckUnavailable, setIsCheckUnavailable] = useState(false);
 
   useEffect(() => {
     let isMounted = true;
@@ -25,30 +26,53 @@ export function AccessGate({ children }: { children: React.ReactNode }) {
 
       if (!accessKey) {
         if (!isMounted) return;
+        setIsCheckUnavailable(false);
         setIsAllowed(false);
         setHasCheckedAccess(true);
         router.replace(`/activer-cle?redirect=${encodeURIComponent(pathname)}`);
         return;
       }
 
-      const serverKey = await validateAccessKeyServer(accessKey.code);
+      const lookup = await lookupAccessKeyStatusServer(accessKey.code);
 
       if (!isMounted) return;
 
-      if (!serverKey) {
+      if (lookup.state === "unavailable") {
+        setIsCheckUnavailable(true);
+        setIsAllowed(false);
+        setHasCheckedAccess(true);
+        return;
+      }
+
+      if (lookup.state === "invalid") {
         window.localStorage.removeItem(ACCESS_KEY_STORAGE_KEY);
+        setIsCheckUnavailable(false);
         setIsAllowed(false);
         setHasCheckedAccess(true);
         router.replace(`/activer-cle?redirect=${encodeURIComponent(pathname)}`);
         return;
       }
 
+      const serverStatus = lookup.status;
+      const serverKey = serverStatus.key;
+      if (!serverKey) return;
+
+      setIsCheckUnavailable(false);
       window.localStorage.setItem(ACCESS_KEY_STORAGE_KEY, JSON.stringify(serverKey));
+
+      if (serverStatus.profileRequired && !serverStatus.profileCompleted && pathname !== "/compte") {
+        setIsAllowed(false);
+        setHasCheckedAccess(true);
+        router.replace(`/compte?setup=required&redirect=${encodeURIComponent(pathname)}`);
+        return;
+      }
+
       setIsAllowed(true);
       setHasCheckedAccess(true);
     }
 
     setHasCheckedAccess(false);
+    setIsCheckUnavailable(false);
     void checkAccess();
 
     return () => {
@@ -68,6 +92,20 @@ export function AccessGate({ children }: { children: React.ReactNode }) {
   }
 
   if (!isAllowed) {
+    if (isCheckUnavailable) {
+      return (
+        <Card className="mx-auto max-w-2xl text-center">
+          <h1 className="text-2xl font-bold tracking-tight text-navy-900">
+            Verification de votre acces indisponible
+          </h1>
+          <p className="mt-3 text-sm leading-6 text-slate-600">
+            Votre cle n'a pas ete supprimee. Rechargez la page dans quelques instants
+            pour reprendre votre parcours.
+          </p>
+        </Card>
+      );
+    }
+
     return (
       <Card className="mx-auto max-w-2xl text-center">
         <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-xl border border-sage-500/20 bg-sage-100 text-sage-700">

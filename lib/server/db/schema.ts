@@ -8,6 +8,9 @@ export const accessKeys = pgTable("access_keys", {
   expiresAt: text("expires_at"),
   isActive: boolean("is_active").default(true).notNull(),
   createdAt: text("created_at").notNull(),
+  allowedNames: jsonb("allowed_names").$type<string[]>(),
+  profilePostalAddress: text("profile_postal_address"),
+  profileLockedAt: text("profile_locked_at"),
 });
 
 export const orders = pgTable("orders", {

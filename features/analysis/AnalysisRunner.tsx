@@ -13,7 +13,6 @@ import {
   getStoredUploadedDocumentsServer
 } from "@/features/upload/storage";
 import { expenseCategoryLabels, summarizeExpensesByCategory } from "@/lib/expense-summary";
-import { formatCurrency } from "@/lib/utils";
 import type { MockAnalysis, UploadedDocument } from "@/types";
 import {
   AnalysisServerError,
@@ -32,6 +31,15 @@ const analysisSteps = [
   "Comparaison des pistes",
   "Préparation des actions"
 ];
+
+function formatPreciseCurrency(value: number) {
+  return new Intl.NumberFormat("fr-FR", {
+    style: "currency",
+    currency: "EUR",
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2
+  }).format(value);
+}
 
 function hasUsableAmounts(analysis: MockAnalysis | null) {
   return Boolean(
@@ -174,6 +182,15 @@ export function AnalysisRunner() {
     () => (analysis ? summarizeExpensesByCategory(analysis.expenses) : []),
     [analysis]
   );
+  const detectedProviders = useMemo(
+    () =>
+      analysis
+        ? [...new Set(analysis.expenses.map((expense) => expense.provider).filter(Boolean))].join(
+            ", "
+          )
+        : "",
+    [analysis]
+  );
 
   const progress = Math.min((currentStep / analysisSteps.length) * 100, 100);
 
@@ -259,15 +276,25 @@ export function AnalysisRunner() {
         <div className="mt-4 grid gap-3 md:grid-cols-2">
           {documents
             .filter((document) => document.status === "ready")
-            .map((document) => (
-              <div className="rounded-lg bg-navy-50 p-4" key={document.id}>
-                <p className="font-medium text-navy-900">{document.fileName}</p>
-                <p className="mt-1 text-sm text-slate-500">
-                  {getDocumentTypeLabel(document.documentType)} -{" "}
-                  {expenseCategoryLabels[document.detectedCategory]}
-                </p>
-              </div>
-            ))}
+            .map((document) => {
+              const normalizedExpense = analysis?.expenses.find(
+                (expense) => expense.sourceDocumentId === document.id
+              );
+              const documentType =
+                normalizedExpense?.documentType ?? document.documentType;
+              const category =
+                normalizedExpense?.category ?? document.detectedCategory;
+
+              return (
+                <div className="rounded-lg bg-navy-50 p-4" key={document.id}>
+                  <p className="font-medium text-navy-900">{document.fileName}</p>
+                  <p className="mt-1 text-sm text-slate-500">
+                    {getDocumentTypeLabel(documentType)} -{" "}
+                    {expenseCategoryLabels[category]}
+                  </p>
+                </div>
+              );
+            })}
         </div>
       </Card>
 
@@ -277,19 +304,19 @@ export function AnalysisRunner() {
             <div>
               <p className="text-sm text-slate-500">Total mensuel estimé</p>
               <p className="mt-1 text-2xl font-bold text-navy-900">
-                {formatCurrency(analysis.totalMonthlyAmount)}
+                {formatPreciseCurrency(analysis.totalMonthlyAmount)}
               </p>
             </div>
             <div>
               <p className="text-sm text-slate-500">Total annuel estimé</p>
               <p className="mt-1 text-2xl font-bold text-navy-900">
-                {formatCurrency(analysis.totalYearlyAmount)}
+                {formatPreciseCurrency(analysis.totalYearlyAmount)}
               </p>
             </div>
             <div>
-              <p className="text-sm text-slate-500">Pistes d'économies</p>
-              <p className="mt-1 text-2xl font-bold text-sage-700">
-                {formatCurrency(analysis.yearlyPotentialSavings)}
+              <p className="text-sm text-slate-500">Fournisseur détecté</p>
+              <p className="mt-1 text-2xl font-bold text-navy-900">
+                {detectedProviders || "Non détecté"}
               </p>
             </div>
           </div>
@@ -301,14 +328,20 @@ export function AnalysisRunner() {
               >
                 <p className="font-medium text-navy-900">{summary.label}</p>
                 <p className="font-semibold text-navy-900">
-                  {formatCurrency(summary.monthlyTotal)} / mois
+                  {formatPreciseCurrency(summary.monthlyTotal)} / mois
                 </p>
               </div>
             ))}
           </div>
-          <Button className="mt-6" href="/resultats">
-            Voir mes résultats
-          </Button>
+          <div className="mt-6 flex flex-col items-start gap-3 sm:flex-row sm:items-center">
+            <Button href="/resultats">
+              Voir mes résultats
+            </Button>
+            <p className="text-xs italic text-slate-500 sm:text-sm">
+              &#128161; Vérifier si des offres alternatives peuvent vous faire
+              réaliser des économies.
+            </p>
+          </div>
         </Card>
       ) : null}
     </div>

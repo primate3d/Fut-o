@@ -28,14 +28,31 @@ import {
   getStoredUploadedDocuments,
   getStoredUploadedDocumentsServer
 } from "@/features/upload/storage";
+import { getStoredAccessKey, isDiscoveryPlan } from "@/features/billing/access-keys";
 import { expenseCategoryLabels } from "@/lib/expense-summary";
 import { getProviderBranding } from "@/lib/provider-branding";
-import { formatCurrency } from "@/lib/utils";
 import { getSelectedAlternativeOffer } from "@/features/recommendations/selected-offer";
-import { addAuditActionLog } from "@/features/privacy/action-log";
+import {
+  addAuditActionLog,
+  takeQueuedLetterFollowup,
+  type LetterActionSnapshot
+} from "@/features/privacy/action-log";
 import { purgeSourceDocuments } from "@/features/privacy/lifecycle";
 import type { CustomerProfile, GeneratedLetter, LetterPersonalization, MockAnalysis } from "@/types";
-import { generateLettersFromAnalysis, renderLetter } from "./service";
+import {
+  createFollowupLetterFromSnapshot,
+  generateLettersFromAnalysis,
+  renderLetter
+} from "./service";
+
+function formatCurrency(value: number) {
+  return new Intl.NumberFormat("fr-FR", {
+    style: "currency",
+    currency: "EUR",
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2
+  }).format(value);
+}
 
 const initialPersonalization: LetterPersonalization = {
   firstName: "",
@@ -71,6 +88,30 @@ function splitFullName(fullName?: string) {
 
 function hasText(value?: string) {
   return typeof value === "string" && value.trim().length > 0;
+}
+
+function sanitizeDetectedCustomerIdentity(customer: CustomerProfile | undefined) {
+  if (!customer) return undefined;
+
+  const identityText = [customer.fullName, customer.firstName, customer.lastName]
+    .filter(hasText)
+    .join(" ")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
+  const looksLikeDocumentText =
+    /\b(souscrit|offre|abonnement|contrat|facture|forfait|adsl|fibre|internet|mobile|sfr)\b/.test(
+      identityText
+    );
+
+  if (!looksLikeDocumentText) return customer;
+
+  return {
+    ...customer,
+    fullName: undefined,
+    firstName: undefined,
+    lastName: undefined
+  };
 }
 
 function mergeCustomerWhenMissing(
@@ -110,7 +151,7 @@ function getMergedCustomerFromAnalysis(analysis: MockAnalysis | null) {
 function getPersonalizationFromAnalysis(
   analysis: MockAnalysis
 ): Partial<LetterPersonalization> {
-  const customer = getMergedCustomerFromAnalysis(analysis);
+  const customer = sanitizeDetectedCustomerIdentity(getMergedCustomerFromAnalysis(analysis));
   if (!customer) return {};
 
   const nameParts = splitFullName(customer.fullName);
@@ -230,6 +271,7 @@ function sendEmail(subject: string, body: string) {
 }
 
 export function LettersPanel() {
+  const isDiscoveryAccess = isDiscoveryPlan(getStoredAccessKey()?.plan);
   const [analysis, setAnalysis] = useState<MockAnalysis | null>(null);
   const [selectedLetterId, setSelectedLetterId] = useState<string | null>(null);
   const [personalization, setPersonalization] =
@@ -239,6 +281,9 @@ export function LettersPanel() {
   const [serviceMessage, setServiceMessage] = useState<string | null>(null);
   const [sourcePurgeMessage, setSourcePurgeMessage] = useState<string | null>(null);
   const [isReloading, setIsReloading] = useState(false);
+  const [isFollowupDraft, setIsFollowupDraft] = useState(false);
+  const [followupSourceDocumentName, setFollowupSourceDocumentName] =
+    useState<string | undefined>();
 
   async function purgeSourcesAfterDownload() {
     const purged = await purgeSourceDocuments();
@@ -253,6 +298,16 @@ export function LettersPanel() {
     }
   }
 
+  function getLetterActionSnapshot(letter: GeneratedLetter): LetterActionSnapshot {
+    return {
+      letter,
+      personalization,
+      documentName:
+        analysis?.documents.map((document) => document.fileName).join(", ") ??
+        followupSourceDocumentName
+    };
+  }
+
   async function downloadLetterPdf(letter: GeneratedLetter, content: string) {
     generatePDF(
       `${letter.provider}-${letter.type}.pdf`.replaceAll(" ", "-"),
@@ -262,8 +317,11 @@ export function LettersPanel() {
     addAuditActionLog({
       type: "letter_downloaded",
       label: `Courrier généré : ${letter.title}`,
-      documentName: analysis?.documents.map((document) => document.fileName).join(", "),
-      provider: letter.provider
+      documentName:
+        analysis?.documents.map((document) => document.fileName).join(", ") ??
+        followupSourceDocumentName,
+      provider: letter.provider,
+      letterSnapshot: getLetterActionSnapshot(letter)
     });
     await purgeSourcesAfterDownload();
   }
@@ -276,10 +334,25 @@ export function LettersPanel() {
     addAuditActionLog({
       type: "letter_downloaded",
       label: `Courrier généré : ${letter.title}`,
-      documentName: analysis?.documents.map((document) => document.fileName).join(", "),
-      provider: letter.provider
+      documentName:
+        analysis?.documents.map((document) => document.fileName).join(", ") ??
+        followupSourceDocumentName,
+      provider: letter.provider,
+      letterSnapshot: getLetterActionSnapshot(letter)
     });
     await purgeSourcesAfterDownload();
+  }
+
+  function prepareLetterEmail(letter: GeneratedLetter, content: string) {
+    const letterSnapshot = getLetterActionSnapshot(letter);
+    addAuditActionLog({
+      type: "letter_email_prepared",
+      label: `Courrier préparé pour envoi par email : ${letter.title}`,
+      documentName: letterSnapshot.documentName,
+      provider: letter.provider,
+      letterSnapshot
+    });
+    sendEmail(letter.subject, content);
   }
 
   async function handleForceAnalysis() {
@@ -309,6 +382,25 @@ export function LettersPanel() {
   }
 
   useEffect(() => {
+    if (isDiscoveryAccess) return;
+
+    const queuedFollowup = takeQueuedLetterFollowup();
+    if (queuedFollowup?.letterSnapshot) {
+      const followupLetter = createFollowupLetterFromSnapshot(
+        queuedFollowup.letterSnapshot.letter,
+        queuedFollowup.createdAt
+      );
+      setLetters([followupLetter]);
+      setSelectedLetterId(followupLetter.id);
+      setPersonalization(queuedFollowup.letterSnapshot.personalization);
+      setFollowupSourceDocumentName(queuedFollowup.letterSnapshot.documentName);
+      setIsFollowupDraft(true);
+      setServiceMessage(
+        "Relance préparée à partir du courrier précédemment généré. Vérifiez le contenu avant envoi."
+      );
+      return;
+    }
+
     const storedAnalysis = getStoredMockAnalysis();
     const documents = getStoredUploadedDocuments();
     const hasUsableStoredAnalysis =
@@ -370,7 +462,7 @@ export function LettersPanel() {
     }
 
     void loadServerState();
-  }, []);
+  }, [isDiscoveryAccess]);
 
   useEffect(() => {
     if (!selectedLetterId && letters.length > 0) {
@@ -407,7 +499,24 @@ export function LettersPanel() {
     window.setTimeout(() => setCopyMessage(null), 1800);
   }
 
-  if (!analysis || letters.length === 0) {
+  if (isDiscoveryAccess) {
+    return (
+      <Card className="mx-auto max-w-2xl text-center">
+        <h1 className="text-2xl font-bold text-navy-900">
+          Courriers non inclus dans l&apos;accès Découverte
+        </h1>
+        <p className="mt-3 text-sm leading-6 text-slate-600">
+          Votre aperçu gratuit permet de voir une économie potentielle. Les courriers
+          personnalisés sont disponibles avec Audit Foyer ou Audit Famille.
+        </p>
+        <Button className="mt-6" href="/tarifs">
+          Débloquer mon audit complet
+        </Button>
+      </Card>
+    );
+  }
+
+  if ((!analysis && !isFollowupDraft) || letters.length === 0) {
     return (
       <section className="space-y-4">
         {serviceMessage ? (
@@ -432,7 +541,9 @@ export function LettersPanel() {
         <div>
           <div className="flex items-center gap-3">
             <h1 className="text-3xl font-bold text-navy-900">Démarches adaptées</h1>
-            {hasDocumentProfiles(analysis) ? (
+            {isFollowupDraft ? (
+              <Badge tone="green">Relance</Badge>
+            ) : analysis && hasDocumentProfiles(analysis) ? (
               <Badge tone="green">Analyse IA</Badge>
             ) : (
               <Badge tone="amber">Analyse Rapide</Badge>
@@ -458,7 +569,7 @@ export function LettersPanel() {
         </div>
       ) : null}
 
-      {!hasDetectedCustomer ? (
+      {!isFollowupDraft && !hasDetectedCustomer ? (
         <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm leading-6 text-amber-900 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <p>
             Aucune coordonnée client n'a été détectée dans l'analyse actuelle. Relancez
@@ -469,7 +580,7 @@ export function LettersPanel() {
             {isReloading ? "Analyse..." : "Relancer l'analyse (IA)"}
           </Button>
         </div>
-      ) : !hasDocumentProfiles(analysis) ? (
+      ) : !isFollowupDraft && analysis && !hasDocumentProfiles(analysis) ? (
         <div className="rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm leading-6 text-blue-900 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <p>
             Les courriers actuels sont générés à partir d'une analyse rapide. Pour une personnalisation plus fine (coordonnées, détails des contrats), vous pouvez relancer une analyse IA complète.
@@ -569,7 +680,7 @@ export function LettersPanel() {
                     </a>
                   ) : null}
                 <Button
-                  onClick={() => sendEmail(letter.subject, renderLetter(letter, personalization))}
+                  onClick={() => prepareLetterEmail(letter, renderLetter(letter, personalization))}
                   type="button"
                   variant="ghost"
                 >
@@ -644,7 +755,7 @@ export function LettersPanel() {
                     PDF
                   </Button>
                   <Button
-                    onClick={() => sendEmail(selectedLetter.subject, renderedLetter)}
+                    onClick={() => prepareLetterEmail(selectedLetter, renderedLetter)}
                     type="button"
                     variant="ghost"
                   >

@@ -4,13 +4,21 @@ import type { AlternativeOffer } from "@/features/recommendations/service";
 import type { SelectedAlternativeOffer } from "@/features/recommendations/selected-offer";
 import type { AuditActionLog } from "@/features/privacy/action-log";
 import { expenseCategoryLabels } from "@/lib/expense-summary";
-import { formatCurrency } from "@/lib/utils";
 
 type JsPdfWithPages = jsPDF & {
   internal: jsPDF["internal"] & {
     getNumberOfPages: () => number;
   };
 };
+
+function formatCurrency(value: number) {
+  return new Intl.NumberFormat("fr-FR", {
+    style: "currency",
+    currency: "EUR",
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2
+  }).format(value);
+}
 
 async function loadImageAsDataUrl(src: string) {
   const response = await fetch(src);

@@ -12,7 +12,11 @@ import {
   MOCK_ANALYSIS_STORAGE_KEY,
   storeMockAnalysis
 } from "@/features/analysis";
-import { getStoredAccessKey } from "@/features/billing/access-keys";
+import {
+  getStoredAccessKey,
+  isAuditFoyerPlan,
+  validateAuditFoyerDocuments
+} from "@/features/billing/access-keys";
 import { expenseCategoryLabels } from "@/lib/expense-summary";
 import { cn, formatBytes } from "@/lib/utils";
 import {
@@ -163,6 +167,10 @@ export function ImportDocumentsPanel() {
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [hasLoadedDocuments, setHasLoadedDocuments] = useState(false);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
+  const [complianceError, setComplianceError] = useState<{
+    extractedName: string;
+    profileName: string;
+  } | null>(null);
   const [hasExistingAudit, setHasExistingAudit] = useState(false);
   const [pendingFiles, setPendingFiles] = useState<File[] | null>(null);
   const [documentCorrections, setDocumentCorrections] = useState<
@@ -339,10 +347,25 @@ export function ImportDocumentsPanel() {
       return;
     }
 
+    const activeKey = getStoredAccessKey();
+
+    if (activeKey?.plan === "decouverte" && usableDocuments.length > 1) {
+      setStatusMessage("L'accès Découverte est limité à 1 document maximum. Passez à la Formule Famille pour analyser plusieurs documents.");
+      return;
+    }
+
+    if (isAuditFoyerPlan(activeKey?.plan)) {
+      const validation = validateAuditFoyerDocuments(activeKey?.plan, usableDocuments);
+      if (!validation.isValid) {
+        setStatusMessage(validation.message || "Limite dépassée pour ce plan.");
+        return;
+      }
+    }
+
     setIsAnalyzing(true);
+    setComplianceError(null);
 
     try {
-      const activeKey = getStoredAccessKey();
       console.info("[FUTEO_ANALYSIS_POST]", {
         code: activeKey?.code,
         documentCount: usableDocuments.length,
@@ -363,7 +386,20 @@ export function ImportDocumentsPanel() {
         analysis?: MockAnalysis;
         error?: string;
         details?: string;
+        code?: string;
+        extractedName?: string;
+        profileName?: string;
       };
+
+      if (!response.ok && payload.code === "HOUSEHOLD_NAME_MISMATCH") {
+        clearStoredAnalysis();
+        setComplianceError({
+          extractedName: payload.extractedName ?? "Nom non detecte",
+          profileName: payload.profileName ?? "votre foyer"
+        });
+        setStatusMessage(null);
+        return;
+      }
 
       if (!response.ok || !payload.analysis) {
         const message =
@@ -434,7 +470,7 @@ export function ImportDocumentsPanel() {
               confidentialité renforcée : passez par la saisie manuelle.
             </p>
           </div>
-          <Button href="/resultats" type="button" variant="secondary">
+          <Button href="/resultats?mode=manuel" type="button" variant="secondary">
             Saisie manuelle (sans téléverser)
           </Button>
         </div>
@@ -519,6 +555,27 @@ export function ImportDocumentsPanel() {
       {statusMessage ? (
         <div className="rounded-xl border border-sage-200 bg-sage-50 px-4 py-3 text-sm leading-6 text-sage-900">
           {statusMessage}
+        </div>
+      ) : null}
+
+      {complianceError ? (
+        <div className="p-4 mb-4 border-l-4 border-red-600 bg-red-50 text-red-900 rounded-r-md">
+          <div className="flex items-center mb-2">
+            <span className="text-xl mr-2">❌</span>
+            <h4 className="font-bold text-red-800">Action impossible : Document non conforme</h4>
+          </div>
+          <p className="text-sm leading-relaxed">
+            Le document téléversé est au nom de{" "}
+            <span className="font-semibold text-black">{complianceError.extractedName}</span>.
+            Votre clé d&apos;accès Futéo a été configurée exclusivement pour le foyer de{" "}
+            <span className="font-semibold text-black">{complianceError.profileName}</span>.
+          </p>
+          <p className="text-sm mt-2 leading-relaxed">
+            Pour éviter tout abus ou utilisation de votre clé par un tiers, l&apos;analyse de
+            documents extérieurs au foyer est bloquée. Si vous souhaitez analyser les contrats
+            d&apos;un proche, nous vous invitons à générer une nouvelle clé d&apos;accès adaptée
+            depuis notre page Tarifs.
+          </p>
         </div>
       ) : null}
 

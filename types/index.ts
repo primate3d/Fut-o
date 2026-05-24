@@ -17,6 +17,9 @@ export type AccessKey = {
   activatedAt?: string;
   hasUsedFreeTrial?: boolean;
   freeTrialUsedAt?: string;
+  allowedNames?: string[] | null;
+  profilePostalAddress?: string | null;
+  profileLockedAt?: string | null;
 };
 
 export type Household = {
@@ -113,6 +116,7 @@ export type Expense = {
   recurrence: "monthly" | "yearly" | "one_time";
   billingAmount?: number;
   billingFrequency?: DocumentUserCorrections["frequency"];
+  mobileDataGB?: number;
 };
 
 export type Recommendation = {

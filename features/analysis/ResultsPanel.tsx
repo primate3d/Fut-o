@@ -17,8 +17,11 @@ import { Card } from "@/components/ui/Card";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { ProviderLogo } from "@/components/ui/ProviderLogo";
 import { StatCard } from "@/components/ui/StatCard";
-import { getStoredAccessKey } from "@/features/billing/access-keys";
-import type { AlternativeOffer } from "@/features/recommendations/service";
+import { getStoredAccessKey, isDiscoveryPlan } from "@/features/billing/access-keys";
+import {
+  findConditionalInternetSupportOffers,
+  type AlternativeOffer
+} from "@/features/recommendations/service";
 import {
   getSelectedAlternativeOffer,
   storeSelectedAlternativeOffer,
@@ -40,7 +43,6 @@ import {
   summarizeExpensesByCategory
 } from "@/lib/expense-summary";
 import { getProviderBranding } from "@/lib/provider-branding";
-import { formatCurrency } from "@/lib/utils";
 import {
   ExpenseSubcategory,
   type DocumentUserCorrections,
@@ -54,6 +56,15 @@ import {
   isAnalysisForDocuments,
   storeMockAnalysis
 } from "./storage";
+
+function formatCurrency(value: number) {
+  return new Intl.NumberFormat("fr-FR", {
+    style: "currency",
+    currency: "EUR",
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2
+  }).format(value);
+}
 
 function hasUsableAmounts(analysis: MockAnalysis | null) {
   return Boolean(
@@ -116,9 +127,14 @@ function getSavingsStorageKey(auditKey: string) {
 
 function persistYearlyPotentialSavings(yearlyPotentialSavings: number) {
   const activeKey = getStoredAccessKey();
-  if (!activeKey || yearlyPotentialSavings <= 0) return;
+  if (!activeKey) return;
 
   try {
+    if (yearlyPotentialSavings <= 0) {
+      window.localStorage.removeItem(getSavingsStorageKey(activeKey.code));
+      return;
+    }
+
     window.localStorage.setItem(
       getSavingsStorageKey(activeKey.code),
       String(yearlyPotentialSavings)
@@ -253,6 +269,12 @@ export function ResultsPanel() {
     providerAddress: ""
   });
   const [manualFormMessage, setManualFormMessage] = useState<string | null>(null);
+  const [showManualForm, setShowManualForm] = useState(false);
+
+  useEffect(() => {
+    const mode = new URLSearchParams(window.location.search).get("mode");
+    setShowManualForm(mode === "manuel");
+  }, []);
 
   function updateManualForm<K extends keyof ManualEntryForm>(
     field: K,
@@ -373,6 +395,8 @@ export function ResultsPanel() {
     storeUploadedDocuments([manualDocument]);
     storeMockAnalysis(manualAnalysis);
     setAnalysis(manualAnalysis);
+    setShowManualForm(false);
+    router.replace("/resultats");
     setManualFormMessage("Contrat manuel ajoute. Recherche des alternatives en cours.");
     void loadAlternatives(manualAnalysis);
   }
@@ -389,12 +413,13 @@ export function ResultsPanel() {
     setServiceMessage(null);
 
     try {
+      const activeKey = getStoredAccessKey();
       const response = await fetch("/api/alternatives", {
         method: "POST",
         headers: {
           "Content-Type": "application/json"
         },
-        body: JSON.stringify({ expenses: analysisToLoad.expenses })
+        body: JSON.stringify({ code: activeKey?.code, expenses: analysisToLoad.expenses })
       });
 
       if (!response.ok) {
@@ -410,7 +435,7 @@ export function ResultsPanel() {
         nextAlternatives
       );
       const analysisWithSavings =
-        alternativeSavings > analysisToLoad.yearlyPotentialSavings
+        alternativeSavings !== analysisToLoad.yearlyPotentialSavings
           ? {
               ...analysisToLoad,
               yearlyPotentialSavings: alternativeSavings
@@ -553,7 +578,7 @@ export function ResultsPanel() {
     );
   }, [alternatives, analysis]);
 
-  if (!analysis || analysis.expenses.length === 0) {
+  if (showManualForm || !analysis || analysis.expenses.length === 0) {
     return (
       <section className="space-y-6">
       <EmptyState
@@ -705,6 +730,10 @@ export function ResultsPanel() {
   }
 
   const hasMeaningfulSavings = analysis.yearlyPotentialSavings > 0;
+  const isDiscoveryAccess = isDiscoveryPlan(getStoredAccessKey()?.plan);
+  const conditionalSupportOffers = isDiscoveryAccess
+    ? []
+    : findConditionalInternetSupportOffers(analysis.expenses);
 
   return (
     <section className="space-y-6">
@@ -717,7 +746,9 @@ export function ResultsPanel() {
             Lecture préparée à partir des documents que vous avez ajoutés.
           </p>
         </div>
-        {hasMeaningfulSavings ? (
+        {isDiscoveryAccess ? (
+          <Button href="/tarifs">🔓 Débloquer mon audit complet</Button>
+        ) : hasMeaningfulSavings ? (
           <Button href="/courriers">Préparer mes courriers</Button>
         ) : (
           <div className="flex flex-wrap gap-3">
@@ -765,7 +796,7 @@ export function ResultsPanel() {
         />
       </div>
 
-      {selectedOffer ? (
+      {selectedOffer && !isDiscoveryAccess ? (
         <Card className="border-sage-200 bg-sage-50">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
             <div>
@@ -836,7 +867,23 @@ export function ResultsPanel() {
                       {frequencyWarning}
                     </p>
                   ) : null}
-                  {bestOffer ? (
+                  {bestOffer && isDiscoveryAccess ? (
+                    <div className="mt-4 rounded-lg border border-sage-200 bg-sage-50 p-3">
+                      <p className="text-sm font-semibold text-sage-700">
+                        Économie potentielle :{" "}
+                        {formatCurrency(computeVerifiedOfferSaving(bestOffer, analysis))} / an
+                      </p>
+                      <p className="mt-3 font-semibold text-navy-900">
+                        🔒 Opérateur sélectionné caché
+                      </p>
+                      <p className="mt-2 text-sm leading-6 text-slate-600">
+                        Notre comparateur a identifié une offre adaptée à votre profil.
+                      </p>
+                      <Button className="mt-3" href="/tarifs" variant="secondary">
+                        🔓 Débloquer mes économies
+                      </Button>
+                    </div>
+                  ) : bestOffer ? (
                     <div className="mt-4 rounded-lg bg-sage-50 p-3">
                       <p className="text-xs font-semibold uppercase tracking-wide text-sage-700">
                         Meilleure offre repérée
@@ -913,7 +960,11 @@ export function ResultsPanel() {
                       {formatCurrency(expense.yearlyAmount)} / an
                     </p>
                   </div>
-                  {bestOffer ? (
+                  {bestOffer && isDiscoveryAccess ? (
+                    <div className="mt-3 rounded-lg border border-sage-200 bg-sage-50 px-4 py-3 text-sm font-semibold text-sage-800">
+                      🔒 Opérateur sélectionné caché
+                    </div>
+                  ) : bestOffer ? (
                     <a
                       className="mt-3 inline-flex min-h-10 items-center justify-center gap-2 rounded-lg border border-sage-200 bg-sage-50 px-4 py-2 text-sm font-semibold text-sage-800 transition hover:bg-sage-100"
                       href={bestOffer.url}
@@ -1009,6 +1060,32 @@ export function ResultsPanel() {
             alternatives.map((offer) => {
               const verifiedSaving = computeVerifiedOfferSaving(offer, analysis);
 
+              if (isDiscoveryAccess) {
+                return (
+                  <div className="rounded-lg border border-sage-200 bg-sage-50 p-4" key={offer.id}>
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                      <Badge tone="green">{expenseCategoryLabels[offer.category]}</Badge>
+                      <p className="font-semibold text-sage-700">
+                        Économie potentielle : {formatCurrency(verifiedSaving)} / an
+                      </p>
+                    </div>
+                    <p className="mt-4 font-semibold text-navy-900">
+                      🔒 Opérateur sélectionné caché
+                    </p>
+                    <div className="mt-4 rounded-lg border border-sage-200 bg-white p-4">
+                      <p className="text-sm leading-6 text-slate-600">
+                        💡 Notre comparateur a trouvé une offre parfaitement adaptée à votre
+                        profil. Débloquez votre audit complet pour découvrir le fournisseur idéal
+                        et obtenir vos courriers de résiliation prêts à l&apos;envoi.
+                      </p>
+                      <Button className="mt-4" href="/tarifs">
+                        🔓 Débloquer mes économies
+                      </Button>
+                    </div>
+                  </div>
+                );
+              }
+
               return (
                 <div
                   className={
@@ -1026,7 +1103,7 @@ export function ResultsPanel() {
                     ) : null}
                   </div>
                   <p className="font-semibold text-sage-700">
-                    {formatCurrency(verifiedSaving)} / an
+                    Économie : {formatCurrency(verifiedSaving)} / an
                   </p>
                 </div>
                 <div className="mt-3 flex items-center gap-3">
@@ -1067,6 +1144,52 @@ export function ResultsPanel() {
           )}
         </div>
       </Card>
+
+      {conditionalSupportOffers.length > 0 ? (
+        <Card className="border-amber-200 bg-amber-50">
+          <div className="flex items-center gap-2">
+            <Lightbulb className="text-amber-700" size={22} />
+            <h2 className="text-lg font-semibold text-navy-900">
+              Offre solidaire sous conditions
+            </h2>
+          </div>
+          <p className="mt-2 text-sm leading-6 text-slate-600">
+            Cette piste est présentée séparément : elle dépend de votre éligibilité et
+            n&apos;est jamais retenue automatiquement pour vos démarches.
+          </p>
+          <div className="mt-4 grid gap-3 md:grid-cols-2">
+            {conditionalSupportOffers.map((offer) => (
+              <div className="rounded-lg border border-amber-200 bg-white p-4" key={offer.id}>
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div className="flex items-center gap-3">
+                    <ProviderLogo logoUrl={offer.logoUrl} provider={offer.provider} />
+                    <div>
+                      <h3 className="font-semibold text-navy-900">{offer.name}</h3>
+                      <p className="text-sm text-slate-500">
+                        {offer.provider} - {formatCurrency(offer.monthlyPrice)} / mois
+                      </p>
+                    </div>
+                  </div>
+                  <p className="font-semibold text-sage-700">
+                    Jusqu&apos;à {formatCurrency(offer.estimatedYearlySaving)} / an
+                  </p>
+                </div>
+                <p className="mt-3 text-sm leading-6 text-slate-600">
+                  {offer.condition}
+                </p>
+                <a
+                  className="mt-4 inline-flex min-h-10 items-center justify-center gap-2 rounded-lg border border-amber-200 bg-white px-4 py-2 text-sm font-semibold text-navy-900 transition hover:bg-amber-100"
+                  href={offer.url}
+                  rel="noopener noreferrer"
+                  target="_blank"
+                >
+                  Vérifier mon éligibilité <ExternalLink size={15} />
+                </a>
+              </div>
+            ))}
+          </div>
+        </Card>
+      ) : null}
 
       <div className="grid gap-4">
         <h2 className="text-xl font-semibold text-navy-900">

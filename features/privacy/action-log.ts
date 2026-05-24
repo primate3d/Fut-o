@@ -1,12 +1,20 @@
 import { getStoredAccessKey } from "@/features/billing/access-keys";
+import type { GeneratedLetter, LetterPersonalization } from "@/types";
+
+export type LetterActionSnapshot = {
+  letter: GeneratedLetter;
+  personalization: LetterPersonalization;
+  documentName?: string;
+};
 
 export type AuditActionLog = {
   id: string;
   createdAt: string;
-  type: "letter_downloaded" | "report_downloaded";
+  type: "letter_downloaded" | "letter_email_prepared" | "report_downloaded";
   label: string;
   documentName?: string;
   provider?: string;
+  letterSnapshot?: LetterActionSnapshot;
 };
 
 function getActionLogStorageKey() {
@@ -42,4 +50,30 @@ export function addAuditActionLog(
   window.sessionStorage.setItem(getActionLogStorageKey(), JSON.stringify(nextActions));
 
   return nextActions;
+}
+
+export function queueLetterFollowup(action: AuditActionLog) {
+  if (typeof window === "undefined" || !action.letterSnapshot) return false;
+
+  window.sessionStorage.setItem(
+    `${getActionLogStorageKey()}.pendingFollowup`,
+    JSON.stringify(action)
+  );
+  return true;
+}
+
+export function takeQueuedLetterFollowup(): AuditActionLog | null {
+  if (typeof window === "undefined") return null;
+
+  const storageKey = `${getActionLogStorageKey()}.pendingFollowup`;
+  const storedValue = window.sessionStorage.getItem(storageKey);
+  window.sessionStorage.removeItem(storageKey);
+  if (!storedValue) return null;
+
+  try {
+    const parsedValue = JSON.parse(storedValue) as AuditActionLog;
+    return parsedValue.letterSnapshot ? parsedValue : null;
+  } catch {
+    return null;
+  }
 }

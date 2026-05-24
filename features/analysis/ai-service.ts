@@ -200,10 +200,11 @@ RÈGLES IMPÉRATIVES :
 3. Chaque expense.sourceDocumentId DOIT matcher une clé documents[]
 4. Fournisseur = marque commerciale prioritaire (NRJ Mobile > Bouygues, Sosh > Orange)
 5. N'invente JAMAIS de coordonnées absentes
+6. EXTRACTION DES COORDONNÉES CLIENT : Sois TRÈS RÉSILIENT et agnostique. Extrais explicitement le prénom, le nom, l'adresse postale, l'email, le téléphone, et les identifiants de contrat (numéro client, numéro de facture) PEU IMPORTE l'ordre (ex: Nom avant le Prénom) ou les variations de libellés sur la facture.
 
 REGLES MULTI-LIGNES / MULTI-CONTRATS - EXEMPLES CONCRETS OBLIGATOIRES :
 
-6. Si un meme document contient plusieurs contrats, services ou energies distincts,
+7. Si un meme document contient plusieurs contrats, services ou energies distincts,
    cree UNE expense separee pour chaque ligne identifiable, meme si le fournisseur
    et le document sont identiques.
 
@@ -404,7 +405,7 @@ REGLES MULTI-LIGNES / MULTI-CONTRATS - EXEMPLES CONCRETS OBLIGATOIRES :
         ? []
         : [...profileFallbackExpenses, ...detectedDocumentFallbackExpenses];
 
-    const expenses: Expense[] = [...usefulAiExpenses, ...fallbackExpenses].map(
+    const normalizedExpenses: Expense[] = [...usefulAiExpenses, ...fallbackExpenses].map(
       (expense, index) =>
         attachDocumentProfileToExpense(
           {
@@ -418,6 +419,23 @@ REGLES MULTI-LIGNES / MULTI-CONTRATS - EXEMPLES CONCRETS OBLIGATOIRES :
           documentProfiles
         )
     );
+    const seenInternetInvoiceDocuments = new Set<string>();
+    const expenses = normalizedExpenses.filter((expense) => {
+      const sourceDocumentId = expense.sourceDocumentId;
+      if (
+        !sourceDocumentId ||
+        documentProfiles[sourceDocumentId]?.documentType !== "internet_invoice"
+      ) {
+        return true;
+      }
+
+      if (seenInternetInvoiceDocuments.has(sourceDocumentId)) {
+        return false;
+      }
+
+      seenInternetInvoiceDocuments.add(sourceDocumentId);
+      return true;
+    });
 
     const recommendations: Recommendation[] = (rawResult.recommendations ?? []).map(
       (recommendation, index) => ({

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import { Download, ExternalLink, FileSearch, Loader2, Printer } from "lucide-react";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
@@ -15,6 +16,7 @@ import {
   refreshStoredAnalysisServer,
   storeMockAnalysis
 } from "@/features/analysis";
+import { getStoredAccessKey, isDiscoveryPlan } from "@/features/billing/access-keys";
 import { generateLettersFromAnalysis } from "@/features/letters/service";
 import type { AlternativeOffer } from "@/features/recommendations/service";
 import { findAlternativeOffers } from "@/features/recommendations/service";
@@ -25,6 +27,7 @@ import {
 import {
   addAuditActionLog,
   getAuditActionLogs,
+  queueLetterFollowup,
   type AuditActionLog
 } from "@/features/privacy/action-log";
 import { purgeSourceDocuments } from "@/features/privacy/lifecycle";
@@ -37,9 +40,17 @@ import {
   getTopExpenses,
   summarizeExpensesByCategory
 } from "@/lib/expense-summary";
-import { formatCurrency } from "@/lib/utils";
 import type { GeneratedLetter, MockAnalysis } from "@/types";
 import { generatePdfReport } from "./service";
+
+function formatCurrency(value: number) {
+  return new Intl.NumberFormat("fr-FR", {
+    style: "currency",
+    currency: "EUR",
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2
+  }).format(value);
+}
 
 function getOptimizationScore(analysis: MockAnalysis) {
   if (analysis.totalYearlyAmount <= 0) {
@@ -102,6 +113,8 @@ function formatActionDate(createdAt: string) {
 }
 
 export function ReportPanel() {
+  const router = useRouter();
+  const isDiscoveryAccess = isDiscoveryPlan(getStoredAccessKey()?.plan);
   const [analysis, setAnalysis] = useState<MockAnalysis | null>(null);
   const [alternatives, setAlternatives] = useState<AlternativeOffer[]>([]);
   const [selectedOffer, setSelectedOffer] = useState<SelectedAlternativeOffer | null>(null);
@@ -112,6 +125,8 @@ export function ReportPanel() {
   const [actionLogs, setActionLogs] = useState<AuditActionLog[]>([]);
 
   useEffect(() => {
+    if (isDiscoveryAccess) return;
+
     setActionLogs(getAuditActionLogs());
 
     const retainedOffer = getSelectedAlternativeOffer();
@@ -201,7 +216,7 @@ export function ReportPanel() {
     }
 
     void loadConnectedData();
-  }, []);
+  }, [isDiscoveryAccess]);
 
   async function handleDownload() {
     if (!analysis) return;
@@ -239,6 +254,11 @@ export function ReportPanel() {
     }
   }
 
+  function handlePrepareFollowup(action: AuditActionLog) {
+    if (!queueLetterFollowup(action)) return;
+    router.push("/courriers");
+  }
+
   const categorySummaries = useMemo(
     () => (analysis ? summarizeExpensesByCategory(analysis.expenses) : []),
     [analysis]
@@ -247,6 +267,24 @@ export function ReportPanel() {
     () => (analysis ? getTopExpenses(analysis.expenses, 5) : []),
     [analysis]
   );
+
+  if (isDiscoveryAccess) {
+    return (
+      <Card className="mx-auto max-w-2xl text-center">
+        <h1 className="text-2xl font-bold text-navy-900">
+          Rapport complet non inclus dans l&apos;accès Découverte
+        </h1>
+        <p className="mt-3 text-sm leading-6 text-slate-600">
+          Votre aperçu gratuit permet d&apos;identifier une économie potentielle.
+          Passez à Audit Foyer ou Audit Famille pour obtenir le rapport complet et
+          préparer vos démarches.
+        </p>
+        <Button className="mt-6" href="/tarifs">
+          Débloquer mon audit complet
+        </Button>
+      </Card>
+    );
+  }
 
   if (!analysis) {
     return (
@@ -564,13 +602,27 @@ export function ReportPanel() {
         <div className="mt-4 space-y-3">
           {actionLogs.length > 0 ? (
             actionLogs.map((action) => (
-              <div className="rounded-lg border border-navy-100 bg-white p-4" key={action.id}>
-                <p className="font-semibold text-navy-900">{action.label}</p>
-                <p className="mt-1 text-sm text-slate-500">
-                  {formatActionDate(action.createdAt)}
-                  {action.provider ? ` - ${action.provider}` : ""}
-                  {action.documentName ? ` - ${action.documentName}` : ""}
-                </p>
+              <div
+                className="flex flex-col gap-3 rounded-lg border border-navy-100 bg-white p-4 sm:flex-row sm:items-center sm:justify-between"
+                key={action.id}
+              >
+                <div>
+                  <p className="font-semibold text-navy-900">{action.label}</p>
+                  <p className="mt-1 text-sm text-slate-500">
+                    {formatActionDate(action.createdAt)}
+                    {action.provider ? ` - ${action.provider}` : ""}
+                    {action.documentName ? ` - ${action.documentName}` : ""}
+                  </p>
+                </div>
+                {action.letterSnapshot ? (
+                  <Button
+                    onClick={() => handlePrepareFollowup(action)}
+                    type="button"
+                    variant="secondary"
+                  >
+                    Préparer une relance
+                  </Button>
+                ) : null}
               </div>
             ))
           ) : (

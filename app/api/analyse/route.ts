@@ -3,8 +3,12 @@ import { findKeyByCode, getAnalysisByKey, saveAnalysis, saveKey, deleteAnalysisB
 import { analyzeDocumentsWithAI } from "@/features/analysis/ai-service";
 import {
   createAdminAccessKey,
+  hasLockedHouseholdProfile,
   isAdminAccessCode,
-  isBlockedProductionAdminCode
+  isBlockedProductionAdminCode,
+  isAuditFoyerPlan,
+  requiresHouseholdProfile,
+  validateAuditFoyerDocuments
 } from "@/features/billing/access-keys";
 import { mockAccessKeys } from "@/data/mock";
 import { allowDevOnlyMocks, env } from "@/lib/env";
@@ -92,6 +96,52 @@ type ExtractionDiagnostic = {
   textLength: number;
 };
 
+function normalizeHouseholdName(value?: string | null) {
+  return (value ?? "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z\s'-]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function validateAnalysisAgainstHouseholdProfile(key: AccessKey, analysis: MockAnalysis) {
+  const allowedNames = (key.allowedNames ?? []).map(normalizeHouseholdName).filter(Boolean);
+  const customers = [
+    analysis.detectedParties?.customer,
+    ...Object.values(analysis.detectedParties?.documents ?? {}).map((document) => document.customer)
+  ].filter(Boolean);
+  const extractedNames = customers
+    .map((customer) => customer?.fullName || customer?.lastName || "")
+    .filter(Boolean);
+  const matches = extractedNames.map(normalizeHouseholdName).some((extractedName) =>
+    allowedNames.some((allowedName) => ` ${extractedName} `.includes(` ${allowedName} `))
+  );
+
+  return {
+    matches,
+    extractedName: extractedNames[0] ?? "Nom non detecte",
+    profileName: (key.allowedNames ?? []).join(" / ")
+  };
+}
+
+function applyProfileAddressFallback(key: AccessKey, analysis: MockAnalysis) {
+  if (!key.profilePostalAddress || !analysis.detectedParties) return;
+
+  const firstDocumentCustomer = Object.values(analysis.detectedParties.documents ?? {}).find(
+    (document) => document.customer
+  )?.customer;
+  analysis.detectedParties.customer = {
+    ...(firstDocumentCustomer ?? {}),
+    ...(analysis.detectedParties.customer ?? {}),
+    address:
+      analysis.detectedParties.customer?.address ||
+      firstDocumentCustomer?.address ||
+      key.profilePostalAddress
+  };
+}
+
 export async function POST(request: Request) {
   try {
     const { documents, code, force } = (await request.json()) as {
@@ -125,10 +175,37 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Clé expirée" }, { status: 403 });
     }
 
+    if (requiresHouseholdProfile(key.plan) && !hasLockedHouseholdProfile(key)) {
+      return NextResponse.json(
+        { error: "Configurez le profil de votre foyer avant de lancer une analyse." },
+        { status: 403 }
+      );
+    }
+
+    if (documents) {
+      if (key.plan === "decouverte" && documents.length > 1) {
+        return NextResponse.json(
+          { error: "L'accès Découverte est limité à 1 document maximum." },
+          { status: 403 }
+        );
+      }
+
+      if (isAuditFoyerPlan(key.plan)) {
+        const validation = validateAuditFoyerDocuments(key.plan, documents);
+        if (!validation.isValid) {
+          return NextResponse.json(
+            { error: validation.message || "Limite de documents dépassée pour ce plan." },
+            { status: 403 }
+          );
+        }
+      }
+    }
+
     // 2. Vérification du cache
     const existingAnalysis = await getAnalysisByKey(code);
     if (
       !force &&
+      !requiresHouseholdProfile(key.plan) &&
       existingAnalysis &&
       documents &&
       isNonEmptyAnalysis(existingAnalysis) &&
@@ -271,6 +348,22 @@ export async function POST(request: Request) {
         { error: "Analyse vide: sauvegarde refusée" },
         { status: 422 }
       );
+    }
+
+    if (requiresHouseholdProfile(key.plan)) {
+      const compliance = validateAnalysisAgainstHouseholdProfile(key, analysis);
+      if (!compliance.matches) {
+        return NextResponse.json(
+          {
+            error: "Document non conforme au foyer configure.",
+            code: "HOUSEHOLD_NAME_MISMATCH",
+            extractedName: compliance.extractedName,
+            profileName: compliance.profileName
+          },
+          { status: 403 }
+        );
+      }
+      applyProfileAddressFallback(key, analysis);
     }
 
     // 4. Persistance serveur

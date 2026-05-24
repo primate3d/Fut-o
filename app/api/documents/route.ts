@@ -3,8 +3,10 @@ import path from "path";
 import { NextResponse } from "next/server";
 import {
   createAdminAccessKey,
+  hasLockedHouseholdProfile,
   isAdminAccessCode,
-  isBlockedProductionAdminCode
+  isBlockedProductionAdminCode,
+  requiresHouseholdProfile
 } from "@/features/billing/access-keys";
 import { findKeyByCode, getDocumentsByKey, saveDocuments } from "@/lib/server/db";
 import { storage } from "@/lib/server/storage";
@@ -71,6 +73,13 @@ export async function POST(request: Request) {
 
     if (key.expiresAt && new Date(key.expiresAt) < new Date()) {
       return NextResponse.json({ error: "Clé expirée" }, { status: 403 });
+    }
+
+    if (requiresHouseholdProfile(key.plan) && !hasLockedHouseholdProfile(key)) {
+      return NextResponse.json(
+        { error: "Configurez le profil de votre foyer avant d'ajouter un document." },
+        { status: 403 }
+      );
     }
 
     const buffer = Buffer.from(await file.arrayBuffer());

@@ -49,6 +49,10 @@ type InternetBoxInfo = {
   isBundledMobile: boolean;
 };
 
+type MobilePlanInfo = {
+  dataGB?: number;
+};
+
 type ManualBillingInfo = {
   amount: number;
   monthlyAmount: number;
@@ -395,7 +399,10 @@ function extractInternetBoxInfo(
   const hasPromo =
     /\b(promo|promotion|remise|offert|offerte|prix\s+special|avantage)\b/.test(normalizedText) ||
     /\bpendant\s+(?:6|12)\s+mois\b/.test(normalizedText);
+  const explicitlyWithoutCommitment =
+    /\b(?:offre\s+)?sans\s+engagement\b/.test(normalizedText);
   const hasCommitment =
+    !explicitlyWithoutCommitment &&
     /\b(engagement|fin\s+d\s+engagement|date\s+de\s+fin|jusqu\s+au|jusqu'a)\b/.test(normalizedText);
   const hasTvIncluded =
     /\b(tv|television|decodeur|bouquet|canal\+?|netflix|bein)\b/.test(normalizedText);
@@ -409,6 +416,38 @@ function extractInternetBoxInfo(
     hasTvIncluded,
     isBundledMobile: hasBoxSignal && hasMobileSignal
   };
+}
+
+function extractMobilePlanInfo(
+  text: string,
+  documentType?: UploadedDocumentType
+): MobilePlanInfo | undefined {
+  if (documentType !== "mobile_invoice") return undefined;
+
+  const normalizedText = normalize(clean(text));
+  const consumedDataPattern =
+    /\b\d+(?:[.,]\d+)?\s*go\s*(?:utilises?|utilisees?|consommes?|consommees?|restants?)\b/i;
+  const candidatePatterns = [
+    /(?:forfait|enveloppe|data|internet\s+mobile)[^.\n]{0,40}?(\d+(?:[.,]\d+)?)\s*go\b/i,
+    /(\d+(?:[.,]\d+)?)\s*go\s*(?:inclus|incluse|incluses|compris|comprise)\b/i,
+    /(?:jusqu['’]?\s+a|volume\s+inclus)\s*(\d+(?:[.,]\d+)?)\s*go\b/i
+  ];
+
+  for (const pattern of candidatePatterns) {
+    const match = normalizedText.match(pattern);
+    if (!match) continue;
+
+    const matchStart = match.index ?? 0;
+    const matchContext = normalizedText.slice(matchStart, matchStart + match[0].length + 30);
+    if (consumedDataPattern.test(matchContext)) continue;
+
+    const dataGB = Number(match[1].replace(",", "."));
+    if (Number.isFinite(dataGB) && dataGB >= 0) {
+      return { dataGB: Math.round(dataGB) };
+    }
+  }
+
+  return undefined;
 }
 
 function lastAmountBeforeMarker(text: string, marker: string) {
@@ -877,6 +916,7 @@ export function extractDocumentPartyProfile(document: ExtractedDocument): Docume
       : undefined
   );
   const internetBox = extractInternetBoxInfo(text, inferredDocumentType);
+  const mobilePlan = extractMobilePlanInfo(text, inferredDocumentType);
   const insuranceContracts = extractMacifInsuranceContracts(text);
   const insuranceCustomerNumber = extractInsuranceCustomerNumber(text);
   const postalAddress = extractPostalAddress(text, inferredDocumentType, providerName);
@@ -909,6 +949,7 @@ export function extractDocumentPartyProfile(document: ExtractedDocument): Docume
     energyBilling?: EnergyBillingInfo;
     energyServiceLines?: EnergyServiceLineInfo[];
     internetBox?: InternetBoxInfo;
+    mobilePlan?: MobilePlanInfo;
     insuranceContracts?: InsuranceContractInfo[];
     manualBilling?: ManualBillingInfo;
   } = {
@@ -929,6 +970,7 @@ export function extractDocumentPartyProfile(document: ExtractedDocument): Docume
     energyBilling,
     energyServiceLines: energyServiceLines.length > 0 ? energyServiceLines : undefined,
     internetBox,
+    mobilePlan,
     manualBilling: effectiveManualBilling,
     insuranceContracts: insuranceContracts.length > 0 ? insuranceContracts : undefined
   };
@@ -1012,12 +1054,12 @@ function inferDocumentTypeFromContent(
     return "gas_invoice";
   }
 
-  if (/\b(mobile|forfait|ligne mobile|telephone|data|go\b|5g|4g|sim)\b/.test(text)) {
-    return "mobile_invoice";
-  }
-
   if (/\b(box|internet|fibre|adsl|wifi|livebox|freebox|bbox)\b/.test(text)) {
     return "internet_invoice";
+  }
+
+  if (/\b(mobile|forfait|ligne mobile|telephone|data|go\b|5g|4g|sim)\b/.test(text)) {
+    return "mobile_invoice";
   }
 
   if (/\b(assurance auto|vehicule|immatriculation|bonus malus|deux roues|moto)\b/.test(text)) {
@@ -1233,6 +1275,12 @@ export function getInternetBoxInfoFromProfile(
   )?.internetBox;
 }
 
+function getMobilePlanInfoFromProfile(profile?: DocumentPartyProfile) {
+  return (
+    profile as (DocumentPartyProfile & { mobilePlan?: MobilePlanInfo }) | undefined
+  )?.mobilePlan;
+}
+
 function getManualBillingInfoFromProfile(
   profile?: DocumentPartyProfile
 ) {
@@ -1267,6 +1315,7 @@ export function attachDocumentProfileToExpense(
   const inferredSubcategory = inferExpenseSubcategoryFromDocumentType(inferenceDocumentType);
   const energyBilling = getEnergyBillingInfoFromProfile(profile);
   const internetBox = getInternetBoxInfoFromProfile(profile);
+  const mobilePlan = getMobilePlanInfoFromProfile(profile);
   const manualBilling = getManualBillingInfoFromProfile(profile);
   const shouldApplyManualBilling = Boolean(manualBilling && !manualBilling.isMultiContract);
   const isSeparatedEnergyExpense =
@@ -1328,6 +1377,7 @@ export function attachDocumentProfileToExpense(
           internetBundledMobile: internetBox.isBundledMobile
         }
       : {}),
+    ...(mobilePlan?.dataGB != null ? { mobileDataGB: mobilePlan.dataGB } : {}),
     provider: finalProvider,
     documentType: expense.documentType ?? profile.documentType,
     sourceDocumentId: profile.documentId,

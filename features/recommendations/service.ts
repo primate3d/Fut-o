@@ -4,7 +4,12 @@ import {
   type Expense,
   type Recommendation
 } from "@/types";
-import { formatCurrency } from "@/lib/utils";
+import {
+  BOX_PROFILES,
+  MOBILE_PROFILES,
+  type BoxProfile,
+  type MobileProfile
+} from "@/config/marketOffers";
 import { getProviderBranding } from "@/lib/provider-branding";
 
 export async function generateRecommendationsStub(
@@ -27,6 +32,17 @@ export type AlternativeOffer = {
   action: string;
 };
 
+export type ConditionalSupportOffer = {
+  id: string;
+  provider: string;
+  logoUrl?: string;
+  name: string;
+  url: string;
+  monthlyPrice: number;
+  estimatedYearlySaving: number;
+  condition: string;
+};
+
 type AlternativeTemplate = {
   provider: string;
   name: string;
@@ -34,6 +50,8 @@ type AlternativeTemplate = {
   monthlyPrice: number;
   subcategories?: Expense["subcategory"][];
   accessTechnology?: "fiber" | "adsl" | "unknown";
+  tvMode?: "included_decoder" | "app_only" | "decoder_optional" | "none";
+  comparableTvMonthlyPrice?: number;
   requiresBundle?: {
     category: string;
     provider: string;
@@ -48,6 +66,33 @@ type InternetAwareExpense = Expense & {
   internetTvIncluded?: boolean;
   internetBundledMobile?: boolean;
 };
+
+function formatCurrency(value: number) {
+  return new Intl.NumberFormat("fr-FR", {
+    style: "currency",
+    currency: "EUR",
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2
+  }).format(value);
+}
+
+export function calculateAnnualSavings(
+  currentMonthlyPrice: number,
+  alternativePrice: number
+): number {
+  const savings = Math.round((currentMonthlyPrice - alternativePrice) * 12 * 100) / 100;
+  return savings > 0 ? savings : 0;
+}
+
+export function classifyBoxProfile(currentHasTv: boolean): BoxProfile | undefined {
+  return BOX_PROFILES.find((profile) => profile.hasTv === currentHasTv);
+}
+
+export function classifyMobileProfile(currentDataGB: number): MobileProfile | undefined {
+  return MOBILE_PROFILES.find(
+    (profile) => currentDataGB >= profile.minData && currentDataGB <= profile.maxData
+  );
+}
 
 const alternativesByCategory: Partial<Record<ExpenseCategory, AlternativeTemplate[]>> = {
   [ExpenseCategory.ENERGY]: [
@@ -94,21 +139,36 @@ const alternativesByCategory: Partial<Record<ExpenseCategory, AlternativeTemplat
       provider: "RED by SFR",
       name: "La RED Box (Fibre)",
       url: "https://www.red-by-sfr.fr/offre-internet/",
-      monthlyPrice: 24.99,
+      monthlyPrice: 22.99,
       subcategories: [ExpenseSubcategory.INTERNET],
       accessTechnology: "fiber",
-      reason: "Offre fibre simple, sans engagement et souvent à prix fixe.",
-      action: "Vérifier l'éligibilité fibre de votre logement."
+      tvMode: "decoder_optional",
+      comparableTvMonthlyPrice: 25.99,
+      reason: "Offre fibre sans engagement avec TV via application ; décodeur TV disponible en option.",
+      action: "Vérifier l'éligibilité fibre et le besoin d'un décodeur TV."
     },
     {
       provider: "Sosh",
       name: "La Boîte Sosh",
       url: "https://shop.sosh.fr/box-internet",
-      monthlyPrice: 25.99,
+      monthlyPrice: 24.99,
       subcategories: [ExpenseSubcategory.INTERNET],
       accessTechnology: "unknown",
+      tvMode: "decoder_optional",
+      comparableTvMonthlyPrice: 29.99,
       reason: "Réseau Orange avec une offre simplifiée sans TV incluse (en option).",
       action: "Idéal si vous n'avez pas besoin du décodeur TV traditionnel."
+    },
+    {
+      provider: "Bouygues Telecom",
+      name: "B&YOU Pure fibre",
+      url: "https://www.bouyguestelecom.fr/offres-internet/sans-engagement",
+      monthlyPrice: 24.99,
+      subcategories: [ExpenseSubcategory.INTERNET],
+      accessTechnology: "fiber",
+      tvMode: "none",
+      reason: "Offre fibre sans engagement avec un prix durable, sans service TV inclus.",
+      action: "Vérifier vos besoins TV et l'éligibilité fibre de votre logement."
     },
     {
       provider: "Free",
@@ -117,6 +177,7 @@ const alternativesByCategory: Partial<Record<ExpenseCategory, AlternativeTemplat
       monthlyPrice: 29.99,
       subcategories: [ExpenseSubcategory.INTERNET],
       accessTechnology: "fiber",
+      tvMode: "included_decoder",
       reason: "Débit ultra-rapide et services inclus très compétitifs pour la première année.",
       action: "Vérifier le prix hors promotion après la 1ère année."
     },
@@ -270,13 +331,35 @@ function hasRequiredBundle(template: AlternativeTemplate, expenses: Expense[]) {
   );
 }
 
-export function findAlternativeOffers(expenses: Expense[]): AlternativeOffer[] {
+function adaptInternetTemplateToDetectedServices(
+  template: AlternativeTemplate,
+  expense: InternetAwareExpense
+): AlternativeTemplate | undefined {
+  if (!expense.internetTvIncluded) return template;
 
+  if (template.tvMode === "none") {
+    return undefined;
+  }
+
+  if (template.comparableTvMonthlyPrice) {
+    return {
+      ...template,
+      name: `${template.name} + décodeur TV`,
+      monthlyPrice: template.comparableTvMonthlyPrice,
+      reason: `${template.reason} Prix comparé avec l'option décodeur TV car un service TV est détecté sur votre facture.`
+    };
+  }
+
+  return template;
+}
+
+export function findAlternativeOffers(expenses: Expense[]): AlternativeOffer[] {
   return expenses
     .flatMap((expense) => {
       const internetExpense = expense as InternetAwareExpense;
-      const templates = (alternativesByCategory[expense.category] ?? []).filter(
-        (template) =>
+      const templates = (alternativesByCategory[expense.category] ?? [])
+        .filter(
+          (template) =>
           hasRequiredBundle(template, expenses) &&
           (!template.subcategories ||
             (expense.subcategory && template.subcategories.includes(expense.subcategory))) &&
@@ -285,11 +368,26 @@ export function findAlternativeOffers(expenses: Expense[]): AlternativeOffer[] {
             internetExpense.internetAccessTechnology === "adsl" &&
             template.accessTechnology === "fiber"
           )
-      );
+        )
+        .flatMap((template) => {
+          if (expense.subcategory !== ExpenseSubcategory.INTERNET) {
+            return [template];
+          }
+
+          const comparableTemplate = adaptInternetTemplateToDetectedServices(
+            template,
+            internetExpense
+          );
+          return comparableTemplate ? [comparableTemplate] : [];
+        });
 
       return templates.flatMap((template, index) => {
         const yearlyPrice = template.monthlyPrice * 12;
-        const estimatedYearlySaving = Math.max(0, expense.yearlyAmount - yearlyPrice);
+        const estimatedYearlySaving =
+          expense.subcategory === ExpenseSubcategory.INTERNET ||
+          expense.subcategory === ExpenseSubcategory.MOBILE
+            ? calculateAnnualSavings(expense.monthlyAmount, template.monthlyPrice)
+            : Math.max(0, expense.yearlyAmount - yearlyPrice);
         if (estimatedYearlySaving <= 0) {
           return [];
         }
@@ -300,7 +398,7 @@ export function findAlternativeOffers(expenses: Expense[]): AlternativeOffer[] {
                   ? "Prix promotionnel detecte : comparer le tarif hors promotion."
                   : null,
                 internetExpense.internetTvIncluded
-                  ? "Verifier si la TV ou le decodeur sont necessaires."
+                  ? "TV detectee : seules les offres conservant un service TV comparable sont classees."
                   : null,
                 internetExpense.internetBundledMobile
                   ? "Offre groupee possible : separer box et mobile avant decision."
@@ -334,4 +432,34 @@ export function findAlternativeOffers(expenses: Expense[]): AlternativeOffer[] {
 
     .sort((a, b) => b.estimatedYearlySaving - a.estimatedYearlySaving)
     .slice(0, 8);
+}
+
+export function findConditionalInternetSupportOffers(
+  expenses: Expense[]
+): ConditionalSupportOffer[] {
+  const internetExpense = expenses.find(
+    (expense) => expense.subcategory === ExpenseSubcategory.INTERNET
+  );
+  if (!internetExpense) return [];
+
+  const monthlyPrice = 15.99;
+  const estimatedYearlySaving = calculateAnnualSavings(
+    internetExpense.monthlyAmount,
+    monthlyPrice
+  );
+  if (estimatedYearlySaving <= 0) return [];
+
+  return [
+    {
+      id: `conditional_orange_${internetExpense.id}`,
+      provider: "Orange",
+      logoUrl: getProviderBranding("Orange").logoUrl,
+      name: "Coup de pouce Internet",
+      url: "https://boutique.orange.fr/informations/offre-sociale/",
+      monthlyPrice,
+      estimatedYearlySaving,
+      condition:
+        "Offre sociale soumise à éligibilité. Elle est informative et ne sera pas sélectionnée automatiquement pour vos démarches."
+    }
+  ];
 }

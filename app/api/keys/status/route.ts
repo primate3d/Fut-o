@@ -1,8 +1,10 @@
 import { NextResponse } from "next/server";
 import {
   createAdminAccessKey,
+  hasLockedHouseholdProfile,
   isAdminAccessCode,
-  isBlockedProductionAdminCode
+  isBlockedProductionAdminCode,
+  requiresHouseholdProfile
 } from "@/features/billing/access-keys";
 import { findFreeTrialByKeyCode, findKeyByCode, getOrderByGeneratedKey } from "@/lib/server/db";
 
@@ -38,12 +40,16 @@ export async function GET(request: Request) {
   const order = await getOrderByGeneratedKey(key.code);
   const freeTrial = order?.customerEmail ? undefined : await findFreeTrialByKeyCode(key.code);
   const customerEmail = order?.customerEmail ?? freeTrial?.email ?? null;
+  const profileRequired = requiresHouseholdProfile(key.plan);
+  const profileCompleted = !profileRequired || hasLockedHouseholdProfile(key);
 
   return NextResponse.json({
     key,
     customerEmail,
     hasQuota,
     usesRemaining: key.usesRemaining,
-    quotaExceeded: !hasQuota
+    quotaExceeded: !hasQuota,
+    profileRequired,
+    profileCompleted
   });
 }

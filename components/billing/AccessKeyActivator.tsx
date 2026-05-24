@@ -5,7 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { CheckCircle2, KeyRound, ShoppingCart } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
-import { storeAccessKey } from "@/features/billing";
+import { requiresHouseholdProfile, storeAccessKey } from "@/features/billing";
 import type { AccessKey } from "@/types";
 
 export function AccessKeyActivator() {
@@ -36,7 +36,11 @@ export function AccessKeyActivator() {
     await storeAccessKey(key);
     setStatus("success");
     setMessage("Clé activée. Votre espace s'ouvre dans un instant.");
-    window.setTimeout(() => router.replace(redirectPath), 650);
+    const destination =
+      requiresHouseholdProfile(key.plan) && !key.profileLockedAt
+        ? `/compte?setup=required&redirect=${encodeURIComponent(redirectPath)}`
+        : redirectPath;
+    window.setTimeout(() => router.replace(destination), 650);
   }
 
   return (

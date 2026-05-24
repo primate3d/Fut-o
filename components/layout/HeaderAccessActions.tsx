@@ -6,12 +6,15 @@ import { Button } from "@/components/ui/Button";
 import {
   ACCESS_KEY_STORAGE_KEY,
   getStoredAccessKey,
-  validateAccessKeyServer
+  lookupAccessKeyStatusServer
 } from "@/features/billing";
 import type { AccessKey } from "@/types";
 
+type AccessCheckState = "checking" | "active" | "inactive" | "unavailable";
+
 export function HeaderAccessActions({ mobile = false }: { mobile?: boolean }) {
   const [accessKey, setAccessKey] = useState<AccessKey | null>(null);
+  const [accessCheckState, setAccessCheckState] = useState<AccessCheckState>("checking");
 
   useEffect(() => {
     let isMounted = true;
@@ -22,22 +25,35 @@ export function HeaderAccessActions({ mobile = false }: { mobile?: boolean }) {
       if (!storedKey) {
         if (isMounted) {
           setAccessKey(null);
+          setAccessCheckState("inactive");
         }
         return;
       }
 
-      const serverKey = await validateAccessKeyServer(storedKey.code);
+      setAccessCheckState("checking");
+      const lookup = await lookupAccessKeyStatusServer(storedKey.code);
 
       if (!isMounted) return;
 
-      if (!serverKey) {
+      if (lookup.state === "invalid") {
         window.localStorage.removeItem(ACCESS_KEY_STORAGE_KEY);
         setAccessKey(null);
+        setAccessCheckState("inactive");
         return;
       }
 
+      if (lookup.state === "unavailable") {
+        setAccessKey(storedKey);
+        setAccessCheckState("unavailable");
+        return;
+      }
+
+      const serverKey = lookup.status.key;
+      if (!serverKey) return;
+
       window.localStorage.setItem(ACCESS_KEY_STORAGE_KEY, JSON.stringify(serverKey));
       setAccessKey(serverKey);
+      setAccessCheckState("active");
     }
 
     void validateStoredAccessKey();
@@ -47,10 +63,21 @@ export function HeaderAccessActions({ mobile = false }: { mobile?: boolean }) {
     };
   }, []);
 
-  const hasValidatedAccess = Boolean(accessKey);
-  const workspaceHref = hasValidatedAccess
+  const hasValidatedAccess = accessCheckState === "active" && Boolean(accessKey);
+  const keepsWorkspacePath =
+    hasValidatedAccess ||
+    (Boolean(accessKey) && accessCheckState === "unavailable") ||
+    accessCheckState === "checking";
+  const workspaceHref = keepsWorkspacePath
     ? "/tableau-de-bord"
     : "/activer-cle?redirect=/tableau-de-bord";
+  const statusLabel = hasValidatedAccess
+    ? "Cle personnelle active"
+    : accessCheckState === "checking"
+      ? "Verification de la cle"
+      : accessCheckState === "unavailable"
+        ? "Verification indisponible"
+        : "Zero abonnement";
 
   if (mobile) {
     return (
@@ -66,7 +93,7 @@ export function HeaderAccessActions({ mobile = false }: { mobile?: boolean }) {
   return (
     <div className="hidden items-center gap-4 md:flex">
       <span className="text-[10px] font-bold uppercase tracking-wider text-sage-600">
-        {hasValidatedAccess ? "Cle personnelle active" : "Zero abonnement"}
+        {statusLabel}
       </span>
       <Button href={workspaceHref} variant="secondary">
         Espace utilisateur

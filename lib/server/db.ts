@@ -71,7 +71,10 @@ export async function saveKey(key: AccessKey): Promise<void> {
       usesRemaining: key.usesRemaining,
       expiresAt: key.expiresAt || null,
       isActive: key.isActive,
-      createdAt: key.createdAt
+      createdAt: key.createdAt,
+      allowedNames: key.allowedNames ?? null,
+      profilePostalAddress: key.profilePostalAddress ?? null,
+      profileLockedAt: key.profileLockedAt ?? null
     })
     .onConflictDoUpdate({
       target: accessKeys.code,
@@ -79,9 +82,29 @@ export async function saveKey(key: AccessKey): Promise<void> {
         plan: key.plan,
         usesRemaining: key.usesRemaining,
         expiresAt: key.expiresAt || null,
-        isActive: key.isActive
+        isActive: key.isActive,
+        allowedNames: key.allowedNames ?? null,
+        profilePostalAddress: key.profilePostalAddress ?? null,
+        profileLockedAt: key.profileLockedAt ?? null
       }
     });
+}
+
+export async function lockAccessKeyProfile(
+  code: string,
+  allowedNames: string[],
+  profilePostalAddress: string
+): Promise<AccessKey | undefined> {
+  await db
+    .update(accessKeys)
+    .set({
+      allowedNames,
+      profilePostalAddress,
+      profileLockedAt: new Date().toISOString()
+    })
+    .where(eq(accessKeys.code, code.trim().toUpperCase()));
+
+  return findKeyByCode(code);
 }
 
 export async function findKeyByCode(code: string): Promise<AccessKey | undefined> {
