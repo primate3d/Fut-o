@@ -56,6 +56,7 @@ type AlternativeTemplate = {
     category: string;
     provider: string;
   };
+  dataLimitGB?: number;
   reason: string;
   action: string;
 };
@@ -188,6 +189,7 @@ const alternativesByCategory: Partial<Record<ExpenseCategory, AlternativeTemplat
       url: "https://www.prixtel.com/",
       monthlyPrice: 5.99,
       subcategories: [ExpenseSubcategory.MOBILE],
+      dataLimitGB: 40,
       reason: "Le prix s'ajuste chaque mois à votre consommation réelle de data.",
       action: "Idéal si votre consommation internet varie beaucoup d'un mois à l'autre."
     },
@@ -197,6 +199,7 @@ const alternativesByCategory: Partial<Record<ExpenseCategory, AlternativeTemplat
       url: "https://mobile.lebara.com/fr/fr/",
       monthlyPrice: 5.99,
       subcategories: [ExpenseSubcategory.MOBILE],
+      dataLimitGB: 40,
       reason: "Forfait utilisant le réseau Orange, souvent avec beaucoup de data à petit prix.",
       action: "Vérifier si l'absence de MMS (souvent non inclus) vous pose problème."
     },
@@ -206,6 +209,7 @@ const alternativesByCategory: Partial<Record<ExpenseCategory, AlternativeTemplat
       url: "https://www.symamobile.com/",
       monthlyPrice: 9.99,
       subcategories: [ExpenseSubcategory.MOBILE],
+      dataLimitGB: 150,
       reason: "Très bonne offre 5G avec une large enveloppe data sur le réseau SFR.",
       action: "Vérifier la couverture réseau SFR dans votre région."
     },
@@ -215,6 +219,7 @@ const alternativesByCategory: Partial<Record<ExpenseCategory, AlternativeTemplat
       url: "https://www.lapostemobile.fr/",
       monthlyPrice: 10.99,
       subcategories: [ExpenseSubcategory.MOBILE],
+      dataLimitGB: 60,
       reason: "Alternative solide avec l'avantage de pouvoir se rendre en bureau de poste en cas de besoin.",
       action: "Comparer avec les offres 100% digitales si vous préférez un accompagnement."
     },
@@ -224,6 +229,7 @@ const alternativesByCategory: Partial<Record<ExpenseCategory, AlternativeTemplat
       url: "https://mobile.free.fr/",
       monthlyPrice: 2.00,
       subcategories: [ExpenseSubcategory.MOBILE],
+      dataLimitGB: 0.05,
       requiresBundle: { category: "INTERNET", provider: "free" },
       reason: "Imbattable pour les très petits besoins (peu d'appels, peu de data).",
       action: "Attention au hors-forfait si vous utilisez beaucoup internet."
@@ -234,6 +240,7 @@ const alternativesByCategory: Partial<Record<ExpenseCategory, AlternativeTemplat
       url: "https://www.bouyguestelecom.fr/forfaits-mobiles/sans-engagement",
       monthlyPrice: 8.99,
       subcategories: [ExpenseSubcategory.MOBILE],
+      dataLimitGB: 100,
       reason: "Excellente couverture (Bouygues) et forfaits souvent riches en data pour moins de 10€.",
       action: "Comparer les promotions du moment."
     }
@@ -407,6 +414,14 @@ export function findAlternativeOffers(expenses: Expense[]): AlternativeOffer[] {
                   ? "Ligne ADSL detectee : verifier les offres compatibles avec votre logement."
                   : null
               ].filter((note): note is string => Boolean(note))
+            : expense.subcategory === ExpenseSubcategory.MOBILE &&
+                expense.mobileDataGB &&
+                template.dataLimitGB
+            ? [
+                template.dataLimitGB < expense.mobileDataGB
+                  ? `Volume data inférieur (${template.dataLimitGB} Go contre ${expense.mobileDataGB} Go détectés) : vérifier que cette enveloppe suffit avant changement.`
+                  : `Compatible avec une enveloppe détectée de ${expense.mobileDataGB} Go.`
+              ]
             : [];
 
         return {

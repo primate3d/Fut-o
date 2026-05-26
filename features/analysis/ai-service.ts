@@ -190,7 +190,8 @@ Sortie JSON OBLIGATOIRE :
     "category": "TELECOM",
     "subcategory": "MOBILE",
     "monthlyAmount": 25,
-    "customerNumber": "987654"
+    "customerNumber": "987654",
+    "mobileDataGB": 100
   }]
 }
 
@@ -263,7 +264,9 @@ REGLES MULTI-LIGNES / MULTI-CONTRATS - EXEMPLES CONCRETS OBLIGATOIRES :
 
 12. Si la frequence est incertaine, conserve les montants visibles,
     marque recurrence = "one_time", et ajoute une anomalie
-    plutot que d'inventer une mensualite.`
+    plutot que d'inventer une mensualite.
+
+13. Pour une facture mobile, extrais l'enveloppe data internet incluse dans le forfait sous forme de nombre (en Go) dans expense.mobileDataGB (ex: 100 pour 100 Go).`
         },
         {
           role: "user",

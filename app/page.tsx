@@ -12,6 +12,8 @@ import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 
 const startAuditHref = "/activer-cle?redirect=/importer";
+const manualSimulationHref =
+  "/activer-cle?redirect=%2Fresultats%3Fmode%3Dmanuel";
 const lettersAccessHref = "/activer-cle?redirect=/courriers";
 
 const narrativeSteps = [
@@ -19,9 +21,9 @@ const narrativeSteps = [
     alt: "Documents et factures poses sur une table de maison",
     image:
       "https://images.unsplash.com/photo-1450101499163-c8848c66ca85?auto=format&fit=crop&w=900&q=82",
-    title: "Vous ajoutez vos documents",
-    text: "Factures, contrats, abonnements : vous partagez seulement les éléments utiles pour commencer.",
-    note: "Pas besoin de tout trier ni de tout comprendre avant de démarrer."
+    title: "Importez ou saisissez vos prix",
+    text: "Déposez votre facture en 1 clic pour une lecture automatique, ou entrez vos montants à la main en quelques secondes.",
+    note: "Vous choisissez le mode le plus adapté à votre document et à votre confidentialité."
   },
   {
     alt: "Calculatrice, ordinateur et papiers administratifs pour suivre un budget",
@@ -111,12 +113,26 @@ export default function HomePage() {
             <p className="mt-6 max-w-2xl text-lg leading-8 text-white/92">
               À partir des documents que vous choisissez de partager, vous voyez clair sur vos dépenses, les offres adaptées sont identifiées, et les démarches sont prêtes quand vous décidez d'agir.
             </p>
+            <div className="mb-4 mt-6 flex w-full justify-center">
+              <span className="block max-w-max rounded bg-white px-6 py-2 text-center text-xs font-extrabold uppercase tracking-wide text-slate-900 shadow-sm sm:text-sm md:text-base">
+                AVEC OU SANS FACTURE : LA SAISIE MANUELLE EST AUSSI DISPONIBLE !
+              </span>
+            </div>
             <div className="mt-8 flex flex-col gap-3 sm:flex-row sm:items-center">
               <Button href={startAuditHref}>
                 Voir mes dépenses clairement <ArrowRight size={18} />
               </Button>
               <Button href={startAuditHref} variant="secondary" className="bg-transparent text-white border border-white/20 hover:bg-white/10">
                 Commencer maintenant
+              </Button>
+            </div>
+            <div className="mt-4">
+              <Button
+                className="border border-white/20 bg-white/5 text-white hover:bg-white/10"
+                href={manualSimulationHref}
+                variant="ghost"
+              >
+                💡 Pas de facture sous la main ? Faites une simulation manuelle en 30 secondes
               </Button>
             </div>
             <p className="mt-6 text-sm font-medium italic text-white/78">

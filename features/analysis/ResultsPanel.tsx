@@ -23,6 +23,7 @@ import {
   type AlternativeOffer
 } from "@/features/recommendations/service";
 import {
+  SELECTED_ALTERNATIVE_OFFER_STORAGE_KEY,
   getSelectedAlternativeOffer,
   storeSelectedAlternativeOffer,
   type SelectedAlternativeOffer
@@ -78,6 +79,12 @@ function hasUsableAmounts(analysis: MockAnalysis | null) {
             (Number.isFinite(yearlyAmount) && yearlyAmount > 0)
           );
         }))
+  );
+}
+
+function isManualAnalysis(analysis: MockAnalysis | null) {
+  return Boolean(
+    analysis?.documents.some((document) => document.mimeType === "manual/input")
   );
 }
 
@@ -394,6 +401,8 @@ export function ResultsPanel() {
 
     storeUploadedDocuments([manualDocument]);
     storeMockAnalysis(manualAnalysis);
+    window.localStorage.removeItem(SELECTED_ALTERNATIVE_OFFER_STORAGE_KEY);
+    setSelectedOffer(null);
     setAnalysis(manualAnalysis);
     setShowManualForm(false);
     router.replace("/resultats");
@@ -477,6 +486,11 @@ export function ResultsPanel() {
     async function loadServerState() {
       const serverDocuments = await getStoredUploadedDocumentsServer();
       const serverAnalysis = await getStoredAnalysisServer();
+      const currentAnalysis = getStoredMockAnalysis();
+
+      if (isManualAnalysis(currentAnalysis)) {
+        return;
+      }
 
       if (
         isAnalysisForDocuments(serverAnalysis, serverDocuments) &&

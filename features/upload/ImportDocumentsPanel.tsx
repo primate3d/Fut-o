@@ -34,6 +34,7 @@ import {
   getCategoryForDocumentType
 } from "./document-types";
 import {
+  applyDocumentCorrections,
   clearStoredDocumentCorrections,
   deleteDocumentServer,
   getStoredDocumentCorrections,
@@ -348,14 +349,15 @@ export function ImportDocumentsPanel() {
     }
 
     const activeKey = getStoredAccessKey();
+    const usableDocumentsWithCorrections = applyDocumentCorrections(usableDocuments);
 
-    if (activeKey?.plan === "decouverte" && usableDocuments.length > 1) {
+    if (activeKey?.plan === "decouverte" && usableDocumentsWithCorrections.length > 1) {
       setStatusMessage("L'accès Découverte est limité à 1 document maximum. Passez à la Formule Famille pour analyser plusieurs documents.");
       return;
     }
 
     if (isAuditFoyerPlan(activeKey?.plan)) {
-      const validation = validateAuditFoyerDocuments(activeKey?.plan, usableDocuments);
+      const validation = validateAuditFoyerDocuments(activeKey?.plan, usableDocumentsWithCorrections);
       if (!validation.isValid) {
         setStatusMessage(validation.message || "Limite dépassée pour ce plan.");
         return;
@@ -368,7 +370,7 @@ export function ImportDocumentsPanel() {
     try {
       console.info("[FUTEO_ANALYSIS_POST]", {
         code: activeKey?.code,
-        documentCount: usableDocuments.length,
+        documentCount: usableDocumentsWithCorrections.length,
         force: true
       });
       const response = await fetch("/api/analyse", {
@@ -377,7 +379,7 @@ export function ImportDocumentsPanel() {
           "Content-Type": "application/json"
         },
         body: JSON.stringify({
-          documents: usableDocuments,
+          documents: usableDocumentsWithCorrections,
           code: activeKey?.code,
           force: true
         })
@@ -408,7 +410,7 @@ export function ImportDocumentsPanel() {
           `Service d'analyse serveur indisponible (${response.status}).`;
         console.warn("[FUTEO_ANALYSIS_POST_ERROR]", {
           code: activeKey?.code,
-          documentCount: usableDocuments.length,
+          documentCount: usableDocumentsWithCorrections.length,
           message,
           status: response.status
         });
@@ -417,7 +419,7 @@ export function ImportDocumentsPanel() {
 
       console.info("[FUTEO_ANALYSIS_POST_OK]", {
         code: activeKey?.code,
-        documentCount: usableDocuments.length,
+        documentCount: usableDocumentsWithCorrections.length,
         expensesCount: payload.analysis.expenses.length,
         status: response.status
       });
@@ -463,11 +465,11 @@ export function ImportDocumentsPanel() {
         <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
           <div>
             <h2 className="text-lg font-semibold text-navy-900">
-              Document multi-contrats ?
+              Saisie manuelle disponible
             </h2>
             <p className="mt-2 text-sm leading-6 text-amber-900">
-              Document simple : importez votre facture. Document multi-contrats ou
-              confidentialité renforcée : passez par la saisie manuelle.
+              Multi-contrats ou vous voulez comparer sans télécharger : on vous conseille de
+              vous servir de la saisie manuelle.
             </p>
           </div>
           <Button href="/resultats?mode=manuel" type="button" variant="secondary">
