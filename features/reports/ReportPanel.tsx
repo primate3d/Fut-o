@@ -27,7 +27,6 @@ import {
 import {
   addAuditActionLog,
   getAuditActionLogs,
-  queueLetterFollowup,
   type AuditActionLog
 } from "@/features/privacy/action-log";
 import { purgeSourceDocuments } from "@/features/privacy/lifecycle";
@@ -92,6 +91,12 @@ function getLetterTypeLabel(type: GeneratedLetter["type"]) {
   return labels[type];
 }
 
+function isManualAnalysis(analysis: MockAnalysis | null) {
+  return Boolean(
+    analysis?.documents.some((document) => document.mimeType === "manual/input")
+  );
+}
+
 function getSyntheticPreparedLetters(letters: GeneratedLetter[], maxItems = 5) {
   const seen = new Set<string>();
   const uniqueLetters = letters.filter((letter) => {
@@ -134,13 +139,14 @@ export function ReportPanel() {
 
     const storedAnalysis = getStoredMockAnalysis();
     const documents = getStoredUploadedDocuments();
+    const hasManualAnalysis = isManualAnalysis(storedAnalysis);
     const hasCurrentAnalysis =
       isAnalysisForDocuments(storedAnalysis, documents) &&
       hasDocumentProfiles(storedAnalysis);
 
-    setAnalysis(hasCurrentAnalysis ? storedAnalysis : null);
+    setAnalysis(hasCurrentAnalysis || hasManualAnalysis ? storedAnalysis : null);
 
-    if (!storedAnalysis || !hasCurrentAnalysis) {
+    if ((!storedAnalysis || !hasCurrentAnalysis) && !hasManualAnalysis) {
       async function loadServerState() {
         const serverDocuments = await getStoredUploadedDocumentsServer();
         const readyServerDocuments = serverDocuments.filter(
@@ -152,7 +158,11 @@ export function ReportPanel() {
             ? await refreshStoredAnalysisServer(readyServerDocuments)
             : null);
 
-        if (isAnalysisForDocuments(serverAnalysis, serverDocuments) && serverAnalysis) {
+        if (
+          isAnalysisForDocuments(serverAnalysis, serverDocuments) &&
+          serverAnalysis &&
+          !isManualAnalysis(getStoredMockAnalysis())
+        ) {
           storeMockAnalysis(serverAnalysis);
           setAnalysis(serverAnalysis);
           setAlternatives(findAlternativeOffers(serverAnalysis.expenses).slice(0, 5));
@@ -163,6 +173,10 @@ export function ReportPanel() {
       }
 
       void loadServerState();
+      return;
+    }
+
+    if (!storedAnalysis) {
       return;
     }
 
@@ -255,8 +269,8 @@ export function ReportPanel() {
   }
 
   function handlePrepareFollowup(action: AuditActionLog) {
-    if (!queueLetterFollowup(action)) return;
-    router.push("/courriers");
+    if (!action.letterSnapshot) return;
+    router.push(`/courriers?relance=${encodeURIComponent(action.id)}`);
   }
 
   const categorySummaries = useMemo(

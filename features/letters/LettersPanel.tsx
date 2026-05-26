@@ -1,6 +1,7 @@
 "use client";
 
 import { ChangeEvent, useEffect, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import {
   Copy,
   Download,
@@ -34,7 +35,7 @@ import { getProviderBranding } from "@/lib/provider-branding";
 import { getSelectedAlternativeOffer } from "@/features/recommendations/selected-offer";
 import {
   addAuditActionLog,
-  takeQueuedLetterFollowup,
+  getAuditActionLogs,
   type LetterActionSnapshot
 } from "@/features/privacy/action-log";
 import { purgeSourceDocuments } from "@/features/privacy/lifecycle";
@@ -64,6 +65,12 @@ const initialPersonalization: LetterPersonalization = {
   invoiceNumber: "",
   phone: ""
 };
+
+function isManualAnalysis(analysis: MockAnalysis | null) {
+  return Boolean(
+    analysis?.documents.some((document) => document.mimeType === "manual/input")
+  );
+}
 
 const fieldLabels: Record<keyof LetterPersonalization, string> = {
   firstName: "Prénom",
@@ -271,6 +278,8 @@ function sendEmail(subject: string, body: string) {
 }
 
 export function LettersPanel() {
+  const searchParams = useSearchParams();
+  const followupActionId = searchParams.get("relance");
   const isDiscoveryAccess = isDiscoveryPlan(getStoredAccessKey()?.plan);
   const [analysis, setAnalysis] = useState<MockAnalysis | null>(null);
   const [selectedLetterId, setSelectedLetterId] = useState<string | null>(null);
@@ -384,7 +393,9 @@ export function LettersPanel() {
   useEffect(() => {
     if (isDiscoveryAccess) return;
 
-    const queuedFollowup = takeQueuedLetterFollowup();
+    const queuedFollowup = followupActionId
+      ? getAuditActionLogs().find((action) => action.id === followupActionId)
+      : undefined;
     if (queuedFollowup?.letterSnapshot) {
       const followupLetter = createFollowupLetterFromSnapshot(
         queuedFollowup.letterSnapshot.letter,
@@ -420,9 +431,16 @@ export function LettersPanel() {
 
     if (storedAnalysis && hasUsableStoredAnalysis) {
       applyAnalysis(storedAnalysis);
+      if (isManualAnalysis(storedAnalysis)) {
+        return;
+      }
     }
 
     async function loadServerState() {
+      if (isManualAnalysis(getStoredMockAnalysis())) {
+        return;
+      }
+
       const serverDocuments = await getStoredUploadedDocumentsServer();
       const readyServerDocuments = serverDocuments.filter(
         (document) => document.status === "ready"
@@ -442,7 +460,8 @@ export function LettersPanel() {
       if (
         serverAnalysis &&
         isAnalysisForDocuments(serverAnalysis, serverDocuments) &&
-        hasAnalysisDataForLetters(serverAnalysis)
+        hasAnalysisDataForLetters(serverAnalysis) &&
+        !isManualAnalysis(getStoredMockAnalysis())
       ) {
         storeMockAnalysis(serverAnalysis);
         applyAnalysis(serverAnalysis);
@@ -462,7 +481,7 @@ export function LettersPanel() {
     }
 
     void loadServerState();
-  }, [isDiscoveryAccess]);
+  }, [followupActionId, isDiscoveryAccess]);
 
   useEffect(() => {
     if (!selectedLetterId && letters.length > 0) {

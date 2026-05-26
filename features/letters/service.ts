@@ -482,6 +482,72 @@ function buildBodyTemplate(params: {
   ].join("\n");
 }
 
+function getFollowupRequest(type: GeneratedLetterType) {
+  switch (type) {
+    case "subscription_cancellation":
+      return "Je vous remercie de me confirmer la prise en compte de ma demande de resiliation, ainsi que sa date d'effet et les eventuelles demarches restant a effectuer.";
+    case "offer_change":
+      return "Je vous remercie de me confirmer l'etat de traitement de ma demande de changement d'offre et les conditions qui seront appliquees.";
+    case "comparison_report":
+      return "Je vous remercie de m'indiquer si une proposition adaptee peut m'etre formulee au regard des elements transmis.";
+    case "price_negotiation":
+      return "Je vous remercie d'etudier ma demande et de me communiquer les conditions tarifaires pouvant etre proposees pour ce contrat, ou a defaut de me confirmer votre position.";
+    case "provider_followup":
+    default:
+      return "Je vous remercie de bien vouloir me communiquer la suite donnee a ma demande.";
+  }
+}
+
+function buildFollowupBodyTemplate(params: {
+  providerAddress: string;
+  monthlyAmount: number;
+  yearlyAmount: number;
+  initialTitle: string;
+  initialDate: string;
+  initialType: GeneratedLetterType;
+}) {
+  const today = new Date().toLocaleDateString("fr-FR", {
+    day: "numeric",
+    month: "long",
+    year: "numeric"
+  });
+
+  return [
+    "{{firstName}} {{lastName}}",
+    "{{address}}",
+    "{{email}}",
+    "",
+    "                                        A l'attention du :",
+    `                                        ${params.providerAddress
+      .split("\n")
+      .join("\n                                        ")}`,
+    "",
+    `                                        Fait le ${today}`,
+    "",
+    "Objet : {{subject}}",
+    "Reference client : {{customerNumber}}",
+    "Numero de contrat : {{contractNumber}}",
+    "Numero de facture : {{invoiceNumber}}",
+    "Telephone : {{phone}}",
+    "",
+    "Madame, Monsieur,",
+    "",
+    `Je me permets de revenir vers vous au sujet de ma demande initiale "${params.initialTitle}", datee du ${params.initialDate}.`,
+    "",
+    `Cette demande concerne mon contrat facture ${formatCurrency(
+      params.monthlyAmount
+    )} par mois, soit ${formatCurrency(params.yearlyAmount)} par an.`,
+    "",
+    "Sauf erreur de ma part, je n'ai pas encore recu de reponse a ce jour.",
+    "",
+    getFollowupRequest(params.initialType),
+    "",
+    "Dans l'attente de votre retour, je vous prie d'agreer, Madame, Monsieur, l'expression de mes salutations distinguees.",
+    "",
+    "{{firstName}} {{lastName}}"
+  ].join("\n");
+}
+
 const fallbackPresets: Record<GeneratedLetterType, LetterPreset> = {
   subscription_cancellation: {
     title: "Demarche de resiliation",
@@ -806,19 +872,13 @@ export function createFollowupLetterFromSnapshot(
     type: "provider_followup",
     title: `Relance - ${sourceLetter.title}`,
     subject: `Relance concernant ma demande du ${originalDate}`,
-    bodyTemplate: buildBodyTemplate({
-      provider: sourceLetter.provider,
+    bodyTemplate: buildFollowupBodyTemplate({
+      initialTitle: sourceLetter.title,
+      initialDate: originalDate,
+      initialType: sourceLetter.type,
       monthlyAmount: sourceLetter.monthlyAmount,
       yearlyAmount: sourceLetter.yearlyAmount,
-      potentialSaving: sourceLetter.potentialSaving,
-      providerAddress: sourceLetter.providerAddress ?? sourceLetter.provider,
-      offerName: sourceLetter.offerName,
-      offerProvider: sourceLetter.offerProvider,
-      offerMonthlyPrice: sourceLetter.offerMonthlyPrice,
-      offerUrl: sourceLetter.offerUrl,
-      reason: `Je me permets de revenir vers vous concernant ma demande initiale "${sourceLetter.title}", preparee le ${originalDate}.`,
-      request:
-        "Je vous remercie de bien vouloir m'indiquer la suite donnee a cette demande."
+      providerAddress: sourceLetter.providerAddress ?? sourceLetter.provider
     })
   };
 }
