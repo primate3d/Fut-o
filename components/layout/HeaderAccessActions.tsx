@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
+import { usePathname } from "next/navigation";
 import { Button } from "@/components/ui/Button";
 import {
   ACCESS_KEY_STORAGE_KEY,
@@ -13,6 +14,7 @@ import type { AccessKey } from "@/types";
 type AccessCheckState = "checking" | "active" | "inactive" | "unavailable";
 
 export function HeaderAccessActions({ mobile = false }: { mobile?: boolean }) {
+  const pathname = usePathname();
   const [accessKey, setAccessKey] = useState<AccessKey | null>(null);
   const [accessCheckState, setAccessCheckState] = useState<AccessCheckState>("checking");
 
@@ -61,7 +63,7 @@ export function HeaderAccessActions({ mobile = false }: { mobile?: boolean }) {
     return () => {
       isMounted = false;
     };
-  }, []);
+  }, [pathname]);
 
   const hasValidatedAccess = accessCheckState === "active" && Boolean(accessKey);
   const keepsWorkspacePath =

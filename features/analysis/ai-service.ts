@@ -307,6 +307,14 @@ REGLES MULTI-LIGNES / MULTI-CONTRATS - EXEMPLES CONCRETS OBLIGATOIRES :
       );
     }
 
+    const hasSingleManualContractSelection = documents.some((document) =>
+      Boolean(
+        document.userCorrections?.isMultiContract &&
+          typeof document.userCorrections.amount === "number" &&
+          document.userCorrections.amount > 0 &&
+          document.userCorrections.frequency
+      )
+    );
     const insuranceContractExpenses: AiExpense[] = Object.values(documentProfiles)
       .flatMap((profile) =>
         getInsuranceContractsFromProfile(profile).map((contract) => ({
@@ -345,7 +353,9 @@ REGLES MULTI-LIGNES / MULTI-CONTRATS - EXEMPLES CONCRETS OBLIGATOIRES :
         }))
       );
     const aiExpenses =
-      insuranceContractExpenses.length > 0 || energyServiceExpenses.length > 0
+      hasSingleManualContractSelection ||
+      insuranceContractExpenses.length > 0 ||
+      energyServiceExpenses.length > 0
         ? []
         : rawResult.expenses ?? [];
     const usefulAiExpenses = aiExpenses.filter((expense) => {
@@ -400,7 +410,9 @@ REGLES MULTI-LIGNES / MULTI-CONTRATS - EXEMPLES CONCRETS OBLIGATOIRES :
         phone: document.customer?.phone
       }));
     const fallbackExpenses: AiExpense[] =
-      insuranceContractExpenses.length > 0
+      hasSingleManualContractSelection
+        ? profileFallbackExpenses
+        : insuranceContractExpenses.length > 0
         ? insuranceContractExpenses
         : energyServiceExpenses.length > 0
         ? energyServiceExpenses

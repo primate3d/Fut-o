@@ -25,6 +25,7 @@ import {
 import {
   SELECTED_ALTERNATIVE_OFFER_STORAGE_KEY,
   getSelectedAlternativeOffer,
+  refreshSelectedAlternativeOffer,
   storeSelectedAlternativeOffer,
   type SelectedAlternativeOffer
 } from "@/features/recommendations/selected-offer";
@@ -52,6 +53,7 @@ import {
   type UploadedDocumentType
 } from "@/types";
 import {
+  addAnalysisToReportPortfolio,
   getStoredAnalysisServer,
   getStoredMockAnalysis,
   isAnalysisForDocuments,
@@ -192,9 +194,16 @@ type ManualEntryForm = {
   documentType: UploadedDocumentType;
   amount: string;
   frequency: NonNullable<DocumentUserCorrections["frequency"]>;
+  mobileDataGB: string;
+  internetTvIncluded: boolean;
   clientFirstName: string;
   clientLastName: string;
   clientAddress: string;
+  customerNumber: string;
+  contractNumber: string;
+  invoiceNumber: string;
+  phone: string;
+  email: string;
   providerAddress: string;
 };
 
@@ -270,9 +279,16 @@ export function ResultsPanel() {
     documentType: "home_insurance",
     amount: "",
     frequency: "monthly",
+    mobileDataGB: "",
+    internetTvIncluded: false,
     clientFirstName: "",
     clientLastName: "",
     clientAddress: "",
+    customerNumber: "",
+    contractNumber: "",
+    invoiceNumber: "",
+    phone: "",
+    email: "",
     providerAddress: ""
   });
   const [manualFormMessage, setManualFormMessage] = useState<string | null>(null);
@@ -313,6 +329,16 @@ export function ResultsPanel() {
       amount,
       manualForm.frequency
     );
+    const mobileDataGB = Number(manualForm.mobileDataGB.replace(",", "."));
+    const manualComparisonCriteria =
+      documentType === "mobile_invoice" &&
+      manualForm.mobileDataGB.trim() !== "" &&
+      Number.isFinite(mobileDataGB) &&
+      mobileDataGB >= 0
+        ? { mobileDataGB }
+        : documentType === "internet_invoice"
+          ? { internetTvIncluded: manualForm.internetTvIncluded }
+          : {};
     const documentName = `Saisie manuelle - ${label}`;
     const customerFullName = [
       manualForm.clientFirstName.trim(),
@@ -321,12 +347,23 @@ export function ResultsPanel() {
       .filter(Boolean)
       .join(" ");
     const customerProfile =
-      customerFullName || manualForm.clientAddress.trim()
+      customerFullName ||
+      manualForm.clientAddress.trim() ||
+      manualForm.customerNumber.trim() ||
+      manualForm.contractNumber.trim() ||
+      manualForm.invoiceNumber.trim() ||
+      manualForm.phone.trim() ||
+      manualForm.email.trim()
         ? {
             firstName: manualForm.clientFirstName.trim() || undefined,
             lastName: manualForm.clientLastName.trim() || undefined,
             fullName: customerFullName || undefined,
-            address: manualForm.clientAddress.trim() || undefined
+            address: manualForm.clientAddress.trim() || undefined,
+            customerNumber: manualForm.customerNumber.trim() || undefined,
+            contractNumber: manualForm.contractNumber.trim() || undefined,
+            invoiceNumber: manualForm.invoiceNumber.trim() || undefined,
+            phone: manualForm.phone.trim() || undefined,
+            email: manualForm.email.trim() || undefined
           }
         : undefined;
     const providerProfile = {
@@ -387,9 +424,14 @@ export function ResultsPanel() {
           documentType,
           sourceDocumentId: documentId,
           sourceDocumentName: documentName,
+          customerNumber: manualForm.customerNumber.trim() || undefined,
+          contractNumber: manualForm.contractNumber.trim() || undefined,
+          invoiceNumber: manualForm.invoiceNumber.trim() || undefined,
+          phone: manualForm.phone.trim() || undefined,
           recurrence: getManualRecurrence(manualForm.frequency),
           billingAmount: amount,
-          billingFrequency: manualForm.frequency
+          billingFrequency: manualForm.frequency,
+          ...manualComparisonCriteria
         }
       ],
       recommendations: [],
@@ -401,6 +443,7 @@ export function ResultsPanel() {
 
     storeUploadedDocuments([manualDocument]);
     storeMockAnalysis(manualAnalysis);
+    addAnalysisToReportPortfolio(manualAnalysis);
     window.localStorage.removeItem(SELECTED_ALTERNATIVE_OFFER_STORAGE_KEY);
     setSelectedOffer(null);
     setAnalysis(manualAnalysis);
@@ -456,7 +499,11 @@ export function ResultsPanel() {
         storeMockAnalysis(analysisWithSavings);
         persistYearlyPotentialSavings(alternativeSavings);
       }
+      addAnalysisToReportPortfolio(analysisWithSavings);
       setAlternatives(nextAlternatives);
+      setSelectedOffer((currentOffer) =>
+        refreshSelectedAlternativeOffer(currentOffer, nextAlternatives)
+      );
       setAlternativesUpdatedAt(new Date().toISOString());
     } catch {
       setAlternatives([]);
@@ -480,6 +527,7 @@ export function ResultsPanel() {
     setAnalysis(hasUsableCurrentAnalysis ? storedAnalysis : null);
 
     if (storedAnalysis && hasUsableCurrentAnalysis) {
+      addAnalysisToReportPortfolio(storedAnalysis);
       void loadAlternatives(storedAnalysis);
     }
 
@@ -498,6 +546,7 @@ export function ResultsPanel() {
         serverAnalysis
       ) {
         storeMockAnalysis(serverAnalysis);
+        addAnalysisToReportPortfolio(serverAnalysis);
         setAnalysis(serverAnalysis);
         void loadAlternatives(serverAnalysis);
       }
@@ -707,6 +756,38 @@ export function ResultsPanel() {
               </label>
             </div>
 
+            {manualForm.documentType === "mobile_invoice" ? (
+              <div className="grid gap-4 md:grid-cols-3">
+                <label className="text-sm font-semibold text-navy-900">
+                  Volume de Data (Go)
+                  <input
+                    className={manualInputClass}
+                    inputMode="numeric"
+                    min="0"
+                    onChange={(event) => updateManualForm("mobileDataGB", event.target.value)}
+                    placeholder="Ex : 100"
+                    step="1"
+                    type="number"
+                    value={manualForm.mobileDataGB}
+                  />
+                </label>
+              </div>
+            ) : null}
+
+            {manualForm.documentType === "internet_invoice" ? (
+              <label className="flex items-center gap-3 rounded-lg border border-navy-100 bg-white px-4 py-3 text-sm font-semibold text-navy-900 md:max-w-sm">
+                <input
+                  checked={manualForm.internetTvIncluded}
+                  className="h-4 w-4 accent-sage-600"
+                  onChange={(event) =>
+                    updateManualForm("internetTvIncluded", event.target.checked)
+                  }
+                  type="checkbox"
+                />
+                Option TV incluse
+              </label>
+            ) : null}
+
             <div className="grid gap-4 md:grid-cols-2">
               <label className="text-sm font-semibold text-navy-900">
                 Adresse client
@@ -727,6 +808,61 @@ export function ResultsPanel() {
                   placeholder="Optionnel, utile pour les courriers"
                   rows={3}
                   value={manualForm.providerAddress}
+                />
+              </label>
+            </div>
+
+            <div className="grid gap-4 md:grid-cols-3">
+              <label className="text-sm font-semibold text-navy-900">
+                Numéro client
+                <input
+                  className={manualInputClass}
+                  onChange={(event) => updateManualForm("customerNumber", event.target.value)}
+                  placeholder="Optionnel"
+                  value={manualForm.customerNumber}
+                />
+              </label>
+
+              <label className="text-sm font-semibold text-navy-900">
+                Numéro de contrat
+                <input
+                  className={manualInputClass}
+                  onChange={(event) => updateManualForm("contractNumber", event.target.value)}
+                  placeholder="Optionnel"
+                  value={manualForm.contractNumber}
+                />
+              </label>
+
+              <label className="text-sm font-semibold text-navy-900">
+                Numéro de facture
+                <input
+                  className={manualInputClass}
+                  onChange={(event) => updateManualForm("invoiceNumber", event.target.value)}
+                  placeholder="Optionnel"
+                  value={manualForm.invoiceNumber}
+                />
+              </label>
+            </div>
+
+            <div className="grid gap-4 md:grid-cols-2">
+              <label className="text-sm font-semibold text-navy-900">
+                Téléphone
+                <input
+                  className={manualInputClass}
+                  onChange={(event) => updateManualForm("phone", event.target.value)}
+                  placeholder="Optionnel"
+                  value={manualForm.phone}
+                />
+              </label>
+
+              <label className="text-sm font-semibold text-navy-900">
+                Email
+                <input
+                  className={manualInputClass}
+                  onChange={(event) => updateManualForm("email", event.target.value)}
+                  placeholder="Optionnel"
+                  type="email"
+                  value={manualForm.email}
                 />
               </label>
             </div>

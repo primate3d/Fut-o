@@ -51,6 +51,8 @@ type InternetBoxInfo = {
 
 type MobilePlanInfo = {
   dataGB?: number;
+  includedDataGB?: number;
+  consumedDataGB?: number;
 };
 
 type ManualBillingInfo = {
@@ -425,6 +427,26 @@ function extractMobilePlanInfo(
   if (documentType !== "mobile_invoice") return undefined;
 
   const normalizedText = normalize(clean(text));
+  const nrjUsageMatch = normalizedText.match(
+    /\bweb\s*:\s*(\d+(?:[.,]\d+)?)\s*go\s+debit\s+ajuste\s+au[-\s]+dela\s+(\d+(?:[.,]\d+)?)\s*go\s+inclus\b/i
+  );
+  if (nrjUsageMatch) {
+    const includedDataGB = Number(nrjUsageMatch[1].replace(",", "."));
+    const consumedDataGB = Number(nrjUsageMatch[2].replace(",", "."));
+    if (
+      Number.isFinite(includedDataGB) &&
+      includedDataGB >= 0 &&
+      Number.isFinite(consumedDataGB) &&
+      consumedDataGB >= 0
+    ) {
+      return {
+        dataGB: Math.round(includedDataGB),
+        includedDataGB: Math.round(includedDataGB),
+        consumedDataGB: Math.round(consumedDataGB * 100) / 100
+      };
+    }
+  }
+
   const consumedDataPattern =
     /\b\d+(?:[.,]\d+)?\s*go\s*(?:utilises?|utilisees?|consommes?|consommees?|restants?)\b/i;
   const candidatePatterns = [
@@ -487,8 +509,8 @@ function extractMacifInsuranceContracts(text: string): InsuranceContractInfo[] {
   if (twoWheelsAmount) {
     contracts.push({
       label: "Assurance deux roues",
-      documentType: "car_insurance",
-      subcategory: ExpenseSubcategory.OTHER,
+      documentType: "two_wheeler_insurance",
+      subcategory: ExpenseSubcategory.TWO_WHEELER_INSURANCE,
       yearlyAmount: twoWheelsAmount,
       monthlyAmount: normalizeAmount(twoWheelsAmount / 12),
       provider: "MACIF",
@@ -541,8 +563,8 @@ function extractMacifInsuranceContracts(text: string): InsuranceContractInfo[] {
       contracts.push(
         {
           label: "Assurance deux roues",
-          documentType: "car_insurance",
-          subcategory: ExpenseSubcategory.OTHER,
+          documentType: "two_wheeler_insurance",
+          subcategory: ExpenseSubcategory.TWO_WHEELER_INSURANCE,
           yearlyAmount: twoWheelsYearlyAmount,
           monthlyAmount: normalizeAmount(twoWheelsYearlyAmount / 12),
           provider: "MACIF",
@@ -915,6 +937,17 @@ export function extractDocumentPartyProfile(document: ExtractedDocument): Docume
         })
       : undefined
   );
+  const hasManualContractSelection = Boolean(
+    manualCorrections &&
+      (manualProvider ||
+        manualCorrections.documentType ||
+        normalizeManualAmount(manualCorrections.amount) ||
+        manualCorrections.frequency)
+  );
+  const useSingleManualContract = Boolean(
+    manualCorrections?.isMultiContract &&
+      effectiveManualBilling
+  );
   const internetBox = extractInternetBoxInfo(text, inferredDocumentType);
   const mobilePlan = extractMobilePlanInfo(text, inferredDocumentType);
   const insuranceContracts = extractMacifInsuranceContracts(text);
@@ -952,6 +985,7 @@ export function extractDocumentPartyProfile(document: ExtractedDocument): Docume
     mobilePlan?: MobilePlanInfo;
     insuranceContracts?: InsuranceContractInfo[];
     manualBilling?: ManualBillingInfo;
+    hasManualContractSelection?: boolean;
   } = {
     documentId: document.id,
     fileName: document.fileName,
@@ -972,7 +1006,11 @@ export function extractDocumentPartyProfile(document: ExtractedDocument): Docume
     internetBox,
     mobilePlan,
     manualBilling: effectiveManualBilling,
-    insuranceContracts: insuranceContracts.length > 0 ? insuranceContracts : undefined
+    insuranceContracts:
+      !useSingleManualContract && insuranceContracts.length > 0
+        ? insuranceContracts
+        : undefined,
+    hasManualContractSelection
   };
 
   return profile;
@@ -1039,7 +1077,7 @@ function inferDocumentTypeFromContent(
       return "home_insurance";
     }
     if (/\b(deux\s+roues|vehicule|immatriculation|moto|kawasaki)\b/.test(text)) {
-      return "car_insurance";
+      return "two_wheeler_insurance";
     }
     return "home_insurance";
   }
@@ -1062,7 +1100,11 @@ function inferDocumentTypeFromContent(
     return "mobile_invoice";
   }
 
-  if (/\b(assurance auto|vehicule|immatriculation|bonus malus|deux roues|moto)\b/.test(text)) {
+  if (/\b(deux roues|moto)\b/.test(text)) {
+    return "two_wheeler_insurance";
+  }
+
+  if (/\b(assurance auto|vehicule|immatriculation|bonus malus)\b/.test(text)) {
     return "car_insurance";
   }
 
@@ -1200,7 +1242,11 @@ export function inferExpenseCategoryFromDocumentType(documentType?: UploadedDocu
   if (documentType === "electricity_invoice" || documentType === "gas_invoice") {
     return ExpenseCategory.ENERGY;
   }
-  if (documentType === "car_insurance" || documentType === "home_insurance") {
+  if (
+    documentType === "car_insurance" ||
+    documentType === "two_wheeler_insurance" ||
+    documentType === "home_insurance"
+  ) {
     return ExpenseCategory.INSURANCE;
   }
   if (documentType === "health_insurance") {
@@ -1221,6 +1267,9 @@ export function inferExpenseSubcategoryFromDocumentType(documentType?: UploadedD
   if (documentType === "electricity_invoice") return ExpenseSubcategory.ELECTRICITY;
   if (documentType === "gas_invoice") return ExpenseSubcategory.GAS;
   if (documentType === "home_insurance") return ExpenseSubcategory.HOME_INSURANCE;
+  if (documentType === "two_wheeler_insurance") {
+    return ExpenseSubcategory.TWO_WHEELER_INSURANCE;
+  }
   if (documentType === "health_insurance") return ExpenseSubcategory.MUTUAL_HEALTH;
   if (documentType === "bank_statement") return ExpenseSubcategory.BANK_FEES;
   if (documentType === "subscription") return ExpenseSubcategory.STREAMING;
@@ -1289,6 +1338,16 @@ function getManualBillingInfoFromProfile(
   )?.manualBilling;
 }
 
+function hasManualContractSelectionInProfile(profile?: DocumentPartyProfile) {
+  return Boolean(
+    (
+      profile as
+        | (DocumentPartyProfile & { hasManualContractSelection?: boolean })
+        | undefined
+    )?.hasManualContractSelection
+  );
+}
+
 export function attachDocumentProfileToExpense(
   expense: Expense,
   documentProfiles: Record<string, DocumentPartyProfile>
@@ -1307,8 +1366,12 @@ export function attachDocumentProfileToExpense(
     expense.provider && !isGenericProvider(expense.provider) ? expense.provider : undefined,
     expense.provider
   );
+  const manualBilling = getManualBillingInfoFromProfile(profile);
+  const hasManualContractSelection = hasManualContractSelectionInProfile(profile);
   const inferenceDocumentType =
-    expense.category === ExpenseCategory.INSURANCE && expense.documentType
+    hasManualContractSelection && profile.documentType
+      ? profile.documentType
+      : expense.category === ExpenseCategory.INSURANCE && expense.documentType
       ? expense.documentType
       : profile.documentType;
   const inferredCategory = inferExpenseCategoryFromDocumentType(inferenceDocumentType);
@@ -1316,8 +1379,7 @@ export function attachDocumentProfileToExpense(
   const energyBilling = getEnergyBillingInfoFromProfile(profile);
   const internetBox = getInternetBoxInfoFromProfile(profile);
   const mobilePlan = getMobilePlanInfoFromProfile(profile);
-  const manualBilling = getManualBillingInfoFromProfile(profile);
-  const shouldApplyManualBilling = Boolean(manualBilling && !manualBilling.isMultiContract);
+  const shouldApplyManualBilling = Boolean(manualBilling);
   const isSeparatedEnergyExpense =
     expense.category === ExpenseCategory.ENERGY &&
     (expense.subcategory === ExpenseSubcategory.GAS ||
@@ -1378,8 +1440,21 @@ export function attachDocumentProfileToExpense(
         }
       : {}),
     ...(mobilePlan?.dataGB != null ? { mobileDataGB: mobilePlan.dataGB } : {}),
+    ...(mobilePlan?.includedDataGB != null
+      ? { mobileIncludedDataGB: mobilePlan.includedDataGB }
+      : {}),
+    ...(mobilePlan?.consumedDataGB != null
+      ? { mobileConsumedDataGB: mobilePlan.consumedDataGB }
+      : {}),
     provider: finalProvider,
-    documentType: expense.documentType ?? profile.documentType,
+    label:
+      hasManualContractSelection && profile.subscriptionType
+        ? profile.subscriptionType
+        : expense.label,
+    documentType:
+      hasManualContractSelection && profile.documentType
+        ? profile.documentType
+        : expense.documentType ?? profile.documentType,
     sourceDocumentId: profile.documentId,
     sourceDocumentName: profile.fileName,
     customerNumber: expense.customerNumber ?? profile.customer?.customerNumber,
@@ -1403,7 +1478,9 @@ export function attachDocumentProfileToExpense(
         ? inferredCategory
         : expense.category,
     subcategory:
-      inferenceDocumentType === "internet_invoice"
+      hasManualContractSelection
+        ? finalSubcategory
+        : inferenceDocumentType === "internet_invoice"
         ? ExpenseSubcategory.INTERNET
       : expense.category === ExpenseCategory.INSURANCE && expense.subcategory
         ? expense.subcategory

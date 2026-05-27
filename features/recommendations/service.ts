@@ -49,6 +49,7 @@ type AlternativeTemplate = {
   url: string;
   monthlyPrice: number;
   subcategories?: Expense["subcategory"][];
+  documentTypes?: Expense["documentType"][];
   accessTechnology?: "fiber" | "adsl" | "unknown";
   tvMode?: "included_decoder" | "app_only" | "decoder_optional" | "none";
   comparableTvMonthlyPrice?: number;
@@ -73,6 +74,12 @@ function formatCurrency(value: number) {
     style: "currency",
     currency: "EUR",
     minimumFractionDigits: 2,
+    maximumFractionDigits: 2
+  }).format(value);
+}
+
+function formatMobileData(value: number) {
+  return new Intl.NumberFormat("fr-FR", {
     maximumFractionDigits: 2
   }).format(value);
 }
@@ -132,6 +139,26 @@ const alternativesByCategory: Partial<Record<ExpenseCategory, AlternativeTemplat
       subcategories: [ExpenseSubcategory.ELECTRICITY],
       reason: "Bonne alternative avec un service client reconnu et de l'énergie verte.",
       action: "Comparer les frais fixes d'abonnement mensuels."
+    },
+    {
+      provider: "Engie",
+      name: "Passerelle Gaz - estimation indicative",
+      url: "https://particuliers.engie.fr/gaz-naturel.html",
+      monthlyPrice: 65,
+      subcategories: [ExpenseSubcategory.GAS],
+      reason:
+        "Référence de comparaison gaz : le prix réel dépend de votre consommation, de votre zone tarifaire et des taxes.",
+      action: "Demander une estimation TTC personnalisée avant tout changement."
+    },
+    {
+      provider: "TotalEnergies",
+      name: "Verte Fixe Gaz - estimation indicative",
+      url: "https://www.totalenergies.fr/particuliers/gaz/offres-de-gaz/offre-verte-fixe-gaz",
+      monthlyPrice: 68,
+      subcategories: [ExpenseSubcategory.GAS],
+      reason:
+        "Référence de comparaison gaz avec prix HT fixe un an ; le budget TTC dépend de la consommation et de la zone.",
+      action: "Consulter la grille et obtenir une estimation TTC adaptée au logement."
     }
   ],
   [ExpenseCategory.TELECOM]: [
@@ -235,6 +262,18 @@ const alternativesByCategory: Partial<Record<ExpenseCategory, AlternativeTemplat
       action: "Attention au hors-forfait si vous utilisez beaucoup internet."
     },
     {
+      provider: "Cdiscount Mobile",
+      name: "Forfait 300 Go 5G",
+      url: "https://www.cdiscount.com/cdiscountmobile",
+      monthlyPrice: 12.99,
+      subcategories: [ExpenseSubcategory.MOBILE],
+      dataLimitGB: 300,
+      reason:
+        "Forfait 300 Go 5G sans engagement affiche a 12,99 EUR/mois sur la page Cdiscount Mobile le 26/05/2026.",
+      action:
+        "Verifier le tarif en vigueur, la couverture reseau et que 300 Go couvrent votre usage habituel."
+    },
+    {
       provider: "B&You",
       name: "Série Spéciale",
       url: "https://www.bouyguestelecom.fr/forfaits-mobiles/sans-engagement",
@@ -248,8 +287,8 @@ const alternativesByCategory: Partial<Record<ExpenseCategory, AlternativeTemplat
   [ExpenseCategory.INSURANCE]: [
     {
       provider: "Direct Assurance",
-      name: "Assurance Auto/Habitation directe",
-      url: "https://www.directassurance.fr/",
+      name: "Assurance habitation",
+      url: "https://www.direct-assurance.fr/nos-assurances/assurance-habitation",
       monthlyPrice: 15,
       subcategories: [ExpenseSubcategory.HOME_INSURANCE],
       reason: "Modèle 100% en ligne permettant de réduire les coûts de gestion.",
@@ -258,7 +297,7 @@ const alternativesByCategory: Partial<Record<ExpenseCategory, AlternativeTemplat
     {
       provider: "Leocare",
       name: "Assurance 100% mobile",
-      url: "https://leocare.eu/fr/",
+      url: "https://leocare.eu/fr/assurance-habitation/",
       monthlyPrice: 12,
       subcategories: [ExpenseSubcategory.HOME_INSURANCE],
       reason: "Gestion entièrement via l'application, tarifs très agressifs.",
@@ -267,7 +306,7 @@ const alternativesByCategory: Partial<Record<ExpenseCategory, AlternativeTemplat
     {
       provider: "L'olivier Assurance",
       name: "Formule Essentielle",
-      url: "https://www.lolivier.fr/",
+      url: "https://www.lolivier.fr/assurance-habitation",
       monthlyPrice: 14,
       subcategories: [ExpenseSubcategory.HOME_INSURANCE],
       reason: "Alternative économique avec un parcours client simplifié.",
@@ -276,11 +315,53 @@ const alternativesByCategory: Partial<Record<ExpenseCategory, AlternativeTemplat
     {
       provider: "Luko",
       name: "Assurance habitation connectée",
-      url: "https://www.luko.eu/fr/",
+      url: "https://www.fr.luko.eu/assurance/habitation",
       monthlyPrice: 10,
       subcategories: [ExpenseSubcategory.HOME_INSURANCE],
       reason: "Remboursement rapide et contrat transparent et solidaire.",
       action: "Idéal pour les petits appartements ou locataires."
+    },
+    {
+      provider: "Direct Assurance",
+      name: "Auto Tiers - estimation indicative",
+      url: "https://www.direct-assurance.fr/assurance-auto/devis-assurance-auto",
+      monthlyPrice: 25,
+      subcategories: [ExpenseSubcategory.OTHER],
+      documentTypes: ["car_insurance"],
+      reason:
+        "Base de comparaison indicative pour une assurance auto au tiers ; le tarif final dépend du conducteur, du véhicule et des garanties.",
+      action: "Réaliser un devis personnalisé avec les garanties équivalentes."
+    },
+    {
+      provider: "Eurofil",
+      name: "Auto Tous Risques - estimation indicative",
+      url: "https://www.eurofil.com/assurances/assurance-auto.html",
+      monthlyPrice: 39,
+      subcategories: [ExpenseSubcategory.OTHER],
+      documentTypes: ["car_insurance"],
+      reason:
+        "Base de comparaison indicative pour une formule auto tous risques ; le prix final dépend du profil et du véhicule.",
+      action: "Comparer les franchises, garanties et exclusions sur devis."
+    },
+    {
+      provider: "AMV",
+      name: "Moto Tiers - estimation indicative",
+      url: "https://www.amv.fr/assurance/moto/",
+      monthlyPrice: 15,
+      subcategories: [ExpenseSubcategory.TWO_WHEELER_INSURANCE],
+      reason:
+        "Base de comparaison indicative pour un deux-roues au tiers ; le tarif final dépend de la moto et de l'assuré.",
+      action: "Demander un devis avec des garanties comparables."
+    },
+    {
+      provider: "Club 14",
+      name: "Moto Confort - estimation indicative",
+      url: "https://www.club14.com/",
+      monthlyPrice: 29,
+      subcategories: [ExpenseSubcategory.TWO_WHEELER_INSURANCE],
+      reason:
+        "Base de comparaison indicative pour une protection deux-roues renforcée ; le tarif final nécessite un devis.",
+      action: "Vérifier franchises, assistance et protection du conducteur."
     }
   ],
   [ExpenseCategory.SUBSCRIPTIONS]: [
@@ -364,12 +445,30 @@ export function findAlternativeOffers(expenses: Expense[]): AlternativeOffer[] {
   return expenses
     .flatMap((expense) => {
       const internetExpense = expense as InternetAwareExpense;
+      const mobileComparisonDataGB =
+        expense.subcategory === ExpenseSubcategory.MOBILE &&
+        typeof expense.mobileConsumedDataGB === "number"
+          ? expense.mobileConsumedDataGB
+          : expense.mobileDataGB;
+      const mobileProfile =
+        expense.subcategory === ExpenseSubcategory.MOBILE &&
+        typeof mobileComparisonDataGB === "number"
+          ? classifyMobileProfile(mobileComparisonDataGB)
+          : undefined;
       const templates = (alternativesByCategory[expense.category] ?? [])
         .filter(
           (template) =>
           hasRequiredBundle(template, expenses) &&
+          (!template.documentTypes ||
+            (expense.documentType && template.documentTypes.includes(expense.documentType))) &&
           (!template.subcategories ||
             (expense.subcategory && template.subcategories.includes(expense.subcategory))) &&
+          !(
+            expense.subcategory === ExpenseSubcategory.MOBILE &&
+            typeof mobileComparisonDataGB === "number" &&
+            typeof template.dataLimitGB === "number" &&
+            template.dataLimitGB < mobileComparisonDataGB
+          ) &&
           !(
             expense.subcategory === ExpenseSubcategory.INTERNET &&
             internetExpense.internetAccessTechnology === "adsl" &&
@@ -415,12 +514,22 @@ export function findAlternativeOffers(expenses: Expense[]): AlternativeOffer[] {
                   : null
               ].filter((note): note is string => Boolean(note))
             : expense.subcategory === ExpenseSubcategory.MOBILE &&
-                expense.mobileDataGB &&
-                template.dataLimitGB
+                typeof expense.mobileConsumedDataGB === "number" &&
+                typeof template.dataLimitGB === "number"
             ? [
-                template.dataLimitGB < expense.mobileDataGB
-                  ? `Volume data inférieur (${template.dataLimitGB} Go contre ${expense.mobileDataGB} Go détectés) : vérifier que cette enveloppe suffit avant changement.`
-                  : `Compatible avec une enveloppe détectée de ${expense.mobileDataGB} Go.`
+                `Consommation observee : ${formatMobileData(expense.mobileConsumedDataGB)} Go${
+                  typeof expense.mobileIncludedDataGB === "number"
+                    ? ` sur ${formatMobileData(expense.mobileIncludedDataGB)} Go inclus`
+                    : ""
+                }. Cette offre couvre l'usage releve, a confirmer sur une periode representative.`
+              ]
+            : expense.subcategory === ExpenseSubcategory.MOBILE &&
+                typeof expense.mobileDataGB === "number" &&
+                typeof template.dataLimitGB === "number"
+            ? [
+                `Compatible avec une enveloppe déclarée de ${expense.mobileDataGB} Go${
+                  mobileProfile ? ` (${mobileProfile.label})` : ""
+                }.`
               ]
             : [];
 

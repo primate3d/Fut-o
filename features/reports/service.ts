@@ -3,7 +3,10 @@ import type { GeneratedLetter, MockAnalysis } from "@/types";
 import type { AlternativeOffer } from "@/features/recommendations/service";
 import type { SelectedAlternativeOffer } from "@/features/recommendations/selected-offer";
 import type { AuditActionLog } from "@/features/privacy/action-log";
-import { expenseCategoryLabels } from "@/lib/expense-summary";
+import {
+  getTopExpenses,
+  summarizeExpensesByCategory
+} from "@/lib/expense-summary";
 
 type JsPdfWithPages = jsPDF & {
   internal: jsPDF["internal"] & {
@@ -32,44 +35,39 @@ async function loadImageAsDataUrl(src: string) {
   });
 }
 
-function getLetterTypeLabel(type: GeneratedLetter["type"]) {
-  const labels: Record<GeneratedLetter["type"], string> = {
-    subscription_cancellation: "Résiliation",
-    price_negotiation: "Négociation",
-    provider_followup: "Relance",
-    offer_change: "Changement d'offre",
-    comparison_report: "Comparaison"
-  };
-
-  return labels[type];
-}
-
 function truncateText(value: unknown, maxLength: number, fallback = "") {
   const text = typeof value === "string" && value.trim().length > 0 ? value : fallback;
   return text.substring(0, maxLength);
 }
 
-function getSyntheticPreparedLetters(letters: GeneratedLetter[], maxItems = 5) {
-  const seen = new Set<string>();
-  const uniqueLetters = letters.filter((letter) => {
-    const key = `${letter.type}-${letter.category}-${letter.provider}`;
-    if (seen.has(key)) return false;
-    seen.add(key);
-    return true;
-  });
+function normalizeDisplayText(value?: string | null, fallback = "Non renseigné") {
+  return (value?.trim() || fallback)
+    .replace(/sfr\s+pox/gi, "SFR Box")
+    .replace(/nrj\s+moblie/gi, "NRJ Mobile")
+    .replace(/\/\s*mais\b/gi, "/mois");
+}
 
-  return {
-    displayedLetters: uniqueLetters.slice(0, maxItems),
-    hiddenCount: Math.max(0, letters.length - maxItems),
-    totalCount: letters.length
-  };
+function getExpenseIdFromAlternativeId(offer: AlternativeOffer, analysis: MockAnalysis) {
+  return analysis.expenses.find((expense) =>
+    offer.id.startsWith(`alternative_${expense.id}_`)
+  )?.id;
+}
+
+function getBestAlternativeForExpense(
+  expenseId: string,
+  alternatives: AlternativeOffer[],
+  analysis: MockAnalysis
+) {
+  return alternatives
+    .filter((offer) => getExpenseIdFromAlternativeId(offer, analysis) === expenseId)
+    .sort((first, second) => second.estimatedYearlySaving - first.estimatedYearlySaving)[0];
 }
 
 export async function generatePdfReport(
   analysis: MockAnalysis,
-  _alternatives: AlternativeOffer[] = [],
-  letters: GeneratedLetter[] = [],
-  selectedOffer?: SelectedAlternativeOffer | null,
+  alternatives: AlternativeOffer[] = [],
+  _letters: GeneratedLetter[] = [],
+  _selectedOffer?: SelectedAlternativeOffer | null,
   actionLogs: AuditActionLog[] = []
 ): Promise<void> {
   const doc = new jsPDF({
@@ -83,6 +81,12 @@ export async function generatePdfReport(
 
   let y = 20;
   let logoDataUrl: string | null = null;
+  const ensurePageSpace = (height: number) => {
+    if (y + height > 270) {
+      doc.addPage();
+      y = 20;
+    }
+  };
 
   try {
     logoDataUrl = await loadImageAsDataUrl("/brand/futeo-icon.png");
@@ -136,183 +140,132 @@ export async function generatePdfReport(
 
   y += 50;
 
-  if (selectedOffer) {
-    doc.setTextColor(navy[0], navy[1], navy[2]);
-    doc.setFontSize(16);
-    doc.setFont("helvetica", "bold");
-    doc.text("2. Offre retenue pour comparaison", 20, y);
-
-    y += 10;
-    doc.setFillColor(lightSage[0], lightSage[1], lightSage[2]);
-    doc.roundedRect(20, y, 170, 42, 3, 3, "F");
-    doc.setFontSize(10);
-    doc.setTextColor(navy[0], navy[1], navy[2]);
-    doc.setFont("helvetica", "bold");
-    doc.text(
-      truncateText(`${selectedOffer.provider ?? "Offre"} - ${selectedOffer.name ?? "retenue"}`, 75),
-      28,
-      y + 9
-    );
-    doc.setFont("helvetica", "normal");
-    doc.text(`Prix mensuel: ${formatCurrency(selectedOffer.monthlyPrice)}`, 28, y + 18);
-    doc.text(
-      `Economie estimee: ${formatCurrency(selectedOffer.estimatedYearlySaving)} / an`,
-      100,
-      y + 18
-    );
-    doc.text(
-      `Soit environ ${formatCurrency(selectedOffer.estimatedYearlySaving / 12)} / mois`,
-      100,
-      y + 26
-    );
-    doc.text(
-      "Cette estimation permet de mesurer le gain potentiel par rapport au contrat actuel.",
-      28,
-      y + 34
-    );
-    if (selectedOffer.url) {
-      doc.text(truncateText(`Lien: ${selectedOffer.url}`, 95), 28, y + 40);
-    }
-
-    y += 55;
-  }
-
+  const contractComparisons = analysis.expenses.slice(0, 15).map((expense) => ({
+    expense,
+    offer: getBestAlternativeForExpense(expense.id, alternatives, analysis)
+  }));
+  ensurePageSpace(24 + contractComparisons.length * 8);
   doc.setTextColor(navy[0], navy[1], navy[2]);
   doc.setFontSize(16);
   doc.setFont("helvetica", "bold");
-  doc.text(selectedOffer ? "3. Postes retrouvés" : "2. Postes retrouvés", 20, y);
+  doc.text("2. Pistes d'économies par contrat", 20, y);
 
   y += 10;
   doc.setFontSize(10);
   doc.setFont("helvetica", "bold");
-  doc.text("Fournisseur / libellé", 25, y);
-  doc.text("Catégorie", 82, y);
-  doc.text("Mensuel", 140, y);
-  doc.text("Annuel", 170, y);
+  doc.text("Contrat", 25, y);
+  doc.text("Alternative", 88, y);
+  doc.text("Gain estimé", 185, y, { align: "right" });
 
   doc.setDrawColor(200, 200, 200);
   doc.line(20, y + 2, 190, y + 2);
 
   y += 8;
-  doc.setFont("helvetica", "normal");
-  analysis.expenses.slice(0, 15).forEach((expense) => {
-    if (y > 270) {
-      doc.addPage();
-      y = 20;
-    }
-    doc.text(truncateText(expense.label, 30, "Dépense"), 25, y);
-    doc.text(expenseCategoryLabels[expense.category] || expense.category, 82, y);
-    doc.text(formatCurrency(expense.monthlyAmount), 140, y);
-    doc.text(formatCurrency(expense.yearlyAmount), 170, y);
-    y += 7;
+  contractComparisons.forEach(({ expense, offer }) => {
+    const hasSaving = Boolean(offer && offer.estimatedYearlySaving > 0);
+    doc.setFont("helvetica", hasSaving ? "bold" : "normal");
+    doc.setTextColor(hasSaving ? navy[0] : 125, hasSaving ? navy[1] : 125, hasSaving ? navy[2] : 125);
+    doc.text(
+      truncateText(
+        `${normalizeDisplayText(expense.provider || expense.label)} - ${formatCurrency(expense.monthlyAmount)}/mois`,
+        39
+      ),
+      25,
+      y
+    );
+    doc.setFont("helvetica", "normal");
+    doc.text(
+      truncateText(
+        hasSaving && offer
+          ? `${normalizeDisplayText(offer.provider)} - ${normalizeDisplayText(offer.name)}`
+          : "Aucune offre plus compétitive trouvée",
+        48
+      ),
+      88,
+      y
+    );
+    doc.setTextColor(hasSaving ? 0 : 125, hasSaving ? 120 : 125, hasSaving ? 0 : 125);
+    doc.text(`${formatCurrency(offer?.estimatedYearlySaving ?? 0)}/an`, 185, y, {
+      align: "right"
+    });
+    y += 8;
   });
 
-  y += 15;
-
-  if (y > 220) {
-    doc.addPage();
-    y = 20;
-  }
-
+  y += 12;
+  const categorySummaries = summarizeExpensesByCategory(analysis.expenses);
+  const topExpenses = getTopExpenses(analysis.expenses, 5);
+  const overviewHeight = 20 + Math.max(categorySummaries.length, topExpenses.length) * 8;
+  ensurePageSpace(overviewHeight);
   doc.setTextColor(navy[0], navy[1], navy[2]);
   doc.setFontSize(16);
   doc.setFont("helvetica", "bold");
-  doc.text(selectedOffer ? "4. Recommandations prioritaires" : "3. Recommandations prioritaires", 20, y);
+  doc.text("3. Vue des dépenses", 20, y);
 
   y += 10;
-  analysis.recommendations.slice(0, 5).forEach((recommendation) => {
-    if (y > 250) {
-      doc.addPage();
-      y = 20;
-    }
+  doc.setFontSize(10);
+  doc.setFont("helvetica", "bold");
+  doc.text("Dépenses par catégorie", 25, y);
+  doc.text("Top 5 dépenses", 110, y);
+  doc.setDrawColor(210, 210, 210);
+  doc.line(20, y + 2, 190, y + 2);
+  y += 9;
 
-    doc.setFillColor(250, 250, 250);
-    doc.roundedRect(20, y, 170, 25, 2, 2, "F");
-    doc.setDrawColor(navy[0], navy[1], navy[2]);
-    doc.line(20, y, 20, y + 25);
-
-    doc.setFontSize(11);
-    doc.setFont("helvetica", "bold");
-    doc.text(recommendation.title, 25, y + 7);
-
+  for (let index = 0; index < Math.max(categorySummaries.length, topExpenses.length); index += 1) {
+    const summary = categorySummaries[index];
+    const expense = topExpenses[index];
     doc.setFontSize(9);
     doc.setFont("helvetica", "normal");
     doc.setTextColor(80, 80, 80);
-    const lines = doc.splitTextToSize(recommendation.description, 160);
-    doc.text(lines, 25, y + 13);
-
-    doc.setFont("helvetica", "bold");
-    doc.setTextColor(0, 120, 0);
-    doc.text(
-      `Piste: ${formatCurrency(recommendation.potentialSaving)}/an`,
-      148,
-      y + 7
-    );
-
-    y += 30;
-  });
-
-  const preparedLettersSummary = getSyntheticPreparedLetters(letters);
-
-  if (preparedLettersSummary.totalCount > 0) {
-    y += 8;
-    if (y > 220) {
-      doc.addPage();
-      y = 20;
+    if (summary) {
+      doc.text(
+        truncateText(`${summary.label} - ${formatCurrency(summary.monthlyTotal)}/mois`, 43),
+        25,
+        y
+      );
     }
+    if (expense) {
+      doc.text(
+        truncateText(
+          `${normalizeDisplayText(expense.provider)} - ${formatCurrency(expense.yearlyAmount)}/an`,
+          43
+        ),
+        110,
+        y
+      );
+    }
+    y += 8;
+  }
 
+  const priorityRecommendations = analysis.recommendations
+    .filter((recommendation) => recommendation.priority !== "low")
+    .slice(0, 5);
+
+  if (priorityRecommendations.length > 0) {
+    y += 10;
+    ensurePageSpace(16 + priorityRecommendations.length * 30);
     doc.setTextColor(navy[0], navy[1], navy[2]);
     doc.setFontSize(16);
     doc.setFont("helvetica", "bold");
-    doc.text("Courriers préparés", 20, y);
-
+    doc.text("4. Recommandations prioritaires", 20, y);
     y += 10;
-    doc.setFontSize(10);
-    doc.setFont("helvetica", "normal");
-    doc.setTextColor(80, 80, 80);
-    doc.text(`${preparedLettersSummary.totalCount} démarches prêtes à utiliser.`, 25, y);
-    y += 8;
 
-    const preparedAt = new Date(analysis.generatedAt).toLocaleDateString("fr-FR");
-    preparedLettersSummary.displayedLetters.forEach((letter) => {
-      if (y > 265) {
-        doc.addPage();
-        y = 20;
-      }
-
-      doc.setFontSize(10);
+    priorityRecommendations.forEach((recommendation) => {
+      doc.setFillColor(250, 250, 250);
+      doc.roundedRect(20, y, 170, 25, 2, 2, "F");
+      doc.setDrawColor(navy[0], navy[1], navy[2]);
+      doc.line(20, y, 20, y + 25);
+      doc.setFontSize(11);
       doc.setFont("helvetica", "bold");
-      doc.setTextColor(navy[0], navy[1], navy[2]);
-      doc.text(
-        truncateText(`• ${getLetterTypeLabel(letter.type)} - ${letter.title ?? "Démarche"}`, 90),
-        25,
-        y
-      );
-      y += 6;
+      doc.text(recommendation.title, 25, y + 7);
+      doc.setFontSize(9);
       doc.setFont("helvetica", "normal");
       doc.setTextColor(80, 80, 80);
-      doc.text(
-        truncateText(
-          `${expenseCategoryLabels[letter.category] || letter.category || "Catégorie"} - ${
-            letter.provider || "Fournisseur"
-          } - Préparée le ${preparedAt}`,
-          100
-        ),
-        30,
-        y
-      );
-      y += 9;
+      doc.text(doc.splitTextToSize(recommendation.description, 160), 25, y + 13);
+      doc.setFont("helvetica", "bold");
+      doc.setTextColor(0, 120, 0);
+      doc.text(`Piste: ${formatCurrency(recommendation.potentialSaving)}/an`, 148, y + 7);
+      y += 30;
     });
-
-    if (preparedLettersSummary.hiddenCount > 0) {
-      doc.setFont("helvetica", "normal");
-      doc.setTextColor(80, 80, 80);
-      doc.text(
-        `+ ${preparedLettersSummary.hiddenCount} autres courriers disponibles dans l'espace Courriers`,
-        25,
-        y
-      );
-    }
   }
 
   if (actionLogs.length > 0) {
@@ -325,7 +278,7 @@ export async function generatePdfReport(
     doc.setTextColor(navy[0], navy[1], navy[2]);
     doc.setFontSize(16);
     doc.setFont("helvetica", "bold");
-    doc.text("Historique de vos demarches", 20, y);
+    doc.text("Historique de vos démarches", 20, y);
 
     y += 10;
     actionLogs.slice(0, 8).forEach((action) => {
@@ -345,7 +298,7 @@ export async function generatePdfReport(
       doc.text(
         truncateText(
           `${new Date(action.createdAt).toLocaleDateString("fr-FR")}${
-            action.provider ? ` - ${action.provider}` : ""
+            action.provider ? ` - ${normalizeDisplayText(action.provider)}` : ""
           }${action.documentName ? ` - ${action.documentName}` : ""}`,
           100
         ),

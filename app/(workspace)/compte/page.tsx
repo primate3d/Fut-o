@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import {
   type AccessKeyStatus,
+  getAccessDurationDays,
   getAccessKeyStatusServer,
   getPlanLabel,
   getStoredAccessKey,
@@ -76,6 +77,7 @@ export default function AccountPage() {
   }, []);
 
   const accessKey = accessStatus?.key ?? null;
+  const accessDurationDays = accessKey ? getAccessDurationDays(accessKey.plan) : null;
   const customerEmail = accessStatus?.customerEmail || "E-mail non disponible pour cette clé";
   const quotaLabel = accessStatus
     ? accessStatus.quotaExceeded
@@ -244,13 +246,14 @@ export default function AccountPage() {
           <p className="mt-2 text-sm leading-6 text-slate-600">
             Une fois votre analyse générée, nous vous recommandons de supprimer
             les fichiers sources. Votre rapport et vos courriers resteront
-            accessibles jusqu'à l'expiration de votre clé (14 jours).
+            accessibles jusqu'à l'expiration de votre clé
+            {accessDurationDays ? ` (${accessDurationDays} jours).` : "."}
           </p>
           <div className="mt-5">
             <DeleteDocumentsButton />
             <p className="mt-3 text-xs leading-5 text-slate-500">
               💡 Cette action effacera définitivement les fichiers PDF/images de notre
-              hébergeur. Seuls vos résultats textuels seront conservés pendant les 14 jours
+              hébergeur. Seuls vos résultats textuels seront conservés pendant la durée
               de validité de votre clé.
             </p>
           </div>

@@ -1,5 +1,5 @@
 import { ACCESS_KEY_STORAGE_KEY, getStoredAccessKey } from "@/features/billing/access-keys";
-import { MOCK_ANALYSIS_STORAGE_KEY } from "@/features/analysis/storage";
+import { MOCK_ANALYSIS_STORAGE_KEY, REPORT_PORTFOLIO_STORAGE_KEY } from "@/features/analysis/storage";
 import {
   DOCUMENT_CORRECTIONS_STORAGE_KEY,
   UPLOADED_DOCUMENTS_STORAGE_KEY,
@@ -8,14 +8,17 @@ import {
 } from "@/features/upload/storage";
 import { SELECTED_ALTERNATIVE_OFFER_STORAGE_KEY } from "@/features/recommendations/selected-offer";
 
-function removeAuditLocalStorageResidues() {
+function removeAuditLocalStorageResidues(activeKeyCode?: string) {
   const prefixesToRemove = ["futeo_savings_"];
   const exactKeysToRemove = [
     UPLOADED_DOCUMENTS_STORAGE_KEY,
     MOCK_ANALYSIS_STORAGE_KEY,
     SELECTED_ALTERNATIVE_OFFER_STORAGE_KEY,
     DOCUMENT_CORRECTIONS_STORAGE_KEY,
-    "futeo.uploadedDocumentsOwner"
+    "futeo.uploadedDocumentsOwner",
+    activeKeyCode
+      ? `${REPORT_PORTFOLIO_STORAGE_KEY}.${activeKeyCode}`
+      : `${REPORT_PORTFOLIO_STORAGE_KEY}.anonymous`
   ];
 
   exactKeysToRemove.forEach((key) => window.localStorage.removeItem(key));
@@ -84,7 +87,17 @@ export async function purgeFullAudit() {
     }
   }
 
-  removeAuditLocalStorageResidues();
+  removeAuditLocalStorageResidues(activeKey?.code);
+}
+
+/**
+ * Recommence un audit avec la clé active conservée.
+ * Le profil du foyer est lié à la clé côté serveur et n'est pas supprimé ici.
+ */
+export async function resetAuditDataForActiveKey() {
+  if (typeof window === "undefined") return;
+  await purgeFullAudit();
+  window.sessionStorage.clear();
 }
 
 /**
@@ -92,7 +105,6 @@ export async function purgeFullAudit() {
  */
 export async function purgeAllSessionData() {
   if (typeof window === "undefined") return;
-  await purgeFullAudit();
+  await resetAuditDataForActiveKey();
   window.localStorage.removeItem(ACCESS_KEY_STORAGE_KEY);
-  window.sessionStorage.clear();
 }

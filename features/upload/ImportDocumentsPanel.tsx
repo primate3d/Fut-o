@@ -17,6 +17,7 @@ import {
   isAuditFoyerPlan,
   validateAuditFoyerDocuments
 } from "@/features/billing/access-keys";
+import { SELECTED_ALTERNATIVE_OFFER_STORAGE_KEY } from "@/features/recommendations/selected-offer";
 import { expenseCategoryLabels } from "@/lib/expense-summary";
 import { cn, formatBytes } from "@/lib/utils";
 import {
@@ -30,8 +31,8 @@ import {
   ACCEPTED_UPLOAD_MIME_TYPES,
   MAX_UPLOAD_SIZE_BYTES,
   detectDocumentType,
-  documentTypeOptions,
-  getCategoryForDocumentType
+  getCategoryForDocumentType,
+  visibleDocumentTypeOptions
 } from "./document-types";
 import {
   applyDocumentCorrections,
@@ -304,6 +305,18 @@ export function ImportDocumentsPanel() {
           : document
       )
     );
+    setDocumentCorrections((currentCorrections) => {
+      const nextCorrections = {
+        ...currentCorrections,
+        [id]: {
+          ...(currentCorrections[id] ?? {}),
+          documentType
+        }
+      };
+
+      storeDocumentCorrections(nextCorrections);
+      return nextCorrections;
+    });
     clearStoredAnalysis();
   }
 
@@ -423,6 +436,7 @@ export function ImportDocumentsPanel() {
         expensesCount: payload.analysis.expenses.length,
         status: response.status
       });
+      window.localStorage.removeItem(SELECTED_ALTERNATIVE_OFFER_STORAGE_KEY);
       storeMockAnalysis(payload.analysis);
       router.push("/analyse");
     } catch (error) {
@@ -662,7 +676,7 @@ export function ImportDocumentsPanel() {
                         }
                         value={document.documentType}
                       >
-                        {documentTypeOptions.map((option) => (
+                        {visibleDocumentTypeOptions.map((option) => (
                           <option key={option.value} value={option.value}>
                             {option.label}
                           </option>
@@ -775,7 +789,7 @@ export function ImportDocumentsPanel() {
                           }
                           value={correction.documentType ?? document.documentType}
                         >
-                          {documentTypeOptions.map((option) => (
+                          {visibleDocumentTypeOptions.map((option) => (
                             <option key={option.value} value={option.value}>
                               {option.label}
                             </option>

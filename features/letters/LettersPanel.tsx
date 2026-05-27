@@ -32,7 +32,11 @@ import {
 import { getStoredAccessKey, isDiscoveryPlan } from "@/features/billing/access-keys";
 import { expenseCategoryLabels } from "@/lib/expense-summary";
 import { getProviderBranding } from "@/lib/provider-branding";
-import { getSelectedAlternativeOffer } from "@/features/recommendations/selected-offer";
+import { findAlternativeOffers } from "@/features/recommendations/service";
+import {
+  getSelectedAlternativeOffer,
+  refreshSelectedAlternativeOffer
+} from "@/features/recommendations/selected-offer";
 import {
   addAuditActionLog,
   getAuditActionLogs,
@@ -373,6 +377,10 @@ export function LettersPanel() {
     if (readyServerDocuments.length > 0) {
       const newAnalysis = await refreshStoredAnalysisServer(readyServerDocuments);
       if (newAnalysis) {
+        const currentSelectedOffer = refreshSelectedAlternativeOffer(
+          getSelectedAlternativeOffer(),
+          findAlternativeOffers(newAnalysis.expenses)
+        );
         storeMockAnalysis(newAnalysis);
         setAnalysis(newAnalysis);
         setPersonalization((currentValue) => ({
@@ -381,7 +389,7 @@ export function LettersPanel() {
             currentValue
           )
         }));
-        setLetters(generateLettersFromAnalysis(newAnalysis, getSelectedAlternativeOffer()));
+        setLetters(generateLettersFromAnalysis(newAnalysis, currentSelectedOffer));
         setServiceMessage("Analyse IA terminée.");
       } else {
         setServiceMessage("Erreur lors de la relance de l'analyse.");
@@ -419,6 +427,10 @@ export function LettersPanel() {
       hasAnalysisDataForLetters(storedAnalysis);
 
     function applyAnalysis(nextAnalysis: MockAnalysis) {
+      const currentSelectedOffer = refreshSelectedAlternativeOffer(
+        getSelectedAlternativeOffer(),
+        findAlternativeOffers(nextAnalysis.expenses)
+      );
       setAnalysis(nextAnalysis);
       setPersonalization((currentValue) => ({
         ...mergeDetectedPersonalization(
@@ -426,7 +438,7 @@ export function LettersPanel() {
           currentValue
         )
       }));
-      setLetters(generateLettersFromAnalysis(nextAnalysis, getSelectedAlternativeOffer()));
+      setLetters(generateLettersFromAnalysis(nextAnalysis, currentSelectedOffer));
     }
 
     if (storedAnalysis && hasUsableStoredAnalysis) {

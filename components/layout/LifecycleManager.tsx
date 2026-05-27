@@ -76,7 +76,7 @@ export function LifecycleManager() {
         <div>
           <p className="font-bold text-amber-900">Session terminée</p>
           <p className="mt-1 text-sm text-amber-800">
-            Votre clé de 14 jours est arrivée à expiration. Les données locales
+            Votre clé est arrivée à expiration. Les données locales
             de l'audit ont été retirées de ce navigateur.
           </p>
         </div>

@@ -472,9 +472,11 @@ function buildBodyTemplate(params: {
     params.offerName ? "" : "",
     params.request,
     "",
-    `D'après les éléments dont je dispose, l'économie possible serait d'environ ${formatCurrency(
-      params.potentialSaving
-    )} par an. Avant de prendre une décision, je souhaite savoir si vous pouvez me proposer de meilleures conditions ou une offre plus adaptée.`,
+    params.potentialSaving > 0
+      ? `D'après les éléments dont je dispose, l'économie possible serait d'environ ${formatCurrency(
+          params.potentialSaving
+        )} par an. Avant de prendre une décision, je souhaite savoir si vous pouvez me proposer de meilleures conditions ou une offre plus adaptée.`
+      : "Avant de prendre une décision, je souhaite savoir si vous pouvez me proposer de meilleures conditions ou une offre plus adaptée.",
     "",
     "Dans l'attente de votre retour, je vous prie d'agréer, Madame, Monsieur, l'expression de mes salutations distinguées.",
     "",
@@ -525,10 +527,10 @@ function buildFollowupBodyTemplate(params: {
     `                                        Fait le ${today}`,
     "",
     "Objet : {{subject}}",
-    "Reference client : {{customerNumber}}",
-    "Numero de contrat : {{contractNumber}}",
-    "Numero de facture : {{invoiceNumber}}",
-    "Telephone : {{phone}}",
+    "Référence client : {{customerNumber}}",
+    "Numéro de contrat : {{contractNumber}}",
+    "Numéro de facture : {{invoiceNumber}}",
+    "Téléphone : {{phone}}",
     "",
     "Madame, Monsieur,",
     "",
@@ -803,7 +805,7 @@ function createLetter(
   const potentialSaving =
     bestOffer && typeof bestOffer.monthlyPrice === "number"
       ? Math.max(0, expense.yearlyAmount - bestOffer.monthlyPrice * 12)
-      : bestOffer?.estimatedYearlySaving ?? Math.max(getPotentialSavingForExpense(analysis, expense), 48);
+      : bestOffer?.estimatedYearlySaving ?? Math.max(getPotentialSavingForExpense(analysis, expense), 0);
   const provider = getCommercialProviderName(analysis, expense);
   const providerAddress = getDetectedProviderAddress(analysis, expense, provider);
 

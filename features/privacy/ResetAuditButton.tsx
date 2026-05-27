@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { RotateCcw } from "lucide-react";
 import { Button } from "@/components/ui/Button";
-import { purgeAllSessionData } from "./lifecycle";
+import { resetAuditDataForActiveKey } from "./lifecycle";
 
 export function ResetAuditButton() {
   const [isReseting, setIsReseting] = useState(false);
@@ -12,9 +12,9 @@ export function ResetAuditButton() {
   async function resetAudit() {
     setIsReseting(true);
     try {
-      await purgeAllSessionData();
+      await resetAuditDataForActiveKey();
       setMessage("Votre audit a été réinitialisé avec succès.");
-      window.location.href = "/activer-cle?redirect=/tableau-de-bord";
+      window.location.href = "/importer";
     } catch {
       setMessage("Une erreur est survenue lors de la réinitialisation.");
     } finally {

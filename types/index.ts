@@ -117,6 +117,8 @@ export type Expense = {
   billingAmount?: number;
   billingFrequency?: DocumentUserCorrections["frequency"];
   mobileDataGB?: number;
+  mobileIncludedDataGB?: number;
+  mobileConsumedDataGB?: number;
 };
 
 export type Recommendation = {

@@ -2,15 +2,16 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Download, ExternalLink, FileSearch, Loader2, Printer } from "lucide-react";
+import { Download, FileSearch, Loader2, Printer } from "lucide-react";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { EmptyState } from "@/components/ui/EmptyState";
-import { StatCard } from "@/components/ui/StatCard";
 import {
+  addAnalysisToReportPortfolio,
   getStoredAnalysisServer,
   getStoredMockAnalysis,
+  getStoredReportPortfolioAnalysis,
   hasDocumentProfiles,
   isAnalysisForDocuments,
   refreshStoredAnalysisServer,
@@ -22,6 +23,7 @@ import type { AlternativeOffer } from "@/features/recommendations/service";
 import { findAlternativeOffers } from "@/features/recommendations/service";
 import {
   getSelectedAlternativeOffer,
+  refreshSelectedAlternativeOffer,
   type SelectedAlternativeOffer
 } from "@/features/recommendations/selected-offer";
 import {
@@ -51,6 +53,47 @@ function formatCurrency(value: number) {
   }).format(value);
 }
 
+function normalizeDisplayText(value?: string | null, fallback = "Non renseigné") {
+  return (value?.trim() || fallback)
+    .replace(/sfr\s+pox/gi, "SFR Box")
+    .replace(/nrj\s+moblie/gi, "NRJ Mobile")
+    .replace(/\/\s*mais\b/gi, "/mois");
+}
+
+function getExpenseIdFromAlternativeId(offer: AlternativeOffer, analysis: MockAnalysis) {
+  return analysis.expenses.find((expense) =>
+    offer.id.startsWith(`alternative_${expense.id}_`)
+  )?.id;
+}
+
+function applyAlternativeSavings(analysis: MockAnalysis, alternatives: AlternativeOffer[]) {
+  const bestSavingByExpense = alternatives.reduce<Record<string, number>>((savings, offer) => {
+    const expenseId = getExpenseIdFromAlternativeId(offer, analysis);
+    if (!expenseId) return savings;
+
+    savings[expenseId] = Math.max(savings[expenseId] ?? 0, offer.estimatedYearlySaving);
+    return savings;
+  }, {});
+
+  return {
+    ...analysis,
+    yearlyPotentialSavings: Object.values(bestSavingByExpense).reduce(
+      (total, saving) => total + Math.max(0, saving),
+      0
+    )
+  };
+}
+
+function getBestAlternativeForExpense(
+  expenseId: string,
+  alternatives: AlternativeOffer[],
+  analysis: MockAnalysis
+) {
+  return alternatives
+    .filter((offer) => getExpenseIdFromAlternativeId(offer, analysis) === expenseId)
+    .sort((first, second) => second.estimatedYearlySaving - first.estimatedYearlySaving)[0];
+}
+
 function getOptimizationScore(analysis: MockAnalysis) {
   if (analysis.totalYearlyAmount <= 0) {
     return 100;
@@ -72,45 +115,10 @@ function getScoreBadge(score: number) {
   return { label: "Prioritaire", tone: "neutral" as const };
 }
 
-const actionPlan = [
-  "Comparer les contrats les plus chers",
-  "Préparer une négociation quand c'est pertinent",
-  "Résilier les abonnements inutiles",
-  "Refaire un point dans quelques mois"
-];
-
-function getLetterTypeLabel(type: GeneratedLetter["type"]) {
-  const labels: Record<GeneratedLetter["type"], string> = {
-    subscription_cancellation: "Résiliation",
-    price_negotiation: "Négociation",
-    provider_followup: "Relance",
-    offer_change: "Changement d'offre",
-    comparison_report: "Comparaison"
-  };
-
-  return labels[type];
-}
-
 function isManualAnalysis(analysis: MockAnalysis | null) {
   return Boolean(
     analysis?.documents.some((document) => document.mimeType === "manual/input")
   );
-}
-
-function getSyntheticPreparedLetters(letters: GeneratedLetter[], maxItems = 5) {
-  const seen = new Set<string>();
-  const uniqueLetters = letters.filter((letter) => {
-    const key = `${letter.type}-${letter.category}-${letter.provider}`;
-    if (seen.has(key)) return false;
-    seen.add(key);
-    return true;
-  });
-
-  return {
-    displayedLetters: uniqueLetters.slice(0, maxItems),
-    hiddenCount: Math.max(0, letters.length - maxItems),
-    totalCount: letters.length
-  };
 }
 
 function formatActionDate(createdAt: string) {
@@ -137,12 +145,18 @@ export function ReportPanel() {
     const retainedOffer = getSelectedAlternativeOffer();
     setSelectedOffer(retainedOffer);
 
-    const storedAnalysis = getStoredMockAnalysis();
+    const activeAnalysis = getStoredMockAnalysis();
+    if (activeAnalysis) {
+      addAnalysisToReportPortfolio(activeAnalysis);
+    }
+    const portfolioAnalysis = getStoredReportPortfolioAnalysis();
+    const storedAnalysis = portfolioAnalysis ?? activeAnalysis;
     const documents = getStoredUploadedDocuments();
     const hasManualAnalysis = isManualAnalysis(storedAnalysis);
     const hasCurrentAnalysis =
-      isAnalysisForDocuments(storedAnalysis, documents) &&
-      hasDocumentProfiles(storedAnalysis);
+      Boolean(portfolioAnalysis) ||
+      (isAnalysisForDocuments(storedAnalysis, documents) &&
+        hasDocumentProfiles(storedAnalysis));
 
     setAnalysis(hasCurrentAnalysis || hasManualAnalysis ? storedAnalysis : null);
 
@@ -163,11 +177,15 @@ export function ReportPanel() {
           serverAnalysis &&
           !isManualAnalysis(getStoredMockAnalysis())
         ) {
+          const allAlternatives = findAlternativeOffers(serverAnalysis.expenses);
+          const refreshedOffer = refreshSelectedAlternativeOffer(retainedOffer, allAlternatives);
+          const analysisWithSavings = applyAlternativeSavings(serverAnalysis, allAlternatives);
           storeMockAnalysis(serverAnalysis);
-          setAnalysis(serverAnalysis);
-          setAlternatives(findAlternativeOffers(serverAnalysis.expenses).slice(0, 5));
+          setAnalysis(analysisWithSavings);
+          setAlternatives(allAlternatives);
+          setSelectedOffer(refreshedOffer);
           setRecommendedLetters(
-            generateLettersFromAnalysis(serverAnalysis, retainedOffer).slice(0, 5)
+            generateLettersFromAnalysis(serverAnalysis, refreshedOffer).slice(0, 5)
           );
         }
       }
@@ -212,16 +230,26 @@ export function ReportPanel() {
           letters?: GeneratedLetter[];
         };
 
-        setAlternatives((alternativesPayload.alternatives ?? []).slice(0, 5));
+        const allAlternatives = alternativesPayload.alternatives ?? [];
+        const refreshedOffer = refreshSelectedAlternativeOffer(retainedOffer, allAlternatives);
+        const analysisWithSavings = applyAlternativeSavings(analysisToLoad, allAlternatives);
+        setAlternatives(allAlternatives);
+        setSelectedOffer(refreshedOffer);
+        setAnalysis(analysisWithSavings);
         setRecommendedLetters(
-          retainedOffer
-            ? generateLettersFromAnalysis(analysisToLoad, retainedOffer).slice(0, 5)
+          refreshedOffer
+            ? generateLettersFromAnalysis(analysisWithSavings, refreshedOffer).slice(0, 5)
             : (lettersPayload.letters ?? []).slice(0, 5)
         );
       } catch {
-        setAlternatives(findAlternativeOffers(analysisToLoad.expenses).slice(0, 5));
+        const allAlternatives = findAlternativeOffers(analysisToLoad.expenses);
+        const refreshedOffer = refreshSelectedAlternativeOffer(retainedOffer, allAlternatives);
+        const analysisWithSavings = applyAlternativeSavings(analysisToLoad, allAlternatives);
+        setAlternatives(allAlternatives);
+        setSelectedOffer(refreshedOffer);
+        setAnalysis(analysisWithSavings);
         setRecommendedLetters(
-          generateLettersFromAnalysis(analysisToLoad, retainedOffer).slice(0, 5)
+          generateLettersFromAnalysis(analysisWithSavings, refreshedOffer).slice(0, 5)
         );
         setServiceMessage(
           "Rapport préparé localement. Les services externes de comparaison, d'email et de stockage seront connectés ensuite."
@@ -317,8 +345,18 @@ export function ReportPanel() {
   const priorityRecommendations = analysis.recommendations
     .filter((recommendation) => recommendation.priority !== "low")
     .slice(0, 4);
-  const preparedAt = new Date(analysis.generatedAt).toLocaleDateString("fr-FR");
-  const preparedLettersSummary = getSyntheticPreparedLetters(recommendedLetters);
+  const contractComparisons = analysis.expenses
+    .map((expense) => ({
+      expense,
+      offer: getBestAlternativeForExpense(expense.id, alternatives, analysis)
+    }));
+  const summaryStats = [
+    { label: "Total mensuel estimé", value: formatCurrency(analysis.totalMonthlyAmount) },
+    { label: "Total annuel estimé", value: formatCurrency(analysis.totalYearlyAmount) },
+    { label: "Pistes annuelles", value: formatCurrency(analysis.yearlyPotentialSavings) },
+    { label: "Postes détectés", value: `${analysis.expenses.length}` },
+    { label: "Points à vérifier", value: `${analysis.anomalies.length}` }
+  ];
 
   return (
     <section className="space-y-6 print:space-y-4">
@@ -347,7 +385,7 @@ export function ReportPanel() {
         </div>
       </div>
 
-      {serviceMessage ? (
+      {serviceMessage && !serviceMessage.startsWith("Rapport préparé localement") ? (
         <div className="rounded-xl border border-sage-200 bg-sage-50 px-4 py-3 text-sm leading-6 text-sage-900 print:hidden">
           {serviceMessage}
         </div>
@@ -365,7 +403,7 @@ export function ReportPanel() {
             <p className="text-sm font-semibold text-slate-500">
               Score d'optimisation
             </p>
-            <p className="mt-3 text-5xl font-bold text-navy-900">{score}</p>
+            <p className="mt-3 text-3xl font-semibold text-slate-800">{score}</p>
             <div className="mt-4">
               <Badge tone={scoreBadge.tone}>{scoreBadge.label}</Badge>
             </div>
@@ -375,7 +413,10 @@ export function ReportPanel() {
             <p className="mt-3 text-sm leading-6 text-slate-600">
               L'analyse a fait ressortir {analysis.expenses.length} poste(s),{" "}
               {analysis.anomalies.length} point(s) à vérifier et{" "}
-              {formatCurrency(analysis.yearlyPotentialSavings)} de pistes
+              <span className="whitespace-nowrap font-medium">
+                {formatCurrency(analysis.yearlyPotentialSavings)}
+              </span>{" "}
+              de pistes
               d'économies annuelles. Ces montants servent à prioriser les contrats
               à regarder en premier.
             </p>
@@ -383,140 +424,116 @@ export function ReportPanel() {
         </div>
       </Card>
 
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
-        <StatCard
-          label="Total mensuel estimé"
-          value={formatCurrency(analysis.totalMonthlyAmount)}
-        />
-        <StatCard label="Total annuel estimé" value={formatCurrency(analysis.totalYearlyAmount)} />
-        <StatCard
-          label="Pistes annuelles"
-          value={formatCurrency(analysis.yearlyPotentialSavings)}
-        />
-        <StatCard label="Postes détectés" value={`${analysis.expenses.length}`} />
-        <StatCard label="Points à vérifier" value={`${analysis.anomalies.length}`} />
+      <div className="flex flex-wrap gap-4">
+        {summaryStats.map((stat) => (
+          <Card className="min-h-28 min-w-[180px] flex-1 p-5 print:shadow-none" key={stat.label}>
+            <p className="text-sm font-semibold text-slate-500">{stat.label}</p>
+            <p className="mt-2 whitespace-nowrap text-xl font-semibold text-slate-800 md:text-2xl">
+              {stat.value}
+            </p>
+          </Card>
+        ))}
       </div>
 
-      {selectedOffer ? (
-        <Card className="border-sage-200 bg-sage-50 print:shadow-none">
+      {contractComparisons.length > 0 ? (
+        <Card className="border-sage-200 bg-white p-4 print:shadow-none">
           <h2 className="text-xl font-semibold text-navy-900">
-            Offre retenue pour comparaison
+            Vos pistes d&apos;économies par contrat
           </h2>
           <p className="mt-2 text-sm leading-6 text-slate-600">
-            Cette estimation permet de mesurer le gain potentiel par rapport à votre contrat actuel.
+            Chaque contrat analysé apparaît ci-dessous, y compris lorsqu&apos;aucune
+            offre plus compétitive n&apos;a été identifiée.
           </p>
-          <div className="mt-4 grid gap-3 md:grid-cols-5">
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-wide text-sage-700">
-                Fournisseur
+          <div className="mt-4 flex flex-col gap-3">
+            {contractComparisons.map(({ expense, offer }) => {
+              const hasSaving = Boolean(offer && offer.estimatedYearlySaving > 0);
+
+              return (
+                <div
+                  className="flex w-full flex-col gap-3 rounded-xl border border-slate-100 bg-white p-4 lg:flex-row lg:items-center lg:justify-between"
+                  key={expense.id}
+                >
+                  <p
+                    className={`min-w-0 flex-1 text-sm font-semibold md:text-base ${
+                      hasSaving ? "text-slate-800" : "text-slate-600"
+                    }`}
+                  >
+                    {normalizeDisplayText(expense.label)} —{" "}
+                    {normalizeDisplayText(expense.provider)} (
+                    {formatCurrency(expense.monthlyAmount)}/mois)
+                  </p>
+                  <p
+                    className="min-w-0 flex-1 text-xs text-slate-500 md:text-sm"
+                  >
+                    {hasSaving && offer
+                      ? `Alternative : ${normalizeDisplayText(offer.provider)} - ${normalizeDisplayText(offer.name)}`
+                      : "Déjà optimisé : aucune offre plus compétitive"}
+                  </p>
+                  <p
+                    className={`shrink-0 whitespace-nowrap text-sm font-semibold md:text-base ${
+                      hasSaving ? "text-emerald-600" : "text-slate-400"
+                    }`}
+                  >
+                    {hasSaving
+                      ? `+ ${formatCurrency(offer?.estimatedYearlySaving ?? 0)} / an`
+                      : formatCurrency(0)}
+                  </p>
+                </div>
+              );
+            })}
+            <div className="mt-3 flex w-full flex-col gap-3 rounded-xl border border-emerald-200 bg-emerald-50/50 p-4 sm:flex-row sm:items-center sm:justify-between">
+              <p className="font-medium text-slate-700">
+                💰 Total de vos économies annuelles potentielles
               </p>
-              <p className="mt-1 font-semibold text-navy-900">{selectedOffer.provider}</p>
-            </div>
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-wide text-sage-700">
-                Offre
-              </p>
-              <p className="mt-1 font-semibold text-navy-900">{selectedOffer.name}</p>
-            </div>
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-wide text-sage-700">
-                Prix mensuel
-              </p>
-              <p className="mt-1 font-semibold text-navy-900">
-                {formatCurrency(selectedOffer.monthlyPrice)}
-              </p>
-            </div>
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-wide text-sage-700">
-                Économie annuelle
-              </p>
-              <p className="mt-1 text-xl font-bold text-sage-700">
-                {formatCurrency(selectedOffer.estimatedYearlySaving)} / an
-              </p>
-            </div>
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-wide text-sage-700">
-                Économie mensuelle
-              </p>
-              <p className="mt-1 text-xl font-bold text-sage-700">
-                {formatCurrency(selectedOffer.estimatedYearlySaving / 12)} / mois
+              <p className="whitespace-nowrap text-base font-bold text-emerald-600">
+                + {formatCurrency(analysis.yearlyPotentialSavings)} / an
               </p>
             </div>
           </div>
-          {selectedOffer.url ? (
-            <a
-              className="mt-4 inline-flex min-h-10 items-center justify-center gap-2 rounded-lg border border-sage-200 bg-white px-4 py-2 text-sm font-semibold text-sage-800 transition hover:bg-sage-100"
-              href={selectedOffer.url}
-              rel="noopener noreferrer"
-              target="_blank"
-            >
-              Voir l'offre retenue <ExternalLink size={15} />
-            </a>
-          ) : null}
         </Card>
       ) : null}
 
-      <div className="grid gap-6 xl:grid-cols-2">
+      {priorityRecommendations.length > 0 ? (
         <Card className="print:shadow-none">
           <h2 className="text-xl font-semibold text-navy-900">
             Recommandations prioritaires
           </h2>
           <div className="mt-4 space-y-4">
-            {priorityRecommendations.length > 0 ? (
-              priorityRecommendations.map((recommendation) => (
-                <div className="rounded-lg bg-navy-50 p-4" key={recommendation.id}>
-                  <Badge tone={recommendation.priority === "high" ? "green" : "blue"}>
-                    Priorité {recommendation.priority === "high" ? "haute" : "normale"}
-                  </Badge>
-                  <h3 className="mt-3 font-semibold text-navy-900">
-                    {recommendation.title}
-                  </h3>
-                  <p className="mt-2 text-sm leading-6 text-slate-600">
-                    {recommendation.description}
-                  </p>
-                  <p className="mt-2 font-semibold text-sage-700">
-                    {formatCurrency(recommendation.potentialSaving)} / an
-                  </p>
-                </div>
-              ))
-            ) : (
-              <p className="text-sm text-slate-600">
-                Aucune recommandation prioritaire pour le moment.
-              </p>
-            )}
+            {priorityRecommendations.map((recommendation) => (
+              <div className="rounded-lg bg-navy-50 p-4" key={recommendation.id}>
+                <Badge tone={recommendation.priority === "high" ? "green" : "blue"}>
+                  Priorité {recommendation.priority === "high" ? "haute" : "normale"}
+                </Badge>
+                <h3 className="mt-3 font-semibold text-navy-900">
+                  {recommendation.title}
+                </h3>
+                <p className="mt-2 text-sm leading-6 text-slate-600">
+                  {recommendation.description}
+                </p>
+                <p className="mt-2 font-semibold text-sage-700">
+                  {formatCurrency(recommendation.potentialSaving)} / an
+                </p>
+              </div>
+            ))}
           </div>
         </Card>
+      ) : null}
 
-        <Card className="print:shadow-none">
-          <h2 className="text-xl font-semibold text-navy-900">Plan d'action</h2>
-          <ol className="mt-4 space-y-3">
-            {actionPlan.map((action, index) => (
-              <li className="flex gap-3 rounded-lg bg-sage-50 p-4" key={action}>
-                <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-sage-500 text-sm font-bold text-white">
-                  {index + 1}
-                </span>
-                <span className="font-medium text-navy-900">{action}</span>
-              </li>
-            ))}
-          </ol>
-        </Card>
-      </div>
-
-      <div className="grid gap-6 xl:grid-cols-2">
-        <Card className="print:shadow-none">
+      <div className="grid grid-cols-1 gap-6 md:grid-cols-2 print:break-inside-avoid">
+        <Card className="p-4 print:break-inside-avoid print:shadow-none">
           <h2 className="text-xl font-semibold text-navy-900">
             Dépenses par catégorie
           </h2>
-          <div className="mt-4 space-y-3">
+          <div className="mt-3 space-y-2">
             {categorySummaries.map((summary) => (
-              <div className="rounded-lg border border-navy-100 p-4" key={summary.category}>
+              <div className="rounded-lg border border-navy-100 bg-white p-3" key={summary.category}>
                 <div className="flex items-center justify-between gap-4">
                   <p className="font-medium text-navy-900">{summary.label}</p>
-                  <p className="font-semibold text-navy-900">
+                  <p className="whitespace-nowrap font-semibold text-slate-700">
                     {formatCurrency(summary.monthlyTotal)} / mois
                   </p>
                 </div>
-                <p className="mt-1 text-sm text-slate-500">
+                <p className="mt-1 whitespace-nowrap text-sm text-slate-500">
                   {formatCurrency(summary.yearlyTotal)} / an
                 </p>
               </div>
@@ -524,19 +541,24 @@ export function ReportPanel() {
           </div>
         </Card>
 
-        <Card className="print:shadow-none">
+        <Card className="p-4 print:break-inside-avoid print:shadow-none">
           <h2 className="text-xl font-semibold text-navy-900">Top 5 dépenses</h2>
-          <div className="mt-4 space-y-3">
+          <div className="mt-3 space-y-2">
             {topExpenses.map((expense, index) => (
-              <div className="flex items-center justify-between gap-4" key={expense.id}>
+              <div
+                className="flex items-center justify-between gap-4 rounded-lg border border-navy-100 bg-white p-3"
+                key={expense.id}
+              >
                 <div>
                   <p className="text-xs font-bold text-sage-700">#{index + 1}</p>
-                  <p className="font-medium text-navy-900">{expense.label}</p>
+                  <p className="font-medium text-navy-900">
+                    {normalizeDisplayText(expense.label)}
+                  </p>
                   <p className="text-sm text-slate-500">
-                    {expense.provider} - {expenseCategoryLabels[expense.category]}
+                    {normalizeDisplayText(expense.provider)} - {expenseCategoryLabels[expense.category]}
                   </p>
                 </div>
-                <p className="font-semibold text-navy-900">
+                <p className="whitespace-nowrap font-semibold text-slate-700">
                   {formatCurrency(expense.yearlyAmount)} / an
                 </p>
               </div>
@@ -544,66 +566,6 @@ export function ReportPanel() {
           </div>
         </Card>
       </div>
-
-      <Card className="print:shadow-none">
-        <h2 className="text-xl font-semibold text-navy-900">
-          Alternatives à comparer
-        </h2>
-        <div className="mt-4 grid gap-3 md:grid-cols-2">
-          {alternatives.length > 0 ? (
-            alternatives.map((offer) => (
-              <div className="rounded-lg bg-navy-50 p-4" key={offer.id}>
-                <p className="font-semibold text-navy-900">{offer.name}</p>
-                <p className="mt-1 text-sm text-slate-500">
-                  {offer.provider} - {formatCurrency(offer.monthlyPrice)} / mois
-                </p>
-                <p className="mt-2 text-sm leading-6 text-slate-600">
-                  {offer.action}
-                </p>
-              </div>
-            ))
-          ) : (
-            <p className="text-sm text-slate-600">
-              Aucune alternative prioritaire à comparer pour le moment.
-            </p>
-          )}
-        </div>
-      </Card>
-
-      <Card className="print:shadow-none">
-        <h2 className="text-xl font-semibold text-navy-900">Courriers préparés</h2>
-        <p className="mt-2 text-sm leading-6 text-slate-600">
-          {preparedLettersSummary.totalCount > 0
-            ? `${preparedLettersSummary.totalCount} démarches prêtes à utiliser.`
-            : "Les courriers préparés apparaîtront ici après génération."}
-        </p>
-        <div className="mt-4 grid gap-3 md:grid-cols-2">
-          {preparedLettersSummary.displayedLetters.length > 0 ? (
-            preparedLettersSummary.displayedLetters.map((letter) => (
-              <div className="rounded-lg bg-navy-50 p-4" key={letter.id}>
-                <p className="font-semibold text-navy-900">
-                  {getLetterTypeLabel(letter.type)} - {letter.title}
-                </p>
-                <p className="mt-1 text-sm text-slate-500">
-                  {expenseCategoryLabels[letter.category]} - {letter.provider}
-                </p>
-                <p className="mt-2 text-sm font-medium text-sage-700">
-                  Préparée le {preparedAt}
-                </p>
-              </div>
-            ))
-          ) : (
-            <p className="text-sm text-slate-600">
-              Les courriers apparaîtront ici après génération.
-            </p>
-          )}
-        </div>
-        {preparedLettersSummary.hiddenCount > 0 ? (
-          <p className="mt-3 text-sm font-medium text-slate-600">
-            + {preparedLettersSummary.hiddenCount} autres courriers disponibles dans l'espace Courriers
-          </p>
-        ) : null}
-      </Card>
 
       <Card className="print:shadow-none">
         <h2 className="text-xl font-semibold text-navy-900">
@@ -624,7 +586,7 @@ export function ReportPanel() {
                   <p className="font-semibold text-navy-900">{action.label}</p>
                   <p className="mt-1 text-sm text-slate-500">
                     {formatActionDate(action.createdAt)}
-                    {action.provider ? ` - ${action.provider}` : ""}
+                    {action.provider ? ` - ${normalizeDisplayText(action.provider)}` : ""}
                     {action.documentName ? ` - ${action.documentName}` : ""}
                   </p>
                 </div>

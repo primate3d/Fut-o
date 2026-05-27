@@ -60,3 +60,34 @@ export function storeSelectedAlternativeOffer(offer: AlternativeOffer) {
     JSON.stringify(toSelectedAlternativeOffer(offer))
   );
 }
+
+export function refreshSelectedAlternativeOffer(
+  selectedOffer: SelectedAlternativeOffer | null,
+  alternatives: AlternativeOffer[]
+): SelectedAlternativeOffer | null {
+  if (!selectedOffer) {
+    return null;
+  }
+
+  const currentOffer = alternatives.find((offer) => {
+    const sourceExpenseId = getSourceExpenseId(offer);
+    return (
+      offer.category === selectedOffer.category &&
+      offer.provider === selectedOffer.provider &&
+      (offer.name === selectedOffer.name ||
+        (selectedOffer.sourceExpenseId &&
+          sourceExpenseId === selectedOffer.sourceExpenseId))
+    );
+  });
+
+  if (!currentOffer) {
+    return selectedOffer;
+  }
+
+  const refreshedOffer = toSelectedAlternativeOffer(currentOffer);
+  if (JSON.stringify(refreshedOffer) !== JSON.stringify(selectedOffer)) {
+    storeSelectedAlternativeOffer(currentOffer);
+  }
+
+  return refreshedOffer;
+}
