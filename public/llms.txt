@@ -28,3 +28,5 @@
 
 ## Pages privees
 - Ne pas explorer les espaces personnels, imports, analyses, resultats, courriers, rapports ou API.
+
+# Mise a jour technique : mai 2026
