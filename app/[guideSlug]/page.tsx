@@ -12,6 +12,14 @@ type GuidePageProps = {
   }>;
 };
 
+function formatGuideDate(date: string) {
+  return new Intl.DateTimeFormat("fr-FR", {
+    day: "numeric",
+    month: "long",
+    year: "numeric"
+  }).format(new Date(`${date}T00:00:00`));
+}
+
 export function generateStaticParams() {
   return guideArticles.map((article) => ({
     guideSlug: article.slug
@@ -42,7 +50,8 @@ export default async function GuideArticlePage({ params }: GuidePageProps) {
 
   return (
     <main className="bg-[#fbf6ed] text-navy-900">
-      <section className="border-b border-[#e9dece] bg-[#fffaf2]">
+      <article>
+      <header className="border-b border-[#e9dece] bg-[#fffaf2]">
         <div className="mx-auto max-w-4xl px-4 py-16 sm:px-6 lg:px-8 lg:py-20">
           <p className="text-sm font-semibold uppercase tracking-wide text-sage-700">
             {article.category} · {article.readingTime}
@@ -52,6 +61,11 @@ export default async function GuideArticlePage({ params }: GuidePageProps) {
           </h1>
           <p className="mt-5 text-lg leading-8 text-slate-600">
             {article.description}
+          </p>
+          <p className="mt-4 text-sm text-slate-500">
+            <time dateTime={article.updatedAt}>
+              Mis à jour le {formatGuideDate(article.updatedAt)}
+            </time>
           </p>
           <div className="mt-5 flex flex-wrap gap-2">
             {article.keywords.map((keyword) => (
@@ -72,7 +86,7 @@ export default async function GuideArticlePage({ params }: GuidePageProps) {
             </Button>
           </div>
         </div>
-      </section>
+      </header>
 
       <section className="mx-auto grid max-w-7xl gap-8 px-4 py-16 sm:px-6 lg:grid-cols-[0.9fr_1.1fr] lg:px-8 lg:py-20">
         <Card className="bg-white/90">
@@ -157,6 +171,7 @@ export default async function GuideArticlePage({ params }: GuidePageProps) {
           </Button>
         </Card>
       </section>
+      </article>
     </main>
   );
 }

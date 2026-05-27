@@ -25,6 +25,7 @@ export function Footer() {
             <div>
               <p className="font-semibold text-navy-900">Futeo</p>
               <p className="mt-1">Service en ligne, sans abonnement.</p>
+              <p className="mt-1">&copy; {new Date().getFullYear()} Futéo</p>
               <a
                 className="mt-1 inline-flex font-semibold text-slate-600 hover:underline"
                 href="mailto:contact@futeo.fr"

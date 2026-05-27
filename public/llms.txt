@@ -1,0 +1,30 @@
+# Futeo
+
+> Futeo aide les particuliers a analyser leurs contrats du foyer, comparer des pistes d'economie et preparer leurs demarches, avec ou sans televersement de document.
+
+## Service
+- Accueil: https://www.futeo.fr/
+- Tarifs: https://www.futeo.fr/tarifs
+- FAQ: https://www.futeo.fr/faq
+- A propos: https://www.futeo.fr/a-propos
+- Cas concrets: https://www.futeo.fr/cas-concrets
+
+## Guides publics
+- https://www.futeo.fr/guides
+- https://www.futeo.fr/lettre-resiliation-assurance-habitation
+- https://www.futeo.fr/negocier-son-forfait-internet
+- https://www.futeo.fr/comparer-plusieurs-contrats-facilement
+- https://www.futeo.fr/reduire-ses-depenses-mensuelles
+- https://www.futeo.fr/changer-de-fournisseur-energie
+- https://www.futeo.fr/resilier-une-box-internet
+- https://www.futeo.fr/demande-reduction-tarifaire
+- https://www.futeo.fr/changement-offre-mobile
+
+## Portee actuelle
+- Secteurs couverts: mobile, box/internet, energie/electricite et assurance habitation.
+- Des alternatives peuvent egalement etre proposees pour l'assurance auto ou deux-roues lorsqu'elles sont disponibles.
+- Les economies sont estimatives et les offres doivent etre verifiees avant decision.
+- Les courriers sont prepares pour relecture et envoi par l'utilisateur.
+
+## Pages privees
+- Ne pas explorer les espaces personnels, imports, analyses, resultats, courriers, rapports ou API.

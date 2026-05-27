@@ -4,6 +4,8 @@ export type GuideArticle = {
   description: string;
   category: "Résiliation" | "Négociation" | "Comparaison" | "Dépenses";
   readingTime: string;
+  publishedAt: string;
+  updatedAt: string;
   keywords: string[];
   includes: string[];
   questions: string[];
@@ -23,6 +25,8 @@ export const guideArticles: GuideArticle[] = [
       "Comprendre quand et comment préparer une résiliation d'assurance habitation, sans recopier un modèle générique qui ne correspond pas à votre situation.",
     category: "Résiliation",
     readingTime: "4 min",
+    publishedAt: "2026-05-27",
+    updatedAt: "2026-05-27",
     keywords: ["résiliation", "contrat", "assurance", "habitation"],
     includes: [
       "structure du courrier",
@@ -54,6 +58,8 @@ export const guideArticles: GuideArticle[] = [
       "Beaucoup de foyers gardent la même box internet pendant des années sans comparer les offres disponibles aujourd'hui.",
     category: "Négociation",
     readingTime: "4 min",
+    publishedAt: "2026-05-27",
+    updatedAt: "2026-05-27",
     keywords: ["internet", "forfait", "négociation", "réduction tarifaire"],
     includes: [
       "comparaison du contrat actuel",
@@ -85,6 +91,8 @@ export const guideArticles: GuideArticle[] = [
       "Assurance, énergie, internet, mobile : le plus difficile est souvent de remettre les informations au même endroit.",
     category: "Comparaison",
     readingTime: "5 min",
+    publishedAt: "2026-05-27",
+    updatedAt: "2026-05-27",
     keywords: ["comparaison", "contrat", "assurance", "énergie", "internet"],
     includes: [
       "lecture par poste",
@@ -116,6 +124,8 @@ export const guideArticles: GuideArticle[] = [
       "Avant de supprimer au hasard des abonnements, il vaut mieux comprendre ce qui pèse vraiment dans le budget du foyer.",
     category: "Dépenses",
     readingTime: "4 min",
+    publishedAt: "2026-05-27",
+    updatedAt: "2026-05-27",
     keywords: ["dépenses mensuelles", "abonnement", "comparaison", "contrat"],
     includes: [
       "repérage des dépenses récurrentes",
@@ -147,6 +157,8 @@ export const guideArticles: GuideArticle[] = [
       "Un contrat d'électricité ou de gaz peut rester inchangé longtemps alors que les offres évoluent régulièrement.",
     category: "Comparaison",
     readingTime: "4 min",
+    publishedAt: "2026-05-27",
+    updatedAt: "2026-05-27",
     keywords: ["énergie", "contrat", "fournisseur", "comparaison"],
     includes: [
       "comparaison énergie",
@@ -178,6 +190,8 @@ export const guideArticles: GuideArticle[] = [
       "Résilier une box internet demande surtout de vérifier les informations utiles et de garder une trace claire de la demande.",
     category: "Résiliation",
     readingTime: "3 min",
+    publishedAt: "2026-05-27",
+    updatedAt: "2026-05-27",
     keywords: ["résilier", "box internet", "contrat", "abonnement"],
     includes: [
       "structure de résiliation",
@@ -209,6 +223,8 @@ export const guideArticles: GuideArticle[] = [
       "Une demande de réduction tarifaire est plus crédible quand elle s'appuie sur un contrat actuel et une comparaison claire.",
     category: "Négociation",
     readingTime: "3 min",
+    publishedAt: "2026-05-27",
+    updatedAt: "2026-05-27",
     keywords: ["réduction tarifaire", "négociation", "contrat", "abonnement"],
     includes: [
       "argumentaire de négociation",
@@ -240,6 +256,8 @@ export const guideArticles: GuideArticle[] = [
       "Les forfaits mobiles évoluent souvent. Une offre ancienne peut ne plus être adaptée à votre usage actuel.",
     category: "Négociation",
     readingTime: "3 min",
+    publishedAt: "2026-05-27",
+    updatedAt: "2026-05-27",
     keywords: ["forfait mobile", "changement d'offre", "abonnement", "comparaison"],
     includes: [
       "comparaison du forfait",

@@ -101,7 +101,8 @@ export default function GuidesPage() {
             const card = shortCards[article.slug];
 
             return (
-              <Card className="bg-white/95 p-5" key={article.slug}>
+              <article key={article.slug}>
+              <Card className="h-full bg-white/95 p-5">
                 <h3 className="text-lg font-semibold leading-7 text-[#12243d]">
                   {article.title}
                 </h3>
@@ -122,6 +123,7 @@ export default function GuidesPage() {
                   {card.preview}
                 </p>
               </Card>
+              </article>
             );
           })}
         </div>

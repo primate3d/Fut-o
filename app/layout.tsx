@@ -6,7 +6,56 @@ import { LifecycleManager } from "@/components/layout/LifecycleManager";
 import "./globals.css";
 
 const inter = Inter({ subsets: ["latin"] });
-const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || "https://futeo.fr";
+const baseUrl = (process.env.NEXT_PUBLIC_BASE_URL || "https://www.futeo.fr").replace(/\/$/, "");
+
+const structuredData = {
+  "@context": "https://schema.org",
+  "@graph": [
+    {
+      "@type": "Organization",
+      "@id": `${baseUrl}/#organization`,
+      name: "Futéo",
+      legalName: "homservices",
+      url: baseUrl,
+      logo: `${baseUrl}/brand/futeo-logo.png`,
+      email: "contact@futeo.fr"
+    },
+    {
+      "@type": "WebApplication",
+      "@id": `${baseUrl}/#application`,
+      name: "Futéo",
+      url: baseUrl,
+      applicationCategory: "FinanceApplication",
+      operatingSystem: "Web",
+      inLanguage: "fr-FR",
+      description:
+        "Futéo aide les particuliers à analyser leurs contrats du foyer, comparer des pistes d'économie et préparer leurs démarches.",
+      publisher: {
+        "@id": `${baseUrl}/#organization`
+      },
+      offers: [
+        {
+          "@type": "Offer",
+          name: "Découverte gratuite",
+          price: "0",
+          priceCurrency: "EUR"
+        },
+        {
+          "@type": "Offer",
+          name: "Audit Foyer",
+          price: "9.90",
+          priceCurrency: "EUR"
+        },
+        {
+          "@type": "Offer",
+          name: "Audit Famille",
+          price: "19.90",
+          priceCurrency: "EUR"
+        }
+      ]
+    }
+  ]
+};
 
 export const metadata: Metadata = {
   metadataBase: new URL(baseUrl),
@@ -50,6 +99,13 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
   return (
     <html lang="fr" suppressHydrationWarning>
       <body className={inter.className}>
+        <script
+          dangerouslySetInnerHTML={{
+            __html: JSON.stringify(structuredData).replace(/</g, "\\u003c")
+          }}
+          id="json-ld-global"
+          type="application/ld+json"
+        />
         <Header />
         <LifecycleManager />
         {children}
