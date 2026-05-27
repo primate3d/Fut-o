@@ -7,7 +7,7 @@ const faqs = [
   {
     question: "Quels contrats puis-je analyser aujourd'hui ?",
     answer:
-      "Futéo prend actuellement en charge les factures mobiles, les offres box et internet, les documents d'électricité et d'énergie ainsi que l'assurance habitation. L'assurance auto ou deux roues peut être identifiée, mais les alternatives dédiées restent partielles. La mutuelle, la prévoyance et l'assurance emprunteur ne sont pas encore proposées comme secteurs actifs."
+      "Futéo compare actuellement le mobile, la box et internet, l'électricité, le gaz et l'assurance habitation. Des pistes indicatives sont également proposées pour l'assurance auto et deux-roues, sous réserve de devis et de garanties comparables. La mutuelle, la prévoyance et l'assurance emprunteur ne sont pas encore disponibles."
   },
   {
     question: "Puis-je utiliser Futéo sans téléverser un document ?",

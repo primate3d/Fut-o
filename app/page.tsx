@@ -8,6 +8,7 @@ import {
   ShieldCheck
 } from "lucide-react";
 import Image from "next/image";
+import Link from "next/link";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 
@@ -15,6 +16,7 @@ const startAuditHref = "/activer-cle?redirect=/importer";
 const manualSimulationHref =
   "/activer-cle?redirect=%2Fresultats%3Fmode%3Dmanuel";
 const lettersAccessHref = "/activer-cle?redirect=/courriers";
+const reportAccessHref = "/activer-cle?redirect=/rapport";
 
 const narrativeSteps = [
   {
@@ -80,7 +82,7 @@ const accessItems = [
 export default function HomePage() {
   return (
     <main className="bg-[#fbf6ed] text-navy-900">
-      <section className="relative min-h-[calc(100vh-4rem)] overflow-hidden bg-[#142238]">
+      <section className="relative min-h-[calc(100vh-4rem)] bg-[#142238]">
         <Image
           alt="Couple a la maison consultant des documents du foyer autour d'une table"
           className="object-cover"
@@ -140,9 +142,62 @@ export default function HomePage() {
             </p>
           </div>
         </div>
+
+        <div className="relative z-20 mx-auto mb-6 w-[calc(100%-2rem)] max-w-[360px] rounded-2xl border border-gray-100 bg-white/95 p-6 shadow-[0_25px_60px_rgba(0,0,0,0.18)] backdrop-blur-md lg:absolute lg:-bottom-[100px] lg:right-16 lg:mb-0 lg:w-full">
+          <div className="mb-4 flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <span className="relative flex h-2.5 w-2.5">
+                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />
+                <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-emerald-500" />
+              </span>
+              <span className="text-xs font-extrabold uppercase tracking-wide text-emerald-600">
+                Rapport disponible
+              </span>
+            </div>
+            <span className="rounded bg-gray-50 px-2.5 py-1 font-mono text-xs text-gray-400">
+              Exemple
+            </span>
+          </div>
+
+          <div className="mb-5 space-y-3">
+            <div className="flex items-center justify-between border-b border-gray-100 pb-2 text-sm text-gray-700">
+              <span className="flex items-center gap-1.5 font-medium">🏠 Assurance Habitation</span>
+              <span className="text-base font-bold text-emerald-600">+180,00 €</span>
+            </div>
+            <div className="flex items-center justify-between border-b border-gray-100 pb-2 text-sm text-gray-700">
+              <span className="flex items-center gap-1.5 font-medium">🌐 Facture Internet</span>
+              <span className="text-base font-bold text-emerald-600">+264,12 €</span>
+            </div>
+            <div className="flex items-center justify-between border-b border-gray-100 pb-2 text-sm text-gray-700">
+              <span className="flex items-center gap-1.5 font-medium">🚗 Assurance Auto</span>
+              <span className="text-base font-bold text-emerald-600">+360,00 €</span>
+            </div>
+          </div>
+
+          <div className="rounded-xl border border-emerald-100 bg-gradient-to-r from-emerald-50 to-teal-50 p-4">
+            <p className="mb-1 text-xs font-bold uppercase tracking-wide text-emerald-800">
+              Économie potentielle totale
+            </p>
+            <p className="text-3xl font-black tracking-tight text-emerald-700">
+              + 804,12 €{" "}
+              <span className="text-sm font-bold text-emerald-600/80">/ an</span>
+            </p>
+          </div>
+
+          <Link
+            className="group mt-4 flex cursor-pointer items-center justify-between border-t border-gray-100 pt-4 text-sm font-extrabold text-emerald-700 transition-colors duration-200 hover:text-emerald-800"
+            href={reportAccessHref}
+          >
+            <span>Consulter mon rapport détaillé</span>
+            <ArrowRight
+              className="h-5 w-5 transform transition-transform group-hover:translate-x-1"
+              size={20}
+            />
+          </Link>
+        </div>
       </section>
 
-      <section className="mx-auto max-w-7xl px-4 py-[4.5rem] sm:px-6 lg:px-8 lg:py-24">
+      <section className="mx-auto max-w-7xl px-4 py-[4.5rem] sm:px-6 lg:px-8 lg:pb-24 lg:pt-40">
         <div className="grid gap-12 lg:grid-cols-[0.82fr_1.18fr]">
           <div className="lg:sticky lg:top-24 lg:self-start">
             <p className="text-sm font-semibold uppercase tracking-wide text-sage-700">

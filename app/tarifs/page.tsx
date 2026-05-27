@@ -26,7 +26,7 @@ const faqItems = [
   {
     question: "Quels secteurs sont réellement couverts ?",
     answer:
-      "Futéo couvre actuellement le mobile, la box et internet, l'électricité et l'assurance habitation. L'assurance auto ou deux roues reste partiellement couverte. La mutuelle, la prévoyance et l'assurance emprunteur ne sont pas encore disponibles comme catégories comparables."
+      "Futéo compare actuellement le mobile, la box et internet, l'électricité, le gaz et l'assurance habitation. Des pistes indicatives sont également proposées pour l'assurance auto et deux-roues, sous réserve de devis et de garanties comparables. La mutuelle, la prévoyance et l'assurance emprunteur ne sont pas encore disponibles."
   },
   {
     question: "Puis-je commencer sans importer de document ?",
