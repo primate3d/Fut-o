@@ -13,10 +13,10 @@ export function Logo({ variant = "complete", className }: LogoProps) {
     <Image
       alt="Futéo logo"
       className={cn("h-auto w-auto", className)}
-      height={isIcon ? 653 : 617}
+      height={isIcon ? 653 : 96}
       priority={false}
       src={isIcon ? "/brand/futeo-icon.png" : "/brand/futeo-logo.png"}
-      width={isIcon ? 653 : 1613}
+      width={isIcon ? 653 : 250}
     />
   );
 }

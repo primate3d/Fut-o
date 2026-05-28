@@ -91,7 +91,7 @@ export default function HomePage() {
           sizes="100vw"
           src="https://images.unsplash.com/photo-1511895426328-dc8714191300?auto=format&fit=crop&w=1800&q=88"
         />
-        <div className="absolute inset-0 bg-[linear-gradient(90deg,rgba(13,25,42,0.92)_0%,rgba(13,34,39,0.78)_48%,rgba(13,34,39,0.42)_100%)]" />
+        <div className="absolute inset-0 bg-[linear-gradient(90deg,rgba(13,25,42,0.95)_0%,rgba(13,34,39,0.85)_48%,rgba(13,34,39,0.65)_100%)]" />
 
         <div className="relative z-10 mx-auto flex min-h-[calc(100vh-4rem)] max-w-7xl flex-col justify-center px-4 py-20 sm:px-6 lg:px-8">
           <div className="max-w-2xl text-white">
