@@ -307,14 +307,14 @@ REGLES MULTI-LIGNES / MULTI-CONTRATS - EXEMPLES CONCRETS OBLIGATOIRES :
       );
     }
 
-    const hasSingleManualContractSelection = documents.some((document) =>
+    const manuallySelectedDocumentIds = new Set(documents.filter((document) =>
       Boolean(
         document.userCorrections?.isMultiContract &&
           typeof document.userCorrections.amount === "number" &&
           document.userCorrections.amount > 0 &&
           document.userCorrections.frequency
       )
-    );
+    ).map((document) => document.id));
     const insuranceContractExpenses: AiExpense[] = Object.values(documentProfiles)
       .flatMap((profile) =>
         getInsuranceContractsFromProfile(profile).map((contract) => ({
@@ -352,12 +352,7 @@ REGLES MULTI-LIGNES / MULTI-CONTRATS - EXEMPLES CONCRETS OBLIGATOIRES :
           phone: profile.customer?.phone
         }))
       );
-    const aiExpenses =
-      hasSingleManualContractSelection ||
-      insuranceContractExpenses.length > 0 ||
-      energyServiceExpenses.length > 0
-        ? []
-        : rawResult.expenses ?? [];
+    const aiExpenses = rawResult.expenses ?? [];
     const usefulAiExpenses = aiExpenses.filter((expense) => {
       const monthlyAmount = Number(expense.monthlyAmount);
       const yearlyAmount = Number(expense.yearlyAmount);
@@ -409,18 +404,19 @@ REGLES MULTI-LIGNES / MULTI-CONTRATS - EXEMPLES CONCRETS OBLIGATOIRES :
         invoiceNumber: document.customer?.invoiceNumber,
         phone: document.customer?.phone
       }));
-    const fallbackExpenses: AiExpense[] =
-      hasSingleManualContractSelection
-        ? profileFallbackExpenses
-        : insuranceContractExpenses.length > 0
-        ? insuranceContractExpenses
-        : energyServiceExpenses.length > 0
-        ? energyServiceExpenses
-        : usefulAiExpenses.length > 0
-        ? []
-        : [...profileFallbackExpenses, ...detectedDocumentFallbackExpenses];
+    // Select the best source per document, never discard other documents in the batch.
+    const selectedExpenses = documents.flatMap((document) => {
+      const forDocument = (expenses: AiExpense[]) => expenses.filter((expense) =>
+        expense.sourceDocumentId === document.id || (!expense.sourceDocumentId && documents.length === 1)
+      ).map((expense) => ({ ...expense, sourceDocumentId: document.id }));
+      const candidates = manuallySelectedDocumentIds.has(document.id)
+        ? [forDocument(profileFallbackExpenses)]
+        : [forDocument(insuranceContractExpenses), forDocument(energyServiceExpenses),
+          forDocument(usefulAiExpenses), forDocument(profileFallbackExpenses), forDocument(detectedDocumentFallbackExpenses)];
+      return candidates.find((expenses) => expenses.length > 0) ?? [];
+    });
 
-    const normalizedExpenses: Expense[] = [...usefulAiExpenses, ...fallbackExpenses].map(
+    const normalizedExpenses: Expense[] = selectedExpenses.map(
       (expense, index) =>
         attachDocumentProfileToExpense(
           {

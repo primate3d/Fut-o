@@ -1,4 +1,5 @@
-import { pgTable, text, integer, boolean, jsonb, real } from "drizzle-orm/pg-core";
+import { pgTable, text, integer, boolean, jsonb, real, uniqueIndex, index } from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
 
 export const accessKeys = pgTable("access_keys", {
   id: text("id").primaryKey(),
@@ -8,6 +9,7 @@ export const accessKeys = pgTable("access_keys", {
   expiresAt: text("expires_at"),
   isActive: boolean("is_active").default(true).notNull(),
   createdAt: text("created_at").notNull(),
+  activatedAt: text("activated_at"),
   allowedNames: jsonb("allowed_names").$type<string[]>(),
   profilePostalAddress: text("profile_postal_address"),
   profileLockedAt: text("profile_locked_at"),
@@ -28,11 +30,15 @@ export const orders = pgTable("orders", {
 
 export const freeTrials = pgTable("free_trials", {
   id: text("id").primaryKey(),
-  email: text("email").notNull().unique(),
+  email: text("email").notNull(),
+  scope: text("scope").notNull().default("decouverte"),
+  emailSentAt: text("email_sent_at"),
   keyCode: text("key_code").notNull(),
   usedAt: text("used_at").notNull(),
   createdAt: text("created_at").notNull(),
-});
+}, (table) => [
+  uniqueIndex("free_trials_scope_email_unique").on(table.scope, sql`lower(btrim(${table.email}))`)
+]);
 
 export const documents = pgTable("documents", {
   id: text("id").primaryKey(),
@@ -46,7 +52,7 @@ export const documents = pgTable("documents", {
   provider: text("provider"),
   status: text("status").notNull(),
   uploadedAt: text("uploaded_at").notNull(),
-});
+}, (table) => [index("documents_key_code_idx").on(table.keyCode)]);
 
 export const analyses = pgTable("analyses", {
   id: text("id").primaryKey(),

@@ -1,19 +1,18 @@
 import { NextResponse } from "next/server";
 import {
   createAdminAccessKey,
-  getAccessDurationDays,
   isAdminAccessCode,
-  isBlockedProductionAdminCode,
-  isDiscoveryPlan,
-  normalizeAccessKeyPlan
+  isBlockedProductionAdminCode
 } from "@/features/billing/access-keys";
 import { mockAccessKeys } from "@/data/mock";
 import { allowDevOnlyMocks } from "@/lib/env";
-import { findKeyByCode, saveKey } from "@/lib/server/db";
+import { findKeyByCode, activateStoredKey } from "@/lib/server/db";
+import { RequestError } from "@/lib/server/request-error";
 
 export async function POST(request: Request) {
   try {
-    const { code } = await request.json();
+    const body = await request.json();
+    const code = typeof body.code === "string" ? body.code.trim().toUpperCase() : "";
 
     if (!code) {
       return NextResponse.json({ error: "Code manquant" }, { status: 400 });
@@ -23,7 +22,8 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Cle invalide ou non autorisee" }, { status: 403 });
     }
 
-    let key = (await findKeyByCode(code)) ?? (isAdminAccessCode(code) ? createAdminAccessKey() : undefined);
+    const storedKey = await findKeyByCode(code);
+    let key = storedKey ?? (isAdminAccessCode(code) ? createAdminAccessKey() : undefined);
 
     if (!key && allowDevOnlyMocks()) {
       const mockKey = mockAccessKeys.find((k) => k.code.toUpperCase() === code.toUpperCase());
@@ -36,40 +36,18 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Clé invalide" }, { status: 404 });
     }
 
-    if (key.activatedAt) {
-      return NextResponse.json({ key });
-    }
-
-    if (isDiscoveryPlan(key.plan) && key.hasUsedFreeTrial) {
+    if (!key.isActive || !key.expiresAt || !Number.isFinite(Date.parse(key.expiresAt)) || Date.parse(key.expiresAt) <= Date.now()) {
       return NextResponse.json(
-        { error: "L'accès découverte a déjà été utilisé sur ce compte." },
+        { error: "Cle inactive ou expiree" },
         { status: 403 }
       );
     }
 
-    const now = new Date();
-    const plan = normalizeAccessKeyPlan(key.plan);
-    const expiration = new Date(
-      now.getTime() + getAccessDurationDays(plan) * 24 * 60 * 60 * 1000
-    );
-
-    const activatedKey = {
-      ...key,
-      plan,
-      activatedAt: now.toISOString(),
-      expiresAt: isAdminAccessCode(key.code) ? key.expiresAt : expiration.toISOString(),
-      isActive: true,
-      usesRemaining: key.usesRemaining,
-      hasUsedFreeTrial: isDiscoveryPlan(plan) ? true : key.hasUsedFreeTrial,
-      freeTrialUsedAt: isDiscoveryPlan(plan) ? now.toISOString() : key.freeTrialUsedAt
-    };
-
-    if (!isAdminAccessCode(activatedKey.code)) {
-      await saveKey(activatedKey);
-    }
+    const activatedKey = storedKey ? await activateStoredKey(code) : key;
 
     return NextResponse.json({ key: activatedKey });
   } catch (error) {
+    if (error instanceof RequestError) return NextResponse.json({ error: error.message }, { status: error.status });
     console.error("Erreur activation clé:", error);
     return NextResponse.json({ error: "Erreur serveur" }, { status: 500 });
   }

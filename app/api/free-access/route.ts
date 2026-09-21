@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
-import { generateAccessKey } from "@/features/billing/access-keys";
-import { findFreeTrialByEmail, saveFreeTrial, saveKey } from "@/lib/server/db";
+import { requestFreeAccess } from "@/lib/server/free-access";
+import { RequestError } from "@/lib/server/request-error";
 import { sendAccessKeyEmail } from "@/lib/server/email";
 import { checkoutRateLimiter } from "@/lib/server/ratelimit";
 
@@ -12,16 +12,12 @@ function isValidEmail(email: string) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
 }
 
-function maskKeyForLog(keyCode: string) {
-  return `****${keyCode.slice(-4)}`;
-}
-
 export async function POST(request: Request) {
   try {
     const { email } = (await request.json()) as { email?: string };
-    const normalizedEmail = normalizeEmail(email);
+    const normalizedEmail = typeof email === "string" ? normalizeEmail(email) : "";
 
-    if (!normalizedEmail || !isValidEmail(normalizedEmail)) {
+    if (!normalizedEmail || normalizedEmail.length > 254 || !isValidEmail(normalizedEmail)) {
       return NextResponse.json(
         { error: "Email obligatoire pour recevoir l'accès gratuit." },
         { status: 400 }
@@ -33,43 +29,16 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Trop de requêtes, veuillez patienter." }, { status: 429 });
     }
 
-    const existingTrial = await findFreeTrialByEmail(normalizedEmail);
-    if (existingTrial) {
-      return NextResponse.json(
-        { error: "Une clé gratuite a déjà été demandée avec cet email." },
-        { status: 409 }
-      );
-    }
-
-    const key = generateAccessKey("decouverte");
-    const emailResult = await sendAccessKeyEmail(normalizedEmail, key.code, "Accès gratuit Futéo");
-
-    if (!emailResult.success) {
-      console.error("Echec envoi clé gratuite:", {
-        email: normalizedEmail,
-        keySuffix: maskKeyForLog(key.code),
-        error: emailResult.error
-      });
-      return NextResponse.json(
-        { error: "Impossible d'envoyer la clé gratuite pour le moment." },
-        { status: 500 }
-      );
-    }
-
-    await saveKey(key);
-    await saveFreeTrial({
-      id: `free_${Date.now()}`,
-      email: normalizedEmail,
-      keyCode: key.code,
-      usedAt: new Date().toISOString(),
-      createdAt: new Date().toISOString()
-    });
+    await requestFreeAccess(normalizedEmail, sendAccessKeyEmail);
 
     return NextResponse.json({
       success: true,
       message: "Votre clé gratuite a été envoyée par email."
     });
   } catch (error) {
+    if (error instanceof RequestError) {
+      return NextResponse.json({ error: error.message }, { status: error.status });
+    }
     console.error("Erreur accès gratuit:", error);
     return NextResponse.json(
       { error: "Impossible d'envoyer la clé gratuite pour le moment." },

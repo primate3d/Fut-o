@@ -1,5 +1,8 @@
 import { NextResponse } from "next/server";
-import { findKeyByCode, getAnalysisByKey, saveAnalysis, saveKey, deleteAnalysisByKey } from "@/lib/server/db";
+import { findKeyByCode, getAnalysisByKey, saveAnalysis, consumeAnalysisCredit, deleteAnalysisByKey, getDocumentsByKey } from "@/lib/server/db";
+import { withKeyLock } from "@/lib/server/key-lock";
+import { RequestError } from "@/lib/server/request-error";
+import { readLimitedBody, selectOwnedDocuments } from "@/lib/server/document-validation";
 import { analyzeDocumentsWithAI } from "@/features/analysis/ai-service";
 import {
   createAdminAccessKey,
@@ -144,11 +147,13 @@ function applyProfileAddressFallback(key: AccessKey, analysis: MockAnalysis) {
 
 export async function POST(request: Request) {
   try {
-    const { documents, code, force } = (await request.json()) as {
+    const body = JSON.parse((await readLimitedBody(request, 1024 * 1024)).toString("utf8")) as {
       documents?: UploadedDocument[];
       code?: string;
       force?: boolean;
     };
+    const code = typeof body.code === "string" ? body.code.trim().toUpperCase() : "";
+    const force = body.force === true;
 
     if (isBlockedProductionAdminCode(code)) {
       return NextResponse.json({ error: "Cle invalide ou non autorisee" }, { status: 403 });
@@ -159,9 +164,10 @@ export async function POST(request: Request) {
     }
 
     // 1. Validation de la clé
+    return await withKeyLock(`key:${code}`, async (tx) => {
     const key =
       getLocalAnalysisAccessKey(code) ??
-      (await findKeyByCode(code)) ??
+      (await findKeyByCode(code, tx)) ??
       (isAdminAccessCode(code) ? createAdminAccessKey() : undefined);
     if (!key) {
       return NextResponse.json({ error: "Clé invalide" }, { status: 403 });
@@ -171,7 +177,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Quota épuisé ou clé non active" }, { status: 403 });
     }
 
-    if (key.expiresAt && new Date(key.expiresAt) < new Date()) {
+    if (!key.expiresAt || !Number.isFinite(Date.parse(key.expiresAt)) || Date.parse(key.expiresAt) <= Date.now()) {
       return NextResponse.json({ error: "Clé expirée" }, { status: 403 });
     }
 
@@ -182,6 +188,7 @@ export async function POST(request: Request) {
       );
     }
 
+    const documents = selectOwnedDocuments(body.documents, await getDocumentsByKey(code, tx));
     if (documents) {
       if (key.plan === "decouverte" && documents.length > 1) {
         return NextResponse.json(
@@ -202,7 +209,7 @@ export async function POST(request: Request) {
     }
 
     // 2. Vérification du cache
-    const existingAnalysis = await getAnalysisByKey(code);
+    const existingAnalysis = await getAnalysisByKey(code, tx);
     if (
       !force &&
       !requiresHouseholdProfile(key.plan) &&
@@ -225,6 +232,7 @@ export async function POST(request: Request) {
     for (const doc of documents) {
       const physicalFileName = getPhysicalFileName(code, doc);
       const buffer = await storage.get(physicalFileName);
+      if (!buffer) throw new RequestError("Fichier source indisponible", 422);
       const diagnostic: ExtractionDiagnostic = {
         id: doc.id,
         name: doc.fileName,
@@ -367,27 +375,26 @@ export async function POST(request: Request) {
     }
 
     // 4. Persistance serveur
-    await saveAnalysis(code, analysis);
+    await saveAnalysis(code, analysis, tx);
 
     // 5. Décrémenter le quota
-    const updatedKey = isVirtualAnalysisAccessKey(key.code)
-      ? key
-      : { ...key, usesRemaining: key.usesRemaining - 1 };
-
-    if (!isVirtualAnalysisAccessKey(key.code)) {
-      await saveKey(updatedKey);
-    }
+    const usesRemaining = isVirtualAnalysisAccessKey(key.code)
+      ? key.usesRemaining
+      : await consumeAnalysisCredit(key.code, tx);
 
     logger.info("Analyse IA terminée avec succès", {
       service: "Analysis",
       action: "ai_success",
       keyCode: code,
       latencyMs,
-      metadata: { docCount: documents.length, usesRemaining: updatedKey.usesRemaining }
+      metadata: { docCount: documents.length, usesRemaining }
     });
 
     return NextResponse.json({ analysis, cached: false });
+    });
   } catch (error) {
+    if (error instanceof RequestError) return NextResponse.json({ error: error.message }, { status: error.status });
+    if (error instanceof SyntaxError) return NextResponse.json({ error: "Requete invalide" }, { status: 400 });
     const message =
       error instanceof Error ? error.message : "Une erreur est survenue lors de l'analyse IA";
     logger.error("Erreur critique lors de l'analyse IA", {
@@ -464,6 +471,13 @@ export async function DELETE(request: Request) {
     return NextResponse.json({ error: "Cle expiree", expired: true }, { status: 403 });
   }
 
-  await deleteAnalysisByKey(code);
-  return NextResponse.json({ success: true });
+  try {
+    return await withKeyLock(`key:${key.code}`, async (tx) => {
+      await deleteAnalysisByKey(key.code, tx);
+      return NextResponse.json({ success: true });
+    });
+  } catch (error) {
+    if (error instanceof RequestError) return NextResponse.json({ error: error.message }, { status: error.status });
+    throw error;
+  }
 }

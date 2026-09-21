@@ -1,6 +1,7 @@
-import fs from "fs";
-import path from "path";
+import fs from "node:fs/promises";
+import path from "node:path";
 import { env } from "@/lib/env";
+import { RequestError } from "../request-error";
 
 export interface StorageProvider {
   put(fileName: string, buffer: Buffer): Promise<void>;
@@ -8,34 +9,50 @@ export interface StorageProvider {
   delete(fileName: string): Promise<void>;
 }
 
-export class LocalStorageProvider implements StorageProvider {
-  private baseDir: string;
+export function validatePhysicalFileName(fileName: string) {
+  if (!fileName || fileName.length > 255 || /[\\/:\x00-\x1f]/.test(fileName) ||
+      fileName === "." || fileName === ".." || /[. ]$/.test(fileName)) {
+    throw new RequestError("Nom de fichier non autorise", 403);
+  }
+  return fileName;
+}
 
-  constructor() {
-    this.baseDir = env.UPLOADS_DIR;
-    if (!fs.existsSync(this.baseDir)) {
-      fs.mkdirSync(this.baseDir, { recursive: true });
+export class LocalStorageProvider implements StorageProvider {
+  private readonly baseDir: string;
+
+  constructor(baseDir = env.UPLOADS_DIR) {
+    this.baseDir = path.resolve(baseDir);
+  }
+
+  private resolve(fileName: string) {
+    return path.join(this.baseDir, validatePhysicalFileName(fileName));
+  }
+
+  private async exists(filePath: string) {
+    try {
+      const stat = await fs.lstat(filePath);
+      if (!stat.isFile() || stat.isSymbolicLink()) throw new RequestError("Fichier non autorise", 403);
+      return true;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
+      throw error;
     }
   }
 
-  async put(fileName: string, buffer: Buffer): Promise<void> {
-    const filePath = path.join(this.baseDir, fileName);
-    fs.writeFileSync(filePath, buffer);
+  async put(fileName: string, buffer: Buffer) {
+    const filePath = this.resolve(fileName);
+    await fs.mkdir(this.baseDir, { recursive: true });
+    await fs.writeFile(filePath, buffer, { flag: "wx" });
   }
 
   async get(fileName: string): Promise<Buffer | null> {
-    const filePath = path.join(this.baseDir, fileName);
-    if (!fs.existsSync(filePath)) {
-      return null;
-    }
-    return fs.readFileSync(filePath);
+    const filePath = this.resolve(fileName);
+    return await this.exists(filePath) ? fs.readFile(filePath) : null;
   }
 
-  async delete(fileName: string): Promise<void> {
-    const filePath = path.join(this.baseDir, fileName);
-    if (fs.existsSync(filePath)) {
-      fs.unlinkSync(filePath);
-    }
+  async delete(fileName: string) {
+    const filePath = this.resolve(fileName);
+    if (await this.exists(filePath)) await fs.unlink(filePath);
   }
 }
 

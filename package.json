@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
+    "test:phase1": "tsx --test tests/phase1.test.ts",
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
@@ -37,6 +38,7 @@
     "@types/react-dom": "^19.0.2",
     "autoprefixer": "^10.4.20",
     "drizzle-kit": "^0.31.10",
+    "embedded-postgres": "^18.4.0-beta.17",
     "eslint": "^9.17.0",
     "eslint-config-next": "16.2.4",
     "postcss": "^8.4.49",

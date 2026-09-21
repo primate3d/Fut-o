@@ -1,9 +1,10 @@
-import fs from "fs";
-import path from "path";
-import { and, eq, inArray, lt } from "drizzle-orm";
+import { and, eq, inArray, lt, sql } from "drizzle-orm";
 import { db } from "./db/index";
 import { accessKeys, analyses, documents, freeTrials, orders } from "./db/schema";
 import { ExpenseCategory } from "@/types";
+import { storage } from "./storage";
+import { withKeyLock, type DatabaseExecutor } from "./key-lock";
+import { RequestError } from "./request-error";
 import type {
   AccessKey,
   AnalysisAnomaly,
@@ -14,8 +15,6 @@ import type {
   UploadedDocument,
   UploadedDocumentType
 } from "@/types";
-
-const UPLOADS_DIR = path.join(process.cwd(), "server-data", "uploads");
 
 type StoredUploadedDocument = UploadedDocument & {
   physicalFileName?: string;
@@ -48,14 +47,11 @@ export type FreeTrialRecord = {
   createdAt: string;
 };
 
-if (!fs.existsSync(UPLOADS_DIR)) {
-  fs.mkdirSync(UPLOADS_DIR, { recursive: true });
-}
-
 export async function getKeys(): Promise<AccessKey[]> {
   const records = await db.select().from(accessKeys);
   return records.map((record) => ({
     ...record,
+    activatedAt: record.activatedAt ?? undefined,
     plan: record.plan as AccessKey["plan"],
     expiresAt: record.expiresAt || ""
   }));
@@ -81,7 +77,6 @@ export async function saveKey(key: AccessKey): Promise<void> {
       set: {
         plan: key.plan,
         usesRemaining: key.usesRemaining,
-        expiresAt: key.expiresAt || null,
         isActive: key.isActive,
         allowedNames: key.allowedNames ?? null,
         profilePostalAddress: key.profilePostalAddress ?? null,
@@ -107,17 +102,18 @@ export async function lockAccessKeyProfile(
   return findKeyByCode(code);
 }
 
-export async function findKeyByCode(code: string): Promise<AccessKey | undefined> {
-  const records = await db
+export async function findKeyByCode(code: string, executor: DatabaseExecutor = db): Promise<AccessKey | undefined> {
+  const records = await executor
     .select()
     .from(accessKeys)
-    .where(eq(accessKeys.code, code.toUpperCase()));
+    .where(eq(accessKeys.code, code.trim().toUpperCase()));
 
   if (records.length === 0) return undefined;
   const record = records[0];
 
   return {
     ...record,
+    activatedAt: record.activatedAt ?? undefined,
     plan: record.plan as AccessKey["plan"],
     expiresAt: record.expiresAt || ""
   };
@@ -131,6 +127,28 @@ export async function findFreeTrialByEmail(email: string): Promise<FreeTrialReco
     .where(eq(freeTrials.email, normalizedEmail));
 
   return records[0];
+}
+
+export async function activateStoredKey(code: string): Promise<AccessKey> {
+  code = code.trim().toUpperCase();
+  return withKeyLock(`key:${code}`, async (tx) => {
+    const key = await findKeyByCode(code, tx);
+    if (!key || !key.isActive || !key.expiresAt || !Number.isFinite(Date.parse(key.expiresAt)) || Date.parse(key.expiresAt) <= Date.now()) {
+      throw new RequestError("Cle inactive ou expiree", 403);
+    }
+    await tx.update(accessKeys).set({
+      activatedAt: sql`coalesce(${accessKeys.activatedAt}, ${new Date().toISOString()})`
+    }).where(eq(accessKeys.code, code));
+    return (await findKeyByCode(code, tx))!;
+  });
+}
+
+export async function consumeAnalysisCredit(code: string, executor: DatabaseExecutor) {
+  const updated = await executor.update(accessKeys).set({
+    usesRemaining: sql`${accessKeys.usesRemaining} - 1`
+  }).where(and(eq(accessKeys.code, code), sql`${accessKeys.usesRemaining} > 0`)).returning();
+  if (!updated.length) throw new RequestError("Quota epuise", 403);
+  return updated[0].usesRemaining;
 }
 
 export async function findFreeTrialByKeyCode(keyCode: string): Promise<FreeTrialRecord | undefined> {
@@ -149,8 +167,8 @@ export async function saveFreeTrial(record: FreeTrialRecord): Promise<void> {
   });
 }
 
-export async function getDocumentsByKey(keyCode: string): Promise<UploadedDocument[]> {
-  const records = await db
+export async function getDocumentsByKey(keyCode: string, executor: DatabaseExecutor = db): Promise<UploadedDocument[]> {
+  const records = await executor
     .select()
     .from(documents)
     .where(eq(documents.keyCode, keyCode));
@@ -171,19 +189,19 @@ export async function getDocumentsByKey(keyCode: string): Promise<UploadedDocume
   }));
 }
 
-export async function saveDocuments(keyCode: string, docs: UploadedDocument[]): Promise<void> {
-  const existingDocs = await getDocumentsByKey(keyCode);
+export async function saveDocuments(keyCode: string, docs: UploadedDocument[], executor: DatabaseExecutor = db): Promise<void> {
+  const existingDocs = await getDocumentsByKey(keyCode, executor);
   const newIds = docs.map((document) => document.id);
   const idsToDelete = existingDocs
     .filter((document) => !newIds.includes(document.id))
     .map((document) => document.id);
 
   if (idsToDelete.length > 0) {
-    await db.delete(documents).where(inArray(documents.id, idsToDelete));
+    await executor.delete(documents).where(and(eq(documents.keyCode, keyCode), inArray(documents.id, idsToDelete)));
   }
 
   for (const doc of docs as StoredUploadedDocument[]) {
-    await db
+    const saved = await executor
       .insert(documents)
       .values({
         id: doc.id,
@@ -202,19 +220,22 @@ export async function saveDocuments(keyCode: string, docs: UploadedDocument[]): 
         target: documents.id,
         set: {
           fileName: doc.fileName,
+          physicalFileName: doc.physicalFileName || `${doc.id}.pdf`,
           fileSize: doc.fileSize,
           mimeType: doc.mimeType,
           documentType: doc.documentType,
           detectedCategory: doc.detectedCategory || null,
           provider: doc.provider || null,
           status: doc.status
-        }
-      });
+        },
+        setWhere: eq(documents.keyCode, keyCode)
+      }).returning({ id: documents.id });
+    if (!saved.length) throw new RequestError("Document non autorise", 403);
   }
 }
 
-export async function getAnalysisByKey(keyCode: string): Promise<Analysis | null> {
-  const records = await db
+export async function getAnalysisByKey(keyCode: string, executor: DatabaseExecutor = db): Promise<Analysis | null> {
+  const records = await executor
     .select()
     .from(analyses)
     .where(eq(analyses.keyCode, keyCode));
@@ -236,8 +257,8 @@ export async function getAnalysisByKey(keyCode: string): Promise<Analysis | null
   };
 }
 
-export async function saveAnalysis(keyCode: string, analysis: Analysis): Promise<void> {
-  await db
+export async function saveAnalysis(keyCode: string, analysis: Analysis, executor: DatabaseExecutor = db): Promise<void> {
+  await executor
     .insert(analyses)
     .values({
       id: analysis.id,
@@ -365,11 +386,8 @@ export async function getOrderByGeneratedKey(keyCode: string): Promise<OrderReco
   };
 }
 
-export function deleteDocumentFile(physicalFileName: string) {
-  const filePath = path.join(UPLOADS_DIR, physicalFileName);
-  if (fs.existsSync(filePath)) {
-    fs.unlinkSync(filePath);
-  }
+export async function deleteDocumentFile(physicalFileName: string) {
+  await storage.delete(physicalFileName);
 }
 
 export async function purgeExpiredData(): Promise<void> {
@@ -381,17 +399,25 @@ export async function purgeExpiredData(): Promise<void> {
     .where(and(lt(accessKeys.expiresAt, now), eq(accessKeys.isActive, true)));
 
   for (const key of expiredKeys) {
-    const docs = (await getDocumentsByKey(key.code)) as StoredUploadedDocument[];
+    try {
+      await withKeyLock(`key:${key.code}`, async (tx) => {
+    const current = await findKeyByCode(key.code, tx);
+    if (!current?.expiresAt || Date.parse(current.expiresAt) > Date.now()) return;
+    const docs = (await getDocumentsByKey(key.code, tx)) as StoredUploadedDocument[];
     for (const doc of docs) {
-      deleteDocumentFile(doc.physicalFileName || `${doc.id}.pdf`);
+      await deleteDocumentFile(doc.physicalFileName || `${doc.id}.pdf`);
     }
 
-    await db.delete(documents).where(eq(documents.keyCode, key.code));
-    await db.delete(analyses).where(eq(analyses.keyCode, key.code));
-    await db.update(accessKeys).set({ isActive: false }).where(eq(accessKeys.code, key.code));
+    await tx.delete(documents).where(eq(documents.keyCode, key.code));
+    await tx.delete(analyses).where(eq(analyses.keyCode, key.code));
+    await tx.update(accessKeys).set({ isActive: false }).where(eq(accessKeys.code, key.code));
+      });
+    } catch (error) {
+      if (!(error instanceof RequestError && error.status === 409)) throw error;
+    }
   }
 }
 
-export async function deleteAnalysisByKey(keyCode: string): Promise<void> {
-  await db.delete(analyses).where(eq(analyses.keyCode, keyCode));
+export async function deleteAnalysisByKey(keyCode: string, executor: DatabaseExecutor = db): Promise<void> {
+  await executor.delete(analyses).where(eq(analyses.keyCode, keyCode));
 }
