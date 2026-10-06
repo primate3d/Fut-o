@@ -1,6 +1,6 @@
 "use client";
 
-import { type FormEvent, useState } from "react";
+import { type FormEvent, useEffect, useState } from "react";
 import { Check, Info, KeyRound, Plus, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
@@ -15,6 +15,79 @@ export function PricingAccessKeys() {
   const [showFreeForm, setShowFreeForm] = useState(false);
   const [freeEmail, setFreeEmail] = useState("");
   const [pendingPlan, setPendingPlan] = useState<string | null>(null);
+  const [checkoutStatus, setCheckoutStatus] = useState<{
+    state: "processing" | "completed" | "error";
+    key?: string;
+    message: string;
+  } | null>(null);
+
+  useEffect(() => {
+    const sessionId = new URLSearchParams(window.location.search).get("session_id");
+    if (!sessionId) return;
+
+    let cancelled = false;
+    let timer: number | undefined;
+    setCheckoutStatus({
+      state: "processing",
+      message: "Paiement recu. Votre acces est en cours de preparation."
+    });
+
+    async function refreshStatus(attempt = 0) {
+      try {
+        const response = await fetch(
+          `/api/orders/status?session_id=${encodeURIComponent(sessionId!)}`
+        );
+        const payload = (await response.json()) as {
+          error?: string;
+          key?: string;
+          paymentStatus?: string;
+          status?: string;
+        };
+        if (cancelled) return;
+
+        if (!response.ok) {
+          setCheckoutStatus({
+            state: "error",
+            message: payload.error ?? "Impossible de verifier cette commande."
+          });
+          return;
+        }
+
+        if (payload.status === "completed" && payload.key) {
+          setCheckoutStatus({
+            state: "completed",
+            key: payload.key,
+            message: "Paiement confirme. Votre cle est prete."
+          });
+          return;
+        }
+
+        setCheckoutStatus({
+          state: "processing",
+          message:
+            payload.paymentStatus === "paid"
+              ? "Paiement confirme. Votre cle est en cours de preparation."
+              : "Paiement en cours de confirmation."
+        });
+        if (attempt < 9) {
+          timer = window.setTimeout(() => void refreshStatus(attempt + 1), 1500);
+        }
+      } catch {
+        if (!cancelled) {
+          setCheckoutStatus({
+            state: "error",
+            message: "Impossible de verifier la commande pour le moment."
+          });
+        }
+      }
+    }
+
+    void refreshStatus();
+    return () => {
+      cancelled = true;
+      if (timer) window.clearTimeout(timer);
+    };
+  }, []);
 
   async function requestPaidAccess(plan: AccessKeyPlanDefinition) {
     setPurchaseMessage(null);
@@ -105,6 +178,29 @@ export function PricingAccessKeys() {
           </div>
         </div>
       </Card>
+
+      {checkoutStatus ? (
+        <Card
+          className={
+            checkoutStatus.state === "error"
+              ? "border-red-200 bg-red-50"
+              : "border-sage-200 bg-sage-50"
+          }
+        >
+          <p className="font-semibold text-[#12243d]">{checkoutStatus.message}</p>
+          {checkoutStatus.key ? (
+            <div className="mt-4 space-y-4">
+              <p className="break-all rounded-xl border border-sage-200 bg-white p-4 font-mono text-lg font-bold text-[#12243d]">
+                {checkoutStatus.key}
+              </p>
+              <p className="text-sm text-slate-600">
+                Conservez cette cle. Elle reste identique si l'email de livraison doit etre renvoye.
+              </p>
+              <Button href="/activer-cle">Activer mon acces</Button>
+            </div>
+          ) : null}
+        </Card>
+      ) : null}
 
       {showFreeForm ? (
         <div

@@ -2,6 +2,7 @@ import crypto from "crypto";
 import { NextResponse } from "next/server";
 import {
   createAdminAccessKey,
+  hasValidAccessExpiration,
   hasLockedHouseholdProfile,
   isAdminAccessCode,
   isBlockedProductionAdminCode,
@@ -40,7 +41,7 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: "Cle non active" }, { status: 403 });
   }
 
-  if (key.expiresAt && new Date(key.expiresAt) < new Date()) {
+  if (!hasValidAccessExpiration(key)) {
     return NextResponse.json({ error: "Clé expirée", expired: true }, { status: 403 });
   }
 
@@ -80,7 +81,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Clé non active" }, { status: 403 });
     }
 
-    if (key.expiresAt && new Date(key.expiresAt) < new Date()) {
+    if (!hasValidAccessExpiration(key)) {
       return NextResponse.json({ error: "Clé expirée" }, { status: 403 });
     }
 
@@ -159,7 +160,7 @@ export async function DELETE(request: Request) {
       return NextResponse.json({ error: "Clé invalide" }, { status: 403 });
     }
 
-    if (key.expiresAt && new Date(key.expiresAt) < new Date() && !purge) {
+    if (!hasValidAccessExpiration(key) && !purge) {
       return NextResponse.json({ error: "Clé expirée" }, { status: 403 });
     }
 

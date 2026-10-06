@@ -13,8 +13,9 @@ import postgres from "postgres";
 import snapshot from "../drizzle/meta/0000_snapshot.json";
 import { householdDocuments, aiHouseholdPayload, emptyAnalysis } from "./fixtures/household";
 import { registerE2eWorkflows } from "./e2e-workflows.test";
-import type { UploadedDocument } from "../types";
+import { ExpenseCategory, type MockAnalysis, type UploadedDocument } from "../types";
 import { jsPDF } from "jspdf";
+import type Stripe from "stripe";
 
 let pg: EmbeddedPostgres;
 let sql: ReturnType<typeof postgres>;
@@ -33,6 +34,34 @@ const fakeKey = (code = randomUUID().toUpperCase()) => ({
 });
 const legacyFreeAccessCode = "FUTEO-LEGACY-EXPIRED";
 const legacyDuplicateCode = "FUTEO-LEGACY-DUPLICATE";
+
+function paidSession(id: string, planId: "foyer" | "famille" = "foyer") {
+  return {
+    id,
+    payment_status: "paid",
+    customer_details: { email: "paid@example.invalid" },
+    metadata: { planId, planName: planId === "famille" ? "Audit Famille" : "Audit Foyer" }
+  } as unknown as Stripe.Checkout.Session;
+}
+
+function analysisWithProvider(code: string, provider: string): MockAnalysis {
+  return {
+    ...emptyAnalysis(code),
+    expenses: [{
+      id: `expense_${code}`,
+      label: `Contrat ${provider}`,
+      provider,
+      category: ExpenseCategory.ENERGY,
+      isRecurring: true,
+      monthlyAmount: 100,
+      yearlyAmount: 1200,
+      documentType: "electricity_invoice",
+      recurrence: "monthly"
+    }],
+    totalMonthlyAmount: 100,
+    totalYearlyAmount: 1200
+  };
+}
 
 async function availablePort() {
   const server = net.createServer();
@@ -55,6 +84,8 @@ before(async () => {
   process.env.UPLOADS_DIR = path.join(root, "uploads");
   process.env.FUTEO_LOCAL_E2E = "0";
   process.env.OPENAI_API_KEY = "local-test-only";
+  process.env.STRIPE_SECRET_KEY = "sk_test_phase15";
+  process.env.STRIPE_WEBHOOK_SECRET = "whsec_phase15";
   aiServer = http.createServer(async (request, response) => {
     for await (const chunk of request) { void chunk; }
     aiRequests++;
@@ -536,6 +567,170 @@ test("activation returns 404 for a non-existent key", async () => {
   }));
   assert.equal(response.status, 404);
   assert.match(((await response.json()) as { error: string }).error, /invalide/i);
+});
+
+test("paid checkout creates one cryptographic key and replay keeps delivery idempotent", async () => {
+  const { fulfillPaidCheckout } = await import("../lib/server/paid-access");
+  const session = paidSession(`cs_test_${randomUUID()}`);
+  await repo.saveOrder(session.id, {
+    planId: "foyer",
+    planName: "Audit Foyer",
+    status: "pending",
+    createdAt: new Date().toISOString()
+  });
+  let sends = 0;
+  const sender = async () => { sends += 1; return { success: true }; };
+
+  const first = await fulfillPaidCheckout(session, sender);
+  const replay = await fulfillPaidCheckout(session, sender);
+  assert.equal(first.key.code, replay.key.code);
+  assert.equal(first.key.expiresAt, replay.key.expiresAt);
+  assert.match(first.key.code, /^FF-[A-F0-9]{8}-[A-F0-9]{8}-[A-F0-9]{8}$/);
+  assert.equal(sends, 1);
+  assert.equal((await repo.getOrderBySessionId(session.id))!.emailSent, true);
+});
+
+test("two concurrent paid webhooks create and deliver exactly one key", async () => {
+  const { fulfillPaidCheckout } = await import("../lib/server/paid-access");
+  const session = paidSession(`cs_test_${randomUUID()}`, "famille");
+  await repo.saveOrder(session.id, {
+    planId: "famille",
+    planName: "Audit Famille",
+    status: "pending",
+    createdAt: new Date().toISOString()
+  });
+  let sends = 0;
+  const sender = async () => {
+    sends += 1;
+    await new Promise((resolve) => setTimeout(resolve, 75));
+    return { success: true };
+  };
+
+  const [first, second] = await Promise.all([
+    fulfillPaidCheckout(session, sender),
+    fulfillPaidCheckout(session, sender)
+  ]);
+  assert.equal(first.key.code, second.key.code);
+  assert.equal(sends, 1);
+  assert.equal((await sql`select count(*)::int as count from access_keys where code=${first.key.code}`)[0].count, 1);
+});
+
+test("Brevo failure retries the same paid key without extending expiration", async () => {
+  const { fulfillPaidCheckout } = await import("../lib/server/paid-access");
+  const session = paidSession(`cs_test_${randomUUID()}`);
+  await repo.saveOrder(session.id, {
+    planId: "foyer",
+    planName: "Audit Foyer",
+    status: "pending",
+    createdAt: new Date().toISOString()
+  });
+
+  await assert.rejects(fulfillPaidCheckout(session, async () => ({ success: false })));
+  const failedOrder = (await repo.getOrderBySessionId(session.id))!;
+  const failedKey = (await repo.findKeyByCode(failedOrder.generatedKey!))!;
+  assert.equal(failedOrder.status, "completed");
+  assert.equal(failedOrder.emailSent, false);
+
+  const retried = await fulfillPaidCheckout(session, async () => ({ success: true }));
+  assert.equal(retried.key.code, failedKey.code);
+  assert.equal(retried.key.expiresAt, failedKey.expiresAt);
+  assert.equal((await repo.getOrderBySessionId(session.id))!.emailSent, true);
+});
+
+test("order status requires the signed checkout claim and refuses another session", async () => {
+  const { fulfillPaidCheckout } = await import("../lib/server/paid-access");
+  const { createCheckoutClaim, CHECKOUT_CLAIM_COOKIE } = await import("../lib/server/checkout-claim");
+  const { GET } = await import("../app/api/orders/status/route");
+  const { NextRequest } = await import("next/server");
+  const session = paidSession(`cs_test_${randomUUID()}`);
+  await repo.saveOrder(session.id, {
+    planId: "foyer",
+    planName: "Audit Foyer",
+    status: "pending",
+    createdAt: new Date().toISOString()
+  });
+  const fulfilled = await fulfillPaidCheckout(session, async () => ({ success: true }));
+  const claim = createCheckoutClaim(session.id);
+  const allowed = await GET(new NextRequest(`http://local.test/api/orders/status?session_id=${session.id}`, {
+    headers: { cookie: `${CHECKOUT_CLAIM_COOKIE}=${claim}` }
+  }));
+  assert.equal(allowed.status, 200);
+  assert.equal(((await allowed.json()) as { key: string }).key, fulfilled.key.code);
+
+  const foreignSessionId = `cs_test_${randomUUID()}`;
+  const refused = await GET(new NextRequest(`http://local.test/api/orders/status?session_id=${foreignSessionId}`, {
+    headers: { cookie: `${CHECKOUT_CLAIM_COOKIE}=${claim}` }
+  }));
+  assert.equal(refused.status, 403);
+});
+
+test("letters API enforces key, expiration, plan and server-owned analysis", async () => {
+  const { POST } = await import("../app/api/courriers/route");
+  assert.equal((await POST(new Request("http://local.test/api/courriers", {
+    method: "POST", body: JSON.stringify({})
+  }))).status, 400);
+
+  const expired = { ...fakeKey(), expiresAt: new Date(Date.now() - 1000).toISOString() };
+  await repo.saveKey(expired);
+  assert.equal((await POST(new Request("http://local.test/api/courriers", {
+    method: "POST", body: JSON.stringify({ code: expired.code })
+  }))).status, 403);
+
+  const discovery = { ...fakeKey(), plan: "decouverte" as const };
+  await repo.saveKey(discovery);
+  await repo.saveAnalysis(discovery.code, analysisWithProvider(discovery.code, "DECOUVERTE"));
+  assert.equal((await POST(new Request("http://local.test/api/courriers", {
+    method: "POST", body: JSON.stringify({ code: discovery.code })
+  }))).status, 403);
+
+  const owner = fakeKey();
+  const foreign = fakeKey();
+  await repo.saveKey(owner);
+  await repo.saveKey(foreign);
+  await repo.saveAnalysis(owner.code, analysisWithProvider(owner.code, "EDF"));
+  await repo.saveAnalysis(foreign.code, analysisWithProvider(foreign.code, "SFR"));
+  const response = await POST(new Request("http://local.test/api/courriers", {
+    method: "POST",
+    body: JSON.stringify({ code: owner.code, analysis: analysisWithProvider(foreign.code, "SFR") })
+  }));
+  assert.equal(response.status, 200);
+  const payload = JSON.stringify(await response.json());
+  assert.match(payload, /EDF/);
+  assert.doesNotMatch(payload, /SFR/);
+});
+
+test("missing and invalid expirations are rejected fail-closed", async () => {
+  const { GET } = await import("../app/api/keys/status/route");
+  for (const expiresAt of ["", "not-a-date"]) {
+    const key = { ...fakeKey(), expiresAt };
+    await repo.saveKey(key);
+    const response = await GET(new Request(`http://local.test/api/keys/status?code=${key.code}`));
+    assert.equal(response.status, 403);
+  }
+});
+
+test("redirect sanitizer refuses external and executable destinations", async () => {
+  const { sanitizeInternalRedirect } = await import("../lib/internal-redirect");
+  assert.equal(sanitizeInternalRedirect("/rapport"), "/rapport");
+  for (const value of ["https://example.com", "//example.com", "javascript:alert(1)", "data:text/html,test", "/unknown"]) {
+    assert.equal(sanitizeInternalRedirect(value), "/tableau-de-bord");
+  }
+});
+
+test("production environment and cron purge fail closed", async () => {
+  const { parseEnvironment } = await import("../lib/env");
+  assert.throws(() => parseEnvironment({ NODE_ENV: "production" }), /Configuration de production invalide/);
+
+  const previousSecret = process.env.CRON_SECRET;
+  delete process.env.CRON_SECRET;
+  try {
+    const { POST } = await import("../app/api/cron/purge/route");
+    const response = await POST(new Request("http://local.test/api/cron/purge", { method: "POST" }));
+    assert.equal(response.status, 401);
+  } finally {
+    if (previousSecret === undefined) delete process.env.CRON_SECRET;
+    else process.env.CRON_SECRET = previousSecret;
+  }
 });
 
 registerE2eWorkflows({

@@ -2,6 +2,7 @@
 
 import { FormEvent, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
+import { sanitizeInternalRedirect } from "@/lib/internal-redirect";
 import { RotateCcw, ShieldCheck } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
@@ -125,7 +126,7 @@ export default function AccountPage() {
 
     const redirectPath = searchParams.get("redirect");
     if (redirectPath) {
-      router.replace(redirectPath);
+      router.replace(sanitizeInternalRedirect(redirectPath));
     }
   }
 

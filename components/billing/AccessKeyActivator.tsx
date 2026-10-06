@@ -6,12 +6,13 @@ import { CheckCircle2, KeyRound, ShoppingCart } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { requiresHouseholdProfile, storeAccessKey } from "@/features/billing";
+import { sanitizeInternalRedirect } from "@/lib/internal-redirect";
 import type { AccessKey } from "@/types";
 
 export function AccessKeyActivator() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const redirectPath = searchParams.get("redirect") ?? "/tableau-de-bord";
+  const redirectPath = sanitizeInternalRedirect(searchParams.get("redirect"));
   const [code, setCode] = useState(searchParams.get("code") ?? "");
   const [message, setMessage] = useState<string | null>(null);
   const [status, setStatus] = useState<"idle" | "success" | "error">("idle");

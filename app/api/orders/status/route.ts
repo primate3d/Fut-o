@@ -1,38 +1,48 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { getOrderBySessionId } from "@/lib/server/db";
-import { getStripe } from "@/lib/server/stripe";
+import {
+  CHECKOUT_CLAIM_COOKIE,
+  verifyCheckoutClaim
+} from "@/lib/server/checkout-claim";
 
-export async function GET(request: Request) {
-  const { searchParams } = new URL(request.url);
-  const sessionId = searchParams.get("session_id");
-
+export async function GET(request: NextRequest) {
+  const sessionId = request.nextUrl.searchParams.get("session_id");
   if (!sessionId) {
     return NextResponse.json({ error: "Session ID manquant" }, { status: 400 });
   }
 
-  try {
-    const existingOrder = await getOrderBySessionId(sessionId);
-    const existingKey = existingOrder?.key?.code ?? existingOrder?.generatedKey;
+  const claim = request.cookies.get(CHECKOUT_CLAIM_COOKIE)?.value;
+  if (!verifyCheckoutClaim(sessionId, claim)) {
+    return NextResponse.json({ error: "Session de commande non autorisee" }, { status: 403 });
+  }
 
-    if (existingOrder?.status === "completed" && existingKey) {
+  try {
+    const order = await getOrderBySessionId(sessionId);
+    if (!order) {
+      return NextResponse.json({ error: "Commande introuvable" }, { status: 404 });
+    }
+
+    if (order.status === "completed" && order.generatedKey) {
       return NextResponse.json({
         status: "completed",
-        key: existingKey,
-        planName: existingOrder.planName ?? null
+        key: order.generatedKey,
+        planName: order.planName ?? null
       });
     }
 
-    const stripe = getStripe();
-    const session = await stripe.checkout.sessions.retrieve(sessionId);
+    const { getStripe } = await import("@/lib/server/stripe");
+    const session = await getStripe().checkout.sessions.retrieve(sessionId);
+    if (session.id !== order.id || session.metadata?.planId !== order.planId) {
+      return NextResponse.json({ error: "Commande Stripe incoherente" }, { status: 403 });
+    }
 
     return NextResponse.json({
-      status: existingOrder?.status ?? "pending",
+      status: order.status ?? "pending",
       paymentStatus: session.payment_status,
-      planName: existingOrder?.planName ?? session.metadata?.planName ?? null
+      planName: order.planName ?? session.metadata?.planName ?? null
     });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Erreur technique";
     console.error("Erreur statut commande:", error);
-    return NextResponse.json({ error: message }, { status: 500 });
+    return NextResponse.json({ error: "Statut de commande indisponible" }, { status: 500 });
   }
 }

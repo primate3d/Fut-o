@@ -3,7 +3,10 @@ import { accessKeyPlans, type PublicAccessKeyPlan } from "./access-keys";
 import { saveOrder } from "@/lib/server/db";
 import { requireServerEnv } from "@/lib/env";
 
-export async function createCheckoutSession(planId: string, baseUrl: string): Promise<string | null> {
+export async function createCheckoutSession(
+  planId: string,
+  baseUrl: string
+): Promise<{ id: string; url: string } | null> {
   const plan = accessKeyPlans.find(p => p.plan === planId);
   if (!plan) {
     throw new Error("Plan invalide");
@@ -58,7 +61,7 @@ export async function createCheckoutSession(planId: string, baseUrl: string): Pr
       createdAt: new Date().toISOString()
     });
 
-    return session.url;
+    return session.url ? { id: session.id, url: session.url } : null;
   } catch (error) {
     console.error("Erreur création session Stripe:", error);
     return null;

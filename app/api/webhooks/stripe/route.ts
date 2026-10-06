@@ -1,20 +1,10 @@
 import { NextResponse } from "next/server";
 import Stripe from "stripe";
-import { getOrderBySessionId, saveKey, saveOrder } from "@/lib/server/db";
 import { sendAccessKeyEmail } from "@/lib/server/email";
 import { logger, withLatency } from "@/lib/server/logger";
+import { fulfillPaidCheckout } from "@/lib/server/paid-access";
 import { getStripe } from "@/lib/server/stripe";
 import { requireServerEnv } from "@/lib/env";
-import { getAccessDurationDays, normalizeAccessKeyPlan } from "@/features/billing/access-keys";
-import type { AccessKey } from "@/types";
-
-function normalizePlan(planId: unknown): AccessKey["plan"] {
-  return planId === "famille" || planId === "premium"
-    ? "famille"
-    : planId === "foyer" || planId === "simple"
-      ? "foyer"
-      : "foyer";
-}
 
 function maskKeyForLog(keyCode: string) {
   return `****${keyCode.slice(-4)}`;
@@ -27,9 +17,7 @@ export async function POST(request: Request) {
   let event: Stripe.Event;
 
   try {
-    if (!signature) {
-      throw new Error("Signature Stripe manquante");
-    }
+    if (!signature) throw new Error("Signature Stripe manquante");
 
     const webhookSecret = requireServerEnv("STRIPE_WEBHOOK_SECRET");
     const stripe = getStripe();
@@ -57,84 +45,29 @@ export async function POST(request: Request) {
   if (event.type === "checkout.session.completed") {
     const session = event.data.object as Stripe.Checkout.Session;
     const startTime = performance.now();
-    const order = await getOrderBySessionId(session.id);
 
-    if (order && order.status !== "completed") {
-      const keyCode = `FF-${Math.random()
-        .toString(36)
-        .substring(2, 8)
-        .toUpperCase()}-${Math.random().toString(36).substring(2, 5).toUpperCase()}`;
-      const plan = normalizePlan(order.planId);
-      const normalizedPlan = normalizeAccessKeyPlan(plan);
-      const expiresAt = new Date(
-        Date.now() + getAccessDurationDays(normalizedPlan) * 24 * 60 * 60 * 1000
-      ).toISOString();
-
-      const newKey: AccessKey = {
-        id: `key_${Date.now()}`,
-        code: keyCode,
-        plan: normalizedPlan,
-        usesRemaining: normalizedPlan === "famille" ? 50 : 10,
-        expiresAt,
-        isActive: true,
-        createdAt: new Date().toISOString()
-      };
-
-      await saveKey(newKey);
-
-      await saveOrder(session.id, {
-        ...order,
-        status: "completed",
-        generatedKey: keyCode,
-        completedAt: new Date().toISOString(),
-        customerEmail: session.customer_details?.email,
-        emailSent: false
-      });
-
-      logger.info("Paiement complete et cle generee", {
+    try {
+      const result = await fulfillPaidCheckout(session, sendAccessKeyEmail);
+      logger.info(result.created ? "Paiement complete et cle generee" : "Webhook Stripe rejoue", {
         service: "Stripe",
-        action: "payment_complete",
+        action: result.created ? "payment_complete" : "webhook_duplicate",
         sessionId: session.id,
-        metadata: { plan, email: session.customer_details?.email, keySuffix: maskKeyForLog(keyCode) }
+        idempotencyKey: session.id,
+        metadata: {
+          keySuffix: maskKeyForLog(result.key.code),
+          emailSent: result.emailSent
+        },
+        latencyMs: Math.round(performance.now() - startTime)
       });
-
-      if (session.customer_details?.email) {
-        const emailResult = await sendAccessKeyEmail(
-          session.customer_details.email,
-          keyCode,
-          order.planName || "Audit Futéo"
-        );
-
-        if (emailResult.success) {
-          await saveOrder(session.id, {
-            ...(await getOrderBySessionId(session.id)),
-            emailSent: true,
-            emailSentAt: new Date().toISOString()
-          });
-
-          logger.info("Email de livraison envoye", {
-            service: "Email",
-            action: "delivery_success",
-            sessionId: session.id,
-            metadata: { keySuffix: maskKeyForLog(keyCode) },
-            latencyMs: Math.round(performance.now() - startTime)
-          });
-        } else {
-          logger.error("Echec de l'envoi de l'email de livraison", {
-            service: "Email",
-            action: "delivery_failure",
-            sessionId: session.id,
-            metadata: { error: emailResult.error }
-          });
-        }
-      }
-    } else if (order && order.status === "completed") {
-      logger.warn("Webhook Stripe ignore, deja traite", {
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Erreur de traitement Stripe";
+      logger.error("Echec traitement du paiement Stripe", {
         service: "Stripe",
-        action: "webhook_duplicate",
+        action: "payment_fulfillment_failure",
         sessionId: session.id,
-        idempotencyKey: session.id
+        metadata: { error: message }
       });
+      return NextResponse.json({ error: "Traitement du paiement incomplet" }, { status: 500 });
     }
   }
 

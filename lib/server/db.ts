@@ -2,6 +2,7 @@ import { and, eq, inArray, lt, sql } from "drizzle-orm";
 import { db } from "./db/index";
 import { accessKeys, analyses, documents, freeTrials, orders } from "./db/schema";
 import { ExpenseCategory } from "@/types";
+import { hasValidAccessExpiration } from "@/features/billing/access-keys";
 import { storage } from "./storage";
 import { withKeyLock, type DatabaseExecutor } from "./key-lock";
 import { RequestError } from "./request-error";
@@ -20,7 +21,7 @@ type StoredUploadedDocument = UploadedDocument & {
   physicalFileName?: string;
 };
 
-type OrderData = {
+export type OrderData = {
   sessionId?: string;
   planId?: string;
   planName?: string;
@@ -35,7 +36,7 @@ type OrderData = {
   createdAt?: string;
 };
 
-type OrderRecord = OrderData & {
+export type OrderRecord = OrderData & {
   id: string;
 };
 
@@ -57,8 +58,11 @@ export async function getKeys(): Promise<AccessKey[]> {
   }));
 }
 
-export async function saveKey(key: AccessKey): Promise<void> {
-  await db
+export async function saveKey(
+  key: AccessKey,
+  executor: DatabaseExecutor = db
+): Promise<void> {
+  await executor
     .insert(accessKeys)
     .values({
       id: key.id,
@@ -83,6 +87,30 @@ export async function saveKey(key: AccessKey): Promise<void> {
         profileLockedAt: key.profileLockedAt ?? null
       }
     });
+}
+
+export async function insertKeyIfAbsent(
+  key: AccessKey,
+  executor: DatabaseExecutor = db
+) {
+  const inserted = await executor
+    .insert(accessKeys)
+    .values({
+      id: key.id,
+      code: key.code,
+      plan: key.plan,
+      usesRemaining: key.usesRemaining,
+      expiresAt: key.expiresAt || null,
+      isActive: key.isActive,
+      createdAt: key.createdAt,
+      allowedNames: key.allowedNames ?? null,
+      profilePostalAddress: key.profilePostalAddress ?? null,
+      profileLockedAt: key.profileLockedAt ?? null
+    })
+    .onConflictDoNothing()
+    .returning({ code: accessKeys.code });
+
+  return inserted.length === 1;
 }
 
 export async function lockAccessKeyProfile(
@@ -133,7 +161,7 @@ export async function activateStoredKey(code: string): Promise<AccessKey> {
   code = code.trim().toUpperCase();
   return withKeyLock(`key:${code}`, async (tx) => {
     const key = await findKeyByCode(code, tx);
-    if (!key || !key.isActive || !key.expiresAt || !Number.isFinite(Date.parse(key.expiresAt)) || Date.parse(key.expiresAt) <= Date.now()) {
+    if (!key || !key.isActive || !hasValidAccessExpiration(key)) {
       throw new RequestError("Cle inactive ou expiree", 403);
     }
     await tx.update(accessKeys).set({
@@ -289,8 +317,12 @@ export async function saveAnalysis(keyCode: string, analysis: Analysis, executor
     });
 }
 
-export async function saveOrder(sessionId: string, orderData: OrderData): Promise<void> {
-  await db
+export async function saveOrder(
+  sessionId: string,
+  orderData: OrderData,
+  executor: DatabaseExecutor = db
+): Promise<void> {
+  await executor
     .insert(orders)
     .values({
       id: sessionId,
@@ -317,8 +349,11 @@ export async function saveOrder(sessionId: string, orderData: OrderData): Promis
     });
 }
 
-export async function getOrderBySessionId(sessionId: string): Promise<OrderRecord | undefined> {
-  const records = await db.select().from(orders).where(eq(orders.id, sessionId));
+export async function getOrderBySessionId(
+  sessionId: string,
+  executor: DatabaseExecutor = db
+): Promise<OrderRecord | undefined> {
+  const records = await executor.select().from(orders).where(eq(orders.id, sessionId));
   const record = records[0];
   if (!record) return undefined;
 

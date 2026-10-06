@@ -1,6 +1,6 @@
 import { randomBytes, randomUUID } from "node:crypto";
 import { and, eq, sql } from "drizzle-orm";
-import { getAccessDurationDays } from "@/features/billing/access-keys";
+import { getAccessDurationDays, hasValidAccessExpiration } from "@/features/billing/access-keys";
 import { db } from "./db/index";
 import { accessKeys, freeTrials } from "./db/schema";
 import { withKeyLock } from "./key-lock";
@@ -39,7 +39,7 @@ export async function requestFreeAccess(email: string, send: SendEmail, scope = 
       throw new RequestError("Une cle gratuite a deja ete demandee avec cet email.", 409);
     }
     const [key] = await tx.select().from(accessKeys).where(eq(accessKeys.code, allocation.keyCode));
-    if (!key?.isActive || !key.expiresAt || Date.parse(key.expiresAt) <= Date.now()) {
+    if (!key?.isActive || !hasValidAccessExpiration(key)) {
       throw new RequestError("Cette cle gratuite a expire. Contactez le support.", 403);
     }
     if (!(await send(normalizedEmail, allocation.keyCode, "Acces gratuit Futeo")).success) {

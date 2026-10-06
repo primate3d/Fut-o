@@ -7,9 +7,10 @@ import { purgeExpiredData } from "@/lib/server/db";
  */
 export async function POST(request: Request) {
   try {
-    // Optionnel: Vérifier un token secret dans les headers pour la sécurité
+    // La purge reste inaccessible tant qu'un secret explicite n'est pas configure.
     const authHeader = request.headers.get("authorization");
-    if (process.env.CRON_SECRET && authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
+    const cronSecret = process.env.CRON_SECRET?.trim();
+    if (!cronSecret || authHeader !== `Bearer ${cronSecret}`) {
       return NextResponse.json({ error: "Non autorisé" }, { status: 401 });
     }
 

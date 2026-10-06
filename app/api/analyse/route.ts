@@ -6,6 +6,7 @@ import { readLimitedBody, selectOwnedDocuments } from "@/lib/server/document-val
 import { analyzeDocumentsWithAI } from "@/features/analysis/ai-service";
 import {
   createAdminAccessKey,
+  hasValidAccessExpiration,
   hasLockedHouseholdProfile,
   isAdminAccessCode,
   isBlockedProductionAdminCode,
@@ -177,7 +178,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Quota épuisé ou clé non active" }, { status: 403 });
     }
 
-    if (!key.expiresAt || !Number.isFinite(Date.parse(key.expiresAt)) || Date.parse(key.expiresAt) <= Date.now()) {
+    if (!hasValidAccessExpiration(key)) {
       return NextResponse.json({ error: "Clé expirée" }, { status: 403 });
     }
 
@@ -429,7 +430,7 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: "Cle invalide ou inactive" }, { status: 403 });
   }
 
-  if (key.expiresAt && new Date(key.expiresAt) < new Date()) {
+  if (!hasValidAccessExpiration(key)) {
     return NextResponse.json({ error: "Cle expiree", expired: true }, { status: 403 });
   }
 
@@ -467,7 +468,7 @@ export async function DELETE(request: Request) {
     return NextResponse.json({ error: "Cle non active" }, { status: 403 });
   }
 
-  if (key.expiresAt && new Date(key.expiresAt) < new Date()) {
+  if (!hasValidAccessExpiration(key)) {
     return NextResponse.json({ error: "Cle expiree", expired: true }, { status: 403 });
   }
 

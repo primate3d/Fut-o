@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { findAlternativeOffers } from "@/features/recommendations/service";
 import {
   createAdminAccessKey,
+  hasValidAccessExpiration,
   isAdminAccessCode,
   isBlockedProductionAdminCode,
   isDiscoveryPlan
@@ -40,7 +41,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Clé invalide ou inactive" }, { status: 403 });
   }
 
-  if (key.expiresAt && new Date(key.expiresAt) < new Date()) {
+  if (!hasValidAccessExpiration(key)) {
     return NextResponse.json({ error: "Clé expirée" }, { status: 403 });
   }
 

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import {
   createAdminAccessKey,
+  hasValidAccessExpiration,
   hasLockedHouseholdProfile,
   isAdminAccessCode,
   isBlockedProductionAdminCode,
@@ -30,8 +31,7 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: "Clé inactive" }, { status: 403 });
   }
 
-  const now = new Date();
-  if (key.expiresAt && new Date(key.expiresAt) < now) {
+  if (!hasValidAccessExpiration(key)) {
     return NextResponse.json({ error: "Clé expirée", expired: true }, { status: 403 });
   }
 

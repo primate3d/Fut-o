@@ -127,7 +127,9 @@ function formatActionDate(createdAt: string) {
 
 export function ReportPanel() {
   const router = useRouter();
-  const isDiscoveryAccess = isDiscoveryPlan(getStoredAccessKey()?.plan);
+  const activeKey = getStoredAccessKey();
+  const activeKeyCode = activeKey?.code;
+  const isDiscoveryAccess = isDiscoveryPlan(activeKey?.plan);
   const [analysis, setAnalysis] = useState<MockAnalysis | null>(null);
   const [alternatives, setAlternatives] = useState<AlternativeOffer[]>([]);
   const [selectedOffer, setSelectedOffer] = useState<SelectedAlternativeOffer | null>(null);
@@ -208,14 +210,14 @@ export function ReportPanel() {
             headers: {
               "Content-Type": "application/json"
             },
-            body: JSON.stringify({ expenses: analysisToLoad.expenses })
+            body: JSON.stringify({ code: activeKeyCode, expenses: analysisToLoad.expenses })
           }),
           fetch("/api/courriers", {
             method: "POST",
             headers: {
               "Content-Type": "application/json"
             },
-            body: JSON.stringify({ analysis: analysisToLoad })
+            body: JSON.stringify({ code: activeKeyCode })
           })
         ]);
 
@@ -258,7 +260,7 @@ export function ReportPanel() {
     }
 
     void loadConnectedData();
-  }, [isDiscoveryAccess]);
+  }, [activeKeyCode, isDiscoveryAccess]);
 
   async function handleDownload() {
     if (!analysis) return;

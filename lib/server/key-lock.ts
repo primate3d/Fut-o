@@ -17,3 +17,13 @@ export async function withKeyLock<T>(
     return action(tx);
   });
 }
+
+export async function withWaitingKeyLock<T>(
+  resource: string,
+  action: (tx: DatabaseExecutor) => Promise<T>
+): Promise<T> {
+  return db.transaction(async (tx) => {
+    await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${resource}, 0))`);
+    return action(tx);
+  });
+}

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createCheckoutSession } from "@/features/billing/service";
 import type { AccessKeyPlan } from "@/features/billing/access-keys";
+import { CHECKOUT_CLAIM_COOKIE, createCheckoutClaim } from "@/lib/server/checkout-claim";
 import { checkoutRateLimiter } from "@/lib/server/ratelimit";
 
 export async function POST(request: Request) {
@@ -10,7 +11,6 @@ export async function POST(request: Request) {
     if (!planId) {
       return NextResponse.json({ error: "Plan ID manquant" }, { status: 400 });
     }
-
     if (planId === "decouverte") {
       return NextResponse.json(
         { error: "L'accès gratuit doit passer par le formulaire email." },
@@ -25,15 +25,20 @@ export async function POST(request: Request) {
 
     const protocol = request.headers.get("x-forwarded-proto") || "http";
     const host = request.headers.get("host") || "localhost:3000";
-    const baseUrl = `${protocol}://${host}`;
-
-    const url = await createCheckoutSession(planId, baseUrl);
-
-    if (!url) {
+    const session = await createCheckoutSession(planId, `${protocol}://${host}`);
+    if (!session) {
       return NextResponse.json({ error: "Échec de la création de la session" }, { status: 500 });
     }
 
-    return NextResponse.json({ url });
+    const response = NextResponse.json({ url: session.url });
+    response.cookies.set(CHECKOUT_CLAIM_COOKIE, createCheckoutClaim(session.id), {
+      httpOnly: true,
+      maxAge: 24 * 60 * 60,
+      path: "/",
+      sameSite: "lax",
+      secure: process.env.NODE_ENV === "production"
+    });
+    return response;
   } catch (error) {
     const message = error instanceof Error ? error.message : "Erreur technique";
     console.error("Erreur API Checkout:", error);

@@ -79,7 +79,7 @@ async function getWorkflowOutputs(key: AccessKey, analysis: MockAnalysis) {
   const { POST: lettersPost } = await import("../app/api/courriers/route");
   const lettersResponse = await lettersPost(new Request("http://local.test/api/courriers", {
     method: "POST",
-    body: JSON.stringify({ analysis })
+    body: JSON.stringify({ code: key.code })
   }));
   assert.equal(lettersResponse.status, 200);
   const { letters } = (await lettersResponse.json()) as { letters: GeneratedLetter[] };

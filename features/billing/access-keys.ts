@@ -107,6 +107,15 @@ export function getAccessDurationDays(plan: AccessKeyPlan) {
   return 7;
 }
 
+export function hasValidAccessExpiration(
+  key?: { expiresAt?: string | null } | null,
+  now = Date.now()
+) {
+  if (!key?.expiresAt) return false;
+  const expiresAt = Date.parse(key.expiresAt);
+  return Number.isFinite(expiresAt) && expiresAt > now;
+}
+
 export function isDiscoveryPlan(plan?: AccessKeyPlan | null) {
   return plan === "decouverte";
 }
@@ -283,7 +292,7 @@ export function validateAccessKey(code: string, keys = getDefaultValidationKeys(
     return null;
   }
 
-  if (key.expiresAt && new Date(key.expiresAt).getTime() < Date.now()) {
+  if (!hasValidAccessExpiration(key)) {
     return null;
   }
 
@@ -296,10 +305,10 @@ export function generateAccessKey(plan: AccessKeyPlan): AccessKey {
   ).toISOString();
 
   return {
-    id: `key_${plan}_${Date.now()}`,
-    code: `FUTEO-${plan.toUpperCase()}-${Math.random()
-      .toString(36)
-      .slice(2, 8)
+    id: `key_${crypto.randomUUID()}`,
+    code: `FUTEO-${plan.toUpperCase()}-${crypto.randomUUID()
+      .replaceAll("-", "")
+      .slice(0, 12)
       .toUpperCase()}`,
     plan,
     usesRemaining: 1,

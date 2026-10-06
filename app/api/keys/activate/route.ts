@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import {
   createAdminAccessKey,
+  hasValidAccessExpiration,
   isAdminAccessCode,
   isBlockedProductionAdminCode
 } from "@/features/billing/access-keys";
@@ -36,7 +37,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Clé invalide" }, { status: 404 });
     }
 
-    if (!key.isActive || !key.expiresAt || !Number.isFinite(Date.parse(key.expiresAt)) || Date.parse(key.expiresAt) <= Date.now()) {
+    if (!key.isActive || !hasValidAccessExpiration(key)) {
       return NextResponse.json(
         { error: "Cle inactive ou expiree" },
         { status: 403 }
