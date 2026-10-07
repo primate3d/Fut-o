@@ -94,8 +94,10 @@ async function deleteStoredAnalysisServer() {
   const activeKey = getStoredAccessKey();
   if (!activeKey) return;
 
-  await fetch(`/api/analyse?code=${encodeURIComponent(activeKey.code)}`, {
-    method: "DELETE"
+  await fetch("/api/analyse", {
+    method: "DELETE",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ code: activeKey.code })
   });
 }
 
@@ -382,7 +384,6 @@ export function ImportDocumentsPanel() {
 
     try {
       console.info("[FUTEO_ANALYSIS_POST]", {
-        code: activeKey?.code,
         documentCount: usableDocumentsWithCorrections.length,
         force: true
       });
@@ -422,16 +423,13 @@ export function ImportDocumentsPanel() {
           payload.error ||
           `Service d'analyse serveur indisponible (${response.status}).`;
         console.warn("[FUTEO_ANALYSIS_POST_ERROR]", {
-          code: activeKey?.code,
           documentCount: usableDocumentsWithCorrections.length,
-          message,
           status: response.status
         });
         throw new Error(message);
       }
 
       console.info("[FUTEO_ANALYSIS_POST_OK]", {
-        code: activeKey?.code,
         documentCount: usableDocumentsWithCorrections.length,
         expensesCount: payload.analysis.expenses.length,
         status: response.status
@@ -439,14 +437,14 @@ export function ImportDocumentsPanel() {
       window.localStorage.removeItem(SELECTED_ALTERNATIVE_OFFER_STORAGE_KEY);
       storeMockAnalysis(payload.analysis);
       router.push("/analyse");
-    } catch (error) {
+    } catch {
       clearStoredAnalysis();
       setStatusMessage(
         usableDocuments.some(isLikelyMultiContractInsuranceDocument)
           ? "Analyse serveur nécessaire pour ce document multi-contrats."
           : "L'analyse complète n'a pas abouti. Aucun courrier incomplet n'a été généré. Relancez l'analyse."
       );
-      console.warn("[FUTEO_ANALYSIS_BLOCKED]", error);
+      console.warn("[FUTEO_ANALYSIS_BLOCKED]");
     } finally {
       setIsAnalyzing(false);
     }

@@ -15,14 +15,14 @@ import { RequestError } from "@/lib/server/request-error";
 import { readLimitedBody, validateUpload } from "@/lib/server/document-validation";
 import { MAX_UPLOAD_SIZE_BYTES } from "@/features/upload/document-types";
 import type { UploadedDocument } from "@/types";
+import { readAccessKeyHeader } from "@/lib/access-key-transport";
 
 type StoredUploadedDocument = UploadedDocument & {
   physicalFileName?: string;
 };
 
 export async function GET(request: Request) {
-  const { searchParams } = new URL(request.url);
-  const code = searchParams.get("code");
+  const code = readAccessKeyHeader(request);
 
   if (!code) {
     return NextResponse.json({ error: "Code clé manquant" }, { status: 400 });
@@ -130,7 +130,7 @@ export async function POST(request: Request) {
     if (createdFile && !committed) await storage.delete(createdFile).catch(() => console.error("Nettoyage upload a reprendre"));
     if (error instanceof RequestError) return NextResponse.json({ error: error.message }, { status: error.status });
     if (error instanceof SyntaxError || error instanceof TypeError) return NextResponse.json({ error: "Requete upload invalide" }, { status: 400 });
-    console.error("Erreur upload API:", error);
+    console.error("Erreur upload API");
     return NextResponse.json({ error: "Erreur lors de l'upload du fichier" }, { status: 500 });
   }
 }
@@ -196,7 +196,7 @@ export async function DELETE(request: Request) {
     });
   } catch (error) {
     if (error instanceof RequestError) return NextResponse.json({ error: error.message }, { status: error.status });
-    console.error("Erreur DELETE document:", error);
+    console.error("Erreur DELETE document");
     return NextResponse.json({ error: "Erreur suppression" }, { status: 500 });
   }
 }

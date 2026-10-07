@@ -1,4 +1,5 @@
 import { getStoredAccessKey } from "@/features/billing/access-keys";
+import { createAccessKeyHeaders } from "@/lib/access-key-transport";
 import type { DocumentUserCorrections, UploadedDocument } from "@/types";
 
 export const UPLOADED_DOCUMENTS_STORAGE_KEY = "futeo.uploadedDocuments";
@@ -34,7 +35,8 @@ export async function getStoredUploadedDocumentsServer(): Promise<UploadedDocume
   const timeoutId = window.setTimeout(() => controller.abort(), 2500);
 
   try {
-    const response = await fetch(`/api/documents?code=${activeKey.code}`, {
+    const response = await fetch("/api/documents", {
+      headers: createAccessKeyHeaders(activeKey.code),
       signal: controller.signal
     });
     if (!response.ok) return localDocuments;
@@ -77,8 +79,8 @@ export async function storeUploadedDocumentServer(
 
     const data = (await response.json()) as { document?: UploadedDocument };
     return data.document ?? null;
-  } catch (error) {
-    console.error("Synchronisation serveur du document indisponible:", error);
+  } catch {
+    console.error("Synchronisation serveur du document indisponible");
     return null;
   }
 }
@@ -156,7 +158,7 @@ export async function deleteDocumentServer(documentId: string) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ code: activeKey.code, documentId })
     });
-  } catch (error) {
-    console.error("Suppression serveur du document indisponible:", error);
+  } catch {
+    console.error("Suppression serveur du document indisponible");
   }
 }

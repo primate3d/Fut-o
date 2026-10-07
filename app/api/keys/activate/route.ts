@@ -9,6 +9,7 @@ import { mockAccessKeys } from "@/data/mock";
 import { allowDevOnlyMocks } from "@/lib/env";
 import { findKeyByCode, activateStoredKey } from "@/lib/server/db";
 import { RequestError } from "@/lib/server/request-error";
+import { accessKeyActivationRateLimiter, getRequestIp } from "@/lib/server/ratelimit";
 
 export async function POST(request: Request) {
   try {
@@ -17,6 +18,13 @@ export async function POST(request: Request) {
 
     if (!code) {
       return NextResponse.json({ error: "Code manquant" }, { status: 400 });
+    }
+
+    if (!accessKeyActivationRateLimiter.check(getRequestIp(request))) {
+      return NextResponse.json(
+        { error: "Trop de tentatives, veuillez patienter." },
+        { status: 429, headers: { "Retry-After": "60" } }
+      );
     }
 
     if (isBlockedProductionAdminCode(code)) {
@@ -49,7 +57,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ key: activatedKey });
   } catch (error) {
     if (error instanceof RequestError) return NextResponse.json({ error: error.message }, { status: error.status });
-    console.error("Erreur activation clé:", error);
+    console.error("Erreur activation clé");
     return NextResponse.json({ error: "Erreur serveur" }, { status: 500 });
   }
 }

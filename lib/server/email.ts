@@ -83,7 +83,6 @@ export async function sendAccessKeyEmail(
   console.info("Configuration Brevo détectée:", {
     hasApiKey,
     hasFromEmail,
-    fromEmail,
     fromName,
     nodeEnv: process.env.NODE_ENV
   });
@@ -92,7 +91,7 @@ export async function sendAccessKeyEmail(
     const error = "Configuration Brevo manquante : BREVO_API_KEY et BREVO_FROM_EMAIL sont requis.";
     if (process.env.NODE_ENV !== "production") {
       console.warn(error);
-      console.log(`[MAIL LOCAL] Vers: ${to}, Cle: ${maskKeyForLog(keyCode)}, Plan: ${planName}`);
+      console.log(`[MAIL LOCAL] Destinataire configure, Cle: ${maskKeyForLog(keyCode)}, Plan: ${planName}`);
       return { success: true, simulated: true };
     }
 
@@ -100,7 +99,6 @@ export async function sendAccessKeyEmail(
       error,
       hasApiKey,
       hasFromEmail,
-      fromEmail,
       planName
     });
     return { success: false, error };
@@ -108,7 +106,7 @@ export async function sendAccessKeyEmail(
 
   if (!isValidEmail(fromEmail)) {
     const error = "Configuration Brevo invalide : BREVO_FROM_EMAIL doit être une adresse email valide.";
-    console.error("Echec configuration Brevo:", { error, fromEmail, planName });
+    console.error("Echec configuration Brevo:", { error, planName });
     return { success: false, error };
   }
 
@@ -138,9 +136,6 @@ export async function sendAccessKeyEmail(
       console.error("Echec envoi Brevo:", {
         status: response.status,
         statusText: response.statusText,
-        response: responseBody,
-        fromEmail,
-        to,
         planName
       });
       return { success: false, error: responseBody ?? response.statusText };
@@ -148,7 +143,7 @@ export async function sendAccessKeyEmail(
 
     return { success: true, data: responseBody };
   } catch (error) {
-    console.error("Erreur appel Brevo:", { error, fromEmail, to, planName });
+    console.error("Erreur appel Brevo:", { planName });
     return { success: false, error };
   }
 }

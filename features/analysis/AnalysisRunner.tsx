@@ -141,9 +141,12 @@ export function AnalysisRunner() {
             });
           } catch (error) {
             if (error instanceof AnalysisServerError) {
-              console.warn("[FUTEO_ANALYSIS_BLOCKED]", error.details);
+              console.warn("[FUTEO_ANALYSIS_BLOCKED]", {
+                documentCount: error.details.documentCount,
+                status: error.details.status
+              });
             } else {
-              console.warn("[FUTEO_ANALYSIS_BLOCKED]", error);
+              console.warn("[FUTEO_ANALYSIS_BLOCKED]");
             }
           }
 

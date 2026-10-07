@@ -1,4 +1,4 @@
-import { randomBytes, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import type Stripe from "stripe";
 import {
   getAccessDurationDays,
@@ -15,6 +15,7 @@ import {
 } from "./db";
 import { withWaitingKeyLock } from "./key-lock";
 import { RequestError } from "./request-error";
+import { generateServerAccessKeyCode } from "./access-key-generator";
 
 export type PaidAccessEmailSender = (
   email: string,
@@ -28,11 +29,6 @@ function normalizePaidPlan(planId?: string | null): AccessKey["plan"] {
   throw new RequestError("Plan de commande invalide", 409);
 }
 
-function generatePaidKeyCode() {
-  const token = randomBytes(12).toString("hex").toUpperCase();
-  return `FF-${token.slice(0, 8)}-${token.slice(8, 16)}-${token.slice(16)}`;
-}
-
 async function createUniquePaidKey(plan: AccessKeyPlan, executor: Parameters<typeof insertKeyIfAbsent>[1]) {
   const normalizedPlan = normalizeAccessKeyPlan(plan);
   const now = new Date();
@@ -40,7 +36,7 @@ async function createUniquePaidKey(plan: AccessKeyPlan, executor: Parameters<typ
   for (let attempt = 0; attempt < 3; attempt += 1) {
     const key: AccessKey = {
       id: randomUUID(),
-      code: generatePaidKeyCode(),
+      code: generateServerAccessKeyCode("paid"),
       plan: normalizedPlan,
       usesRemaining: normalizedPlan === "famille" ? 50 : 10,
       expiresAt: new Date(

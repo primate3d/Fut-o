@@ -20,6 +20,7 @@ import { logger, withLatency } from "@/lib/server/logger";
 import { extractTextFromDocument } from "@/lib/server/ocr";
 import { storage } from "@/lib/server/storage";
 import type { AccessKey, MockAnalysis, UploadedDocument } from "@/types";
+import { readAccessKeyHeader } from "@/lib/access-key-transport";
 
 type StoredUploadedDocument = UploadedDocument & {
   physicalFileName?: string;
@@ -411,8 +412,7 @@ export async function POST(request: Request) {
  * Récupère l'analyse existante sans la recalculer
  */
 export async function GET(request: Request) {
-  const { searchParams } = new URL(request.url);
-  const code = searchParams.get("code");
+  const code = readAccessKeyHeader(request);
 
   if (!code) {
     return NextResponse.json({ error: "Code manquant" }, { status: 400 });
@@ -446,8 +446,13 @@ export async function GET(request: Request) {
  * Supprime l'analyse en base pour forcer une nouvelle extraction au prochain appel
  */
 export async function DELETE(request: Request) {
-  const { searchParams } = new URL(request.url);
-  const code = searchParams.get("code");
+  let code = "";
+  try {
+    const body = (await request.json()) as { code?: string };
+    code = typeof body.code === "string" ? body.code.trim().toUpperCase() : "";
+  } catch {
+    return NextResponse.json({ error: "Requete invalide" }, { status: 400 });
+  }
 
   if (!code) {
     return NextResponse.json({ error: "Code manquant" }, { status: 400 });

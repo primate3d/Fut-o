@@ -8,13 +8,21 @@ import {
   requiresHouseholdProfile
 } from "@/features/billing/access-keys";
 import { findFreeTrialByKeyCode, findKeyByCode, getOrderByGeneratedKey } from "@/lib/server/db";
+import { readAccessKeyHeader } from "@/lib/access-key-transport";
+import { accessKeyStatusRateLimiter, getRequestIp } from "@/lib/server/ratelimit";
 
 export async function GET(request: Request) {
-  const { searchParams } = new URL(request.url);
-  const code = searchParams.get("code");
+  const code = readAccessKeyHeader(request);
 
   if (!code) {
     return NextResponse.json({ error: "Code manquant" }, { status: 400 });
+  }
+
+  if (!accessKeyStatusRateLimiter.check(getRequestIp(request))) {
+    return NextResponse.json(
+      { error: "Trop de tentatives, veuillez patienter." },
+      { status: 429, headers: { "Retry-After": "60" } }
+    );
   }
 
   if (isBlockedProductionAdminCode(code)) {

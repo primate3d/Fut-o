@@ -1,4 +1,5 @@
 import { getStoredAccessKey } from "@/features/billing/access-keys";
+import { createAccessKeyHeaders } from "@/lib/access-key-transport";
 import { applyDocumentCorrections } from "@/features/upload/storage";
 import { ExpenseSubcategory, type Expense, type MockAnalysis, type UploadedDocument } from "@/types";
 
@@ -12,7 +13,6 @@ export type ReportPortfolioEntry = {
 };
 
 export type AnalysisServerErrorDetails = {
-  code?: string;
   documentCount: number;
   message: string;
   status: number;
@@ -36,7 +36,8 @@ export async function getStoredAnalysisServer(): Promise<MockAnalysis | null> {
   const timeoutId = window.setTimeout(() => controller.abort(), 2500);
 
   try {
-    const response = await fetch(`/api/analyse?code=${activeKey.code}`, {
+    const response = await fetch("/api/analyse", {
+      headers: createAccessKeyHeaders(activeKey.code),
       signal: controller.signal
     });
     if (!response.ok) return null;
@@ -270,7 +271,6 @@ export async function refreshStoredAnalysisServer(
   const documentsWithCorrections = applyDocumentCorrections(documents);
 
   console.info("[FUTEO_ANALYSIS_POST]", {
-    code: activeKey.code,
     documentCount: documentsWithCorrections.length,
     force: options?.force ?? false
   });
@@ -292,12 +292,14 @@ export async function refreshStoredAnalysisServer(
     const message =
       error instanceof Error ? error.message : "Erreur reseau pendant POST /api/analyse";
     const details = {
-      code: activeKey.code,
       documentCount: documentsWithCorrections.length,
       message,
       status: 0
     };
-    console.warn("[FUTEO_ANALYSIS_POST_ERROR]", details);
+    console.warn("[FUTEO_ANALYSIS_POST_ERROR]", {
+      documentCount: details.documentCount,
+      status: details.status
+    });
     if (options?.throwOnError) {
       throw new AnalysisServerError(details);
     }
@@ -313,12 +315,14 @@ export async function refreshStoredAnalysisServer(
       // Keep the HTTP status message when the body is not JSON.
     }
     const details = {
-      code: activeKey.code,
       documentCount: documentsWithCorrections.length,
       message,
       status: response.status
     };
-    console.warn("[FUTEO_ANALYSIS_POST_ERROR]", details);
+    console.warn("[FUTEO_ANALYSIS_POST_ERROR]", {
+      documentCount: details.documentCount,
+      status: details.status
+    });
     if (options?.throwOnError) {
       throw new AnalysisServerError(details);
     }
@@ -327,7 +331,6 @@ export async function refreshStoredAnalysisServer(
 
   const { analysis } = (await response.json()) as { analysis?: MockAnalysis };
   console.info("[FUTEO_ANALYSIS_POST_OK]", {
-    code: activeKey.code,
     documentCount: documentsWithCorrections.length,
     expensesCount: analysis?.expenses.length ?? 0,
     status: response.status
@@ -340,8 +343,10 @@ export async function deleteStoredAnalysisServer(): Promise<boolean> {
   if (!activeKey) return false;
 
   try {
-    const response = await fetch(`/api/analyse?code=${activeKey.code}`, {
-      method: "DELETE"
+    const response = await fetch("/api/analyse", {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ code: activeKey.code })
     });
     return response.ok;
   } catch {

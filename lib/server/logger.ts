@@ -13,7 +13,7 @@ interface LogContext {
 }
 
 const SENSITIVE_FIELD_PATTERN =
-  /first500|extractedText|address|fullName|firstName|lastName|customerNumber|contractNumber|invoiceNumber|phone|email|keyCode|physicalFileName|fullPath|fileName|amount|price|saving|error/i;
+  /first500|extractedText|address|fullName|firstName|lastName|^name$|customerNumber|contractNumber|invoiceNumber|phone|email|keyCode|physicalFileName|fullPath|fileName|amount|price|saving|error/i;
 
 function maskString(value: string) {
   return value
@@ -42,9 +42,7 @@ function sanitizeLogValue(value: unknown, fieldName?: string): unknown {
 
 export function log(level: LogLevel, message: string, context: LogContext) {
   const production = process.env.NODE_ENV === "production";
-  const safeContext = production
-    ? (sanitizeLogValue(context) as LogContext)
-    : context;
+  const safeContext = sanitizeLogValue(context) as LogContext;
   const logEntry = {
     timestamp: new Date().toISOString(),
     level,
@@ -62,7 +60,7 @@ export function log(level: LogLevel, message: string, context: LogContext) {
     level === "ERROR" ? "\x1b[31m" : level === "WARN" ? "\x1b[33m" : "\x1b[32m";
   console.log(
     `${color}[${level}]\x1b[0m ${logEntry.timestamp} | ${context.service}:${context.action} | ${message}`,
-    context.metadata ?? ""
+    safeContext.metadata ?? ""
   );
 }
 

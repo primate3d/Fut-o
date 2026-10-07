@@ -1,3 +1,5 @@
+import { createAccessKeyHeaders } from "../lib/access-key-transport";
+
 async function runSmokeTests() {
   const baseUrl = "http://localhost:3000";
   console.log("Démarrage des smoke tests Futéo...");
@@ -60,7 +62,9 @@ async function runSmokeTests() {
 
     console.log("--- 4. API Analyse ---");
     try {
-      const analyse = await fetch(`${baseUrl}/api/analyse?code=TEST-KEY`);
+      const analyse = await fetch(`${baseUrl}/api/analyse`, {
+        headers: createAccessKeyHeaders("TEST-KEY")
+      });
       if (analyse.status === 404 || analyse.status === 200) {
         console.log("API Analyse accessible");
         results.analysisApi = true;

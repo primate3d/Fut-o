@@ -48,8 +48,8 @@ export async function purgeSourceDocuments() {
         body: JSON.stringify({ code: activeKey.code, purge: true })
       });
       serverPurged = response.ok;
-    } catch (error) {
-      console.error("Erreur purge serveur:", error);
+    } catch {
+      console.error("Erreur purge serveur");
       serverPurged = false;
     }
   }
@@ -72,8 +72,10 @@ export async function purgeFullAudit() {
   if (activeKey) {
     try {
       // 1. Suppression de l'analyse en DB
-      await fetch(`/api/analyse?code=${encodeURIComponent(activeKey.code)}`, {
-        method: "DELETE"
+      await fetch("/api/analyse", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ code: activeKey.code })
       });
 
       // 2. Suppression des documents en DB et des fichiers physiques
@@ -82,8 +84,8 @@ export async function purgeFullAudit() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ code: activeKey.code, purge: true, clearRecords: true })
       });
-    } catch (error) {
-      console.error("Erreur suppression complète serveur:", error);
+    } catch {
+      console.error("Erreur suppression complète serveur");
     }
   }
 

@@ -1,10 +1,11 @@
-import { randomBytes, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import { and, eq, sql } from "drizzle-orm";
 import { getAccessDurationDays, hasValidAccessExpiration } from "@/features/billing/access-keys";
 import { db } from "./db/index";
 import { accessKeys, freeTrials } from "./db/schema";
 import { withKeyLock } from "./key-lock";
 import { RequestError } from "./request-error";
+import { generateServerAccessKeyCode } from "./access-key-generator";
 
 type SendEmail = (email: string, code: string, label: string) => Promise<{ success: boolean }>;
 
@@ -13,7 +14,7 @@ export async function requestFreeAccess(email: string, send: SendEmail, scope = 
   const normalizedEmail = email.trim().toLowerCase();
   const allocation = await db.transaction(async (tx) => {
     const now = new Date().toISOString();
-    const keyCode = `FUTEO-DECOUVERTE-${randomBytes(16).toString("hex").toUpperCase()}`;
+    const keyCode = generateServerAccessKeyCode("discovery");
     const inserted = await tx.insert(freeTrials).values({
       id: randomUUID(), email: normalizedEmail, scope, keyCode, usedAt: now, createdAt: now
     }).onConflictDoNothing().returning();

@@ -39,7 +39,7 @@ export async function POST(request: Request) {
     if (error instanceof RequestError) {
       return NextResponse.json({ error: error.message }, { status: error.status });
     }
-    console.error("Erreur accès gratuit:", error);
+    console.error("Erreur accès gratuit");
     return NextResponse.json(
       { error: "Impossible d'envoyer la clé gratuite pour le moment." },
       { status: 500 }

@@ -1,5 +1,6 @@
 import { mockAccessKeys } from "@/data/mock";
 import type { AccessKey, UploadedDocument } from "@/types";
+import { createAccessKeyHeaders } from "@/lib/access-key-transport";
 
 export const ACCESS_KEY_STORAGE_KEY = "futeo.activeAccessKey";
 export const PURCHASED_ACCESS_KEYS_STORAGE_KEY = "futeo.purchasedAccessKeys";
@@ -242,7 +243,9 @@ export type AccessKeyStatusLookup =
 
 export async function lookupAccessKeyStatusServer(code: string): Promise<AccessKeyStatusLookup> {
   try {
-    const response = await fetch(`/api/keys/status?code=${encodeURIComponent(code)}`);
+    const response = await fetch("/api/keys/status", {
+      headers: createAccessKeyHeaders(code)
+    });
 
     if (response.status === 403 || response.status === 404) {
       return { state: "invalid" };
@@ -261,7 +264,9 @@ export async function lookupAccessKeyStatusServer(code: string): Promise<AccessK
 
 export async function getAccessKeyStatusServer(code: string): Promise<AccessKeyStatus | null> {
   try {
-    const response = await fetch(`/api/keys/status?code=${code}`);
+    const response = await fetch("/api/keys/status", {
+      headers: createAccessKeyHeaders(code)
+    });
     if (!response.ok) return null;
     return (await response.json()) as AccessKeyStatus;
   } catch {
@@ -271,7 +276,9 @@ export async function getAccessKeyStatusServer(code: string): Promise<AccessKeyS
 
 export async function validateAccessKeyServer(code: string): Promise<AccessKey | null> {
   try {
-    const response = await fetch(`/api/keys/status?code=${code}`);
+    const response = await fetch("/api/keys/status", {
+      headers: createAccessKeyHeaders(code)
+    });
     if (!response.ok) return null;
     const { key } = (await response.json()) as { key: AccessKey | null };
     return key;
@@ -297,34 +304,6 @@ export function validateAccessKey(code: string, keys = getDefaultValidationKeys(
   }
 
   return key;
-}
-
-export function generateAccessKey(plan: AccessKeyPlan): AccessKey {
-  const expiresAt = new Date(
-    Date.now() + getAccessDurationDays(plan) * 24 * 60 * 60 * 1000
-  ).toISOString();
-
-  return {
-    id: `key_${crypto.randomUUID()}`,
-    code: `FUTEO-${plan.toUpperCase()}-${crypto.randomUUID()
-      .replaceAll("-", "")
-      .slice(0, 12)
-      .toUpperCase()}`,
-    plan,
-    usesRemaining: 1,
-    expiresAt,
-    isActive: true,
-    createdAt: new Date().toISOString(),
-    hasUsedFreeTrial: false
-  };
-}
-
-export function generateMockAccessKey(plan: AccessKeyPlan): AccessKey {
-  if (process.env.NODE_ENV === "production") {
-    throw new Error("generateMockAccessKey est réservé au développement local");
-  }
-
-  return generateAccessKey(plan);
 }
 
 export function getStoredAccessKey(): AccessKey | null {
@@ -353,10 +332,7 @@ export async function storeAccessKey(accessKey: AccessKey) {
     window.localStorage.removeItem("futeo.mockAnalysis");
     window.localStorage.removeItem("futeo.uploadedDocumentsOwner");
     if (process.env.NODE_ENV !== "production") {
-      console.debug("[Futéo flow] Clé changée: audit local réinitialisé", {
-        previousKey: previousKey?.code,
-        nextKey: accessKey.code
-      });
+      console.debug("[Futéo flow] Clé changée: audit local réinitialisé");
     }
   }
 

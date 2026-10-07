@@ -146,7 +146,11 @@ test("one allocation and one email for two concurrent normalized email requests"
   assert.equal(sends, 1);
   const rows = await sql`select * from free_trials where email = 'simultaneous@example.invalid'`;
   assert.equal(rows.length, 1);
-  assert.equal((await sql`select * from access_keys where code = ${rows[0].key_code}`).length, 1);
+  const keys = await sql`select * from access_keys where code = ${rows[0].key_code}`;
+  assert.equal(keys.length, 1);
+  assert.match(keys[0].code, /^FUTEO-DECOUVERTE-[A-F0-9]{32}$/);
+  assert.equal(keys[0].uses_remaining, 1);
+  assert.ok(Math.abs(Date.parse(keys[0].expires_at) - Date.parse(keys[0].created_at) - 7 * 86400000) < 1000);
 });
 
 test("failed delivery retries the same key and expiration; scopes remain independent", async () => {
@@ -586,6 +590,8 @@ test("paid checkout creates one cryptographic key and replay keeps delivery idem
   assert.equal(first.key.code, replay.key.code);
   assert.equal(first.key.expiresAt, replay.key.expiresAt);
   assert.match(first.key.code, /^FF-[A-F0-9]{8}-[A-F0-9]{8}-[A-F0-9]{8}$/);
+  assert.equal(first.key.usesRemaining, 10);
+  assert.equal(Date.parse(first.key.expiresAt) - Date.parse(first.key.createdAt), 7 * 86400000);
   assert.equal(sends, 1);
   assert.equal((await repo.getOrderBySessionId(session.id))!.emailSent, true);
 });
@@ -611,6 +617,8 @@ test("two concurrent paid webhooks create and deliver exactly one key", async ()
     fulfillPaidCheckout(session, sender)
   ]);
   assert.equal(first.key.code, second.key.code);
+  assert.equal(first.key.usesRemaining, 50);
+  assert.equal(Date.parse(first.key.expiresAt) - Date.parse(first.key.createdAt), 14 * 86400000);
   assert.equal(sends, 1);
   assert.equal((await sql`select count(*)::int as count from access_keys where code=${first.key.code}`)[0].count, 1);
 });
@@ -704,9 +712,133 @@ test("missing and invalid expirations are rejected fail-closed", async () => {
   for (const expiresAt of ["", "not-a-date"]) {
     const key = { ...fakeKey(), expiresAt };
     await repo.saveKey(key);
-    const response = await GET(new Request(`http://local.test/api/keys/status?code=${key.code}`));
+    const response = await GET(new Request("http://local.test/api/keys/status", {
+      headers: { "x-futeo-access-key": key.code }
+    }));
     assert.equal(response.status, 403);
   }
+});
+
+test("server key generator preserves discovery and paid formats", async () => {
+  const { generateServerAccessKeyCode } = await import("../lib/server/access-key-generator");
+  assert.match(generateServerAccessKeyCode("discovery"), /^FUTEO-DECOUVERTE-[A-F0-9]{32}$/);
+  assert.match(generateServerAccessKeyCode("paid"), /^FF-[A-F0-9]{8}-[A-F0-9]{8}-[A-F0-9]{8}$/);
+});
+
+test("structured logger masks access keys and personal document metadata", async () => {
+  const { logger } = await import("../lib/server/logger");
+  const previousNodeEnv = process.env.NODE_ENV;
+  const originalConsoleLog = console.log;
+  let output = "";
+  console.log = (...values: unknown[]) => {
+    output += values.map(String).join(" ");
+  };
+  Reflect.set(process.env, "NODE_ENV", "production");
+
+  try {
+    logger.info("Journal securise", {
+      service: "SecurityTest",
+      action: "mask",
+      keyCode: "FUTEO-DECOUVERTE-0123456789ABCDEF0123456789ABCDEF",
+      metadata: {
+        email: "person@example.invalid",
+        name: "facture-personnelle.pdf",
+        extractedText: "contenu confidentiel"
+      }
+    });
+  } finally {
+    console.log = originalConsoleLog;
+    if (previousNodeEnv === undefined) {
+      Reflect.deleteProperty(process.env, "NODE_ENV");
+    } else {
+      Reflect.set(process.env, "NODE_ENV", previousNodeEnv);
+    }
+  }
+
+  assert.doesNotMatch(output, /FUTEO-DECOUVERTE-0123456789ABCDEF0123456789ABCDEF/);
+  assert.doesNotMatch(output, /person@example\.invalid|facture-personnelle\.pdf|contenu confidentiel/);
+  assert.match(output, /\[MASQUE\]/);
+});
+
+test("status uses a header and existing key formats remain compatible", async () => {
+  const { GET } = await import("../app/api/keys/status/route");
+  const { POST } = await import("../app/api/keys/activate/route");
+  const code = "FUTEO-LEGACY-COMPATIBLE-001";
+  const key = { ...fakeKey(code), plan: "foyer" as const, usesRemaining: 7 };
+  await repo.saveKey(key);
+
+  const legacyQuery = await GET(new Request(`http://local.test/api/keys/status?code=${code}`));
+  assert.equal(legacyQuery.status, 400);
+
+  const status = await GET(new Request("http://local.test/api/keys/status", {
+    headers: { "x-futeo-access-key": code, "x-forwarded-for": "198.51.100.10" }
+  }));
+  assert.equal(status.status, 200);
+  const payload = await status.json() as { key: { code: string; plan: string }; usesRemaining: number };
+  assert.equal(payload.key.code, code);
+  assert.equal(payload.key.plan, "foyer");
+  assert.equal(payload.usesRemaining, 7);
+
+  const activation = await POST(new Request("http://local.test/api/keys/activate", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "x-forwarded-for": "198.51.100.11" },
+    body: JSON.stringify({ code })
+  }));
+  assert.equal(activation.status, 200);
+  assert.equal((await activation.json() as { key: { code: string } }).key.code, code);
+});
+
+test("application sources do not generate access-key query strings", async () => {
+  for (const file of [
+    "features/billing/access-keys.ts",
+    "features/analysis/storage.ts",
+    "features/upload/storage.ts",
+    "features/privacy/lifecycle.ts",
+    "features/upload/ImportDocumentsPanel.tsx",
+    "scripts/smoke-test-api.ts"
+  ]) {
+    const source = await fs.readFile(file, "utf8");
+    assert.doesNotMatch(source, /\/api\/(?:keys\/status|documents|analyse)\?code=/, file);
+  }
+});
+
+test("activation and status endpoints are rate limited per IP", async () => {
+  const { POST } = await import("../app/api/keys/activate/route");
+  const { GET } = await import("../app/api/keys/status/route");
+
+  for (let attempt = 0; attempt < 10; attempt += 1) {
+    const response = await POST(new Request("http://local.test/api/keys/activate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-forwarded-for": "198.51.100.20" },
+      body: JSON.stringify({ code: `MISSING-ACTIVATION-${attempt}` })
+    }));
+    assert.equal(response.status, 404);
+  }
+  const blockedActivation = await POST(new Request("http://local.test/api/keys/activate", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "x-forwarded-for": "198.51.100.20" },
+    body: JSON.stringify({ code: "MISSING-ACTIVATION-BLOCKED" })
+  }));
+  assert.equal(blockedActivation.status, 429);
+  assert.equal(blockedActivation.headers.get("retry-after"), "60");
+
+  for (let attempt = 0; attempt < 60; attempt += 1) {
+    const response = await GET(new Request("http://local.test/api/keys/status", {
+      headers: {
+        "x-futeo-access-key": `MISSING-STATUS-${attempt}`,
+        "x-forwarded-for": "198.51.100.21"
+      }
+    }));
+    assert.equal(response.status, 404);
+  }
+  const blockedStatus = await GET(new Request("http://local.test/api/keys/status", {
+    headers: {
+      "x-futeo-access-key": "MISSING-STATUS-BLOCKED",
+      "x-forwarded-for": "198.51.100.21"
+    }
+  }));
+  assert.equal(blockedStatus.status, 429);
+  assert.equal(blockedStatus.headers.get("retry-after"), "60");
 });
 
 test("redirect sanitizer refuses external and executable destinations", async () => {
