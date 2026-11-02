@@ -126,6 +126,7 @@ export function parseBouyguesOffers(
       unlimitedData: data.unlimitedData,
       euDataGB: parseRoaming(field(segment, "roamingEnvelope")),
       network: networkText || "Réseau Bouygues Telecom",
+      technology: /5G/i.test(`${offerName} ${networkText ?? ""}`) ? "5G" : "4G",
       commitmentMonths:
         obligation && /sans engagement/i.test(obligation)
           ? 0
@@ -137,7 +138,23 @@ export function parseBouyguesOffers(
       priceAfterPromotion: promotion.after,
       activationFees,
       simFees,
+      conditionalPrices:
+        boxRestricted && promotion.price !== null
+          ? [
+              {
+                kind: "BOX",
+                monthlyPrice: promotion.price,
+                durationMonths: promotion.duration,
+                priceAfter: promotion.after,
+                condition: "Souscription simultanée d'une offre Box/Fibre.",
+              },
+            ]
+          : [],
+      pricingTiers: [],
       conditions,
+      evidence: [
+        `${offerName}; ${field(segment, "dataEnvelope") ?? "data inconnue"}; ${promoText ?? "sans promotion explicite"}`,
+      ],
       sourceUrl: BOUYGUES_SOURCE_URL,
       retrievedAt,
       verifiedAt: null,

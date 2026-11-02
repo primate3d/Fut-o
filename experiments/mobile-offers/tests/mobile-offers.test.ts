@@ -55,6 +55,12 @@ function snapshot(offers: MobileOffer[]): CollectionSnapshot {
       "Free Mobile": { detected: 0, verified: 0, partial: 0, failed: 0 },
       "RED by SFR": { detected: 0, verified: 0, partial: 0, failed: 0 },
       "B&You": { detected: 0, verified: 0, partial: 0, failed: 0 },
+      Orange: { detected: 0, verified: 0, partial: 0, failed: 0 },
+      Sosh: { detected: 0, verified: 0, partial: 0, failed: 0 },
+      SFR: { detected: 0, verified: 0, partial: 0, failed: 0 },
+      Prixtel: { detected: 0, verified: 0, partial: 0, failed: 0 },
+      "NRJ Mobile": { detected: 0, verified: 0, partial: 0, failed: 0 },
+      "Cdiscount Mobile": { detected: 0, verified: 0, partial: 0, failed: 0 },
     },
   };
 }

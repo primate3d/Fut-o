@@ -1,11 +1,11 @@
 {
-  "schemaVersion": 1,
-  "retrievedAt": "2026-11-02T08:56:34.517Z",
+  "schemaVersion": 2,
+  "retrievedAt": "2026-11-02T09:20:34.306Z",
   "results": [
     {
       "provider": "Free Mobile",
       "sourceUrl": "https://mobile.free.fr/",
-      "retrievedAt": "2026-11-02T08:56:34.056Z",
+      "retrievedAt": "2026-11-02T09:20:33.281Z",
       "offers": [
         {
           "provider": "Free Mobile",
@@ -15,18 +15,24 @@
           "unlimitedData": false,
           "euDataGB": 35,
           "network": "Free Mobile 5G/4G",
+          "technology": "5G",
           "commitmentMonths": 0,
           "promotionPrice": null,
           "promotionDuration": null,
           "priceAfterPromotion": null,
           "activationFees": null,
           "simFees": null,
+          "conditionalPrices": [],
+          "pricingTiers": [],
           "conditions": [
             "Des remises distinctes sont réservées aux abonnés Freebox; le prix public affiché n'en tient pas compte."
           ],
+          "evidence": [
+            "Forfait Free 5G+: 19.99 €/mois, fair-use 350000 Mo"
+          ],
           "sourceUrl": "https://mobile.free.fr/",
-          "retrievedAt": "2026-11-02T08:56:34.056Z",
-          "verifiedAt": "2026-11-02T08:56:34.056Z",
+          "retrievedAt": "2026-11-02T09:20:33.281Z",
+          "verifiedAt": "2026-11-02T09:20:33.281Z",
           "verificationStatus": "VERIFIED"
         },
         {
@@ -37,18 +43,24 @@
           "unlimitedData": false,
           "euDataGB": 0.05,
           "network": "Free Mobile 4G",
+          "technology": "4G",
           "commitmentMonths": 0,
           "promotionPrice": null,
           "promotionDuration": null,
           "priceAfterPromotion": null,
           "activationFees": null,
           "simFees": null,
+          "conditionalPrices": [],
+          "pricingTiers": [],
           "conditions": [
             "Des remises distinctes sont réservées aux abonnés Freebox; le prix public affiché n'en tient pas compte."
           ],
+          "evidence": [
+            "Forfait 2€: 2 €/mois, fair-use 50 Mo"
+          ],
           "sourceUrl": "https://mobile.free.fr/",
-          "retrievedAt": "2026-11-02T08:56:34.056Z",
-          "verifiedAt": "2026-11-02T08:56:34.056Z",
+          "retrievedAt": "2026-11-02T09:20:33.281Z",
+          "verifiedAt": "2026-11-02T09:20:33.281Z",
           "verificationStatus": "VERIFIED"
         },
         {
@@ -59,18 +71,24 @@
           "unlimitedData": false,
           "euDataGB": 30,
           "network": "Free Mobile 5G/4G",
+          "technology": "5G",
           "commitmentMonths": 0,
           "promotionPrice": 12.99,
           "promotionDuration": 12,
           "priceAfterPromotion": 19.99,
           "activationFees": null,
           "simFees": null,
+          "conditionalPrices": [],
+          "pricingTiers": [],
           "conditions": [
             "Pendant 12 mois, puis bascule vers le Forfait Free 5G+."
           ],
+          "evidence": [
+            "Série Free: 12.99 €/mois, fair-use 110000 Mo"
+          ],
           "sourceUrl": "https://mobile.free.fr/",
-          "retrievedAt": "2026-11-02T08:56:34.056Z",
-          "verifiedAt": "2026-11-02T08:56:34.056Z",
+          "retrievedAt": "2026-11-02T09:20:33.281Z",
+          "verifiedAt": "2026-11-02T09:20:33.281Z",
           "verificationStatus": "VERIFIED"
         },
         {
@@ -81,18 +99,24 @@
           "unlimitedData": true,
           "euDataGB": null,
           "network": "Free Mobile 5G/4G",
+          "technology": "5G",
           "commitmentMonths": 0,
           "promotionPrice": null,
           "promotionDuration": null,
           "priceAfterPromotion": null,
           "activationFees": null,
           "simFees": null,
+          "conditionalPrices": [],
+          "pricingTiers": [],
           "conditions": [
             "Des remises distinctes sont réservées aux abonnés Freebox; le prix public affiché n'en tient pas compte."
           ],
+          "evidence": [
+            "Forfait Free Max: 29.99 €/mois, fair-use -1 Mo"
+          ],
           "sourceUrl": "https://mobile.free.fr/",
-          "retrievedAt": "2026-11-02T08:56:34.056Z",
-          "verifiedAt": "2026-11-02T08:56:34.056Z",
+          "retrievedAt": "2026-11-02T09:20:33.281Z",
+          "verifiedAt": "2026-11-02T09:20:33.281Z",
           "verificationStatus": "VERIFIED"
         }
       ],
@@ -101,96 +125,113 @@
     {
       "provider": "RED by SFR",
       "sourceUrl": "https://www.red-by-sfr.fr/forfaits-mobiles/",
-      "retrievedAt": "2026-11-02T08:56:34.117Z",
+      "retrievedAt": "2026-11-02T09:20:33.339Z",
       "offers": [
         {
           "provider": "RED by SFR",
-          "offerName": "Forfait RED 1 Go",
-          "monthlyPrice": null,
+          "offerName": "Forfait RED 1Go",
+          "monthlyPrice": 1.99,
           "includedDataGB": 1,
           "unlimitedData": false,
-          "euDataGB": null,
+          "euDataGB": 1,
           "network": "Réseau SFR 4G",
+          "technology": "4G",
           "commitmentMonths": 0,
           "promotionPrice": null,
           "promotionDuration": null,
           "priceAfterPromotion": null,
           "activationFees": null,
           "simFees": null,
-          "conditions": [
-            "Le volume est visible sur la page officielle, mais le HTML public ne relie pas de façon fiable chaque volume à son prix dynamique."
+          "conditionalPrices": [],
+          "pricingTiers": [],
+          "conditions": [],
+          "evidence": [
+            "1Go; 1000 Mo; 1000 Mo; 199 centimes"
           ],
           "sourceUrl": "https://www.red-by-sfr.fr/forfaits-mobiles/",
-          "retrievedAt": "2026-11-02T08:56:34.117Z",
-          "verifiedAt": null,
-          "verificationStatus": "PARTIAL"
+          "retrievedAt": "2026-11-02T09:20:33.339Z",
+          "verifiedAt": "2026-11-02T09:20:33.339Z",
+          "verificationStatus": "VERIFIED"
         },
         {
           "provider": "RED by SFR",
-          "offerName": "Forfait RED 40 Go",
-          "monthlyPrice": null,
+          "offerName": "Forfait RED 40Go",
+          "monthlyPrice": 9.99,
           "includedDataGB": 40,
           "unlimitedData": false,
-          "euDataGB": null,
+          "euDataGB": 15,
           "network": "Réseau SFR 4G",
+          "technology": "4G",
           "commitmentMonths": 0,
           "promotionPrice": null,
           "promotionDuration": null,
           "priceAfterPromotion": null,
           "activationFees": null,
           "simFees": null,
-          "conditions": [
-            "Le volume est visible sur la page officielle, mais le HTML public ne relie pas de façon fiable chaque volume à son prix dynamique."
+          "conditionalPrices": [],
+          "pricingTiers": [],
+          "conditions": [],
+          "evidence": [
+            "40Go; 40000 Mo; 15000 Mo; 999 centimes"
           ],
           "sourceUrl": "https://www.red-by-sfr.fr/forfaits-mobiles/",
-          "retrievedAt": "2026-11-02T08:56:34.117Z",
-          "verifiedAt": null,
-          "verificationStatus": "PARTIAL"
+          "retrievedAt": "2026-11-02T09:20:33.339Z",
+          "verifiedAt": "2026-11-02T09:20:33.339Z",
+          "verificationStatus": "VERIFIED"
         },
         {
           "provider": "RED by SFR",
-          "offerName": "Forfait RED 120 Go 5G",
-          "monthlyPrice": null,
+          "offerName": "Forfait RED 120Go",
+          "monthlyPrice": 12.99,
           "includedDataGB": 120,
           "unlimitedData": false,
-          "euDataGB": null,
+          "euDataGB": 30,
           "network": "Réseau SFR 5G/4G",
+          "technology": "5G",
           "commitmentMonths": 0,
           "promotionPrice": null,
           "promotionDuration": null,
           "priceAfterPromotion": null,
           "activationFees": null,
           "simFees": null,
-          "conditions": [
-            "Le volume est visible sur la page officielle, mais le HTML public ne relie pas de façon fiable chaque volume à son prix dynamique."
+          "conditionalPrices": [],
+          "pricingTiers": [],
+          "conditions": [],
+          "evidence": [
+            "120Go; 120000 Mo; 30000 Mo; 1299 centimes"
           ],
           "sourceUrl": "https://www.red-by-sfr.fr/forfaits-mobiles/",
-          "retrievedAt": "2026-11-02T08:56:34.117Z",
-          "verifiedAt": null,
-          "verificationStatus": "PARTIAL"
+          "retrievedAt": "2026-11-02T09:20:33.339Z",
+          "verifiedAt": "2026-11-02T09:20:33.339Z",
+          "verificationStatus": "VERIFIED"
         },
         {
           "provider": "RED by SFR",
-          "offerName": "Forfait RED 250 Go 5G Voyage",
-          "monthlyPrice": null,
+          "offerName": "Forfait RED 250Go",
+          "monthlyPrice": 15.99,
           "includedDataGB": 250,
           "unlimitedData": false,
-          "euDataGB": null,
+          "euDataGB": 35,
           "network": "Réseau SFR 5G/4G",
+          "technology": "5G",
           "commitmentMonths": 0,
           "promotionPrice": null,
           "promotionDuration": null,
           "priceAfterPromotion": null,
           "activationFees": null,
           "simFees": null,
+          "conditionalPrices": [],
+          "pricingTiers": [],
           "conditions": [
-            "Le volume est visible sur la page officielle, mais le HTML public ne relie pas de façon fiable chaque volume à son prix dynamique.",
-            "Variante Voyage; les destinations exactes restent à vérifier."
+            "Variante Voyage; consulter la page officielle pour les destinations incluses."
+          ],
+          "evidence": [
+            "250Go; 250000 Mo; 35000 Mo; 1599 centimes"
           ],
           "sourceUrl": "https://www.red-by-sfr.fr/forfaits-mobiles/",
-          "retrievedAt": "2026-11-02T08:56:34.117Z",
-          "verifiedAt": null,
-          "verificationStatus": "PARTIAL"
+          "retrievedAt": "2026-11-02T09:20:33.339Z",
+          "verifiedAt": "2026-11-02T09:20:33.339Z",
+          "verificationStatus": "VERIFIED"
         }
       ],
       "failures": []
@@ -198,7 +239,7 @@
     {
       "provider": "B&You",
       "sourceUrl": "https://www.bouyguestelecom.fr/forfaits-mobiles/sans-engagement",
-      "retrievedAt": "2026-11-02T08:56:34.119Z",
+      "retrievedAt": "2026-11-02T09:20:33.342Z",
       "offers": [
         {
           "provider": "B&You",
@@ -208,20 +249,34 @@
           "unlimitedData": false,
           "euDataGB": 35,
           "network": "Qualité du réseau Bouygues Telecom",
+          "technology": "5G",
           "commitmentMonths": 0,
           "promotionPrice": 10.99,
           "promotionDuration": 12,
           "priceAfterPromotion": 13.99,
           "activationFees": 1,
           "simFees": 1,
+          "conditionalPrices": [
+            {
+              "kind": "BOX",
+              "monthlyPrice": 10.99,
+              "durationMonths": 12,
+              "priceAfter": 13.99,
+              "condition": "Souscription simultanée d'une offre Box/Fibre."
+            }
+          ],
+          "pricingTiers": [],
           "conditions": [
             "**10,99€/mois pendant 1 an puis 13,99€/mois**",
             "Bon plan avec Pure fibre",
             "Tarif promotionnel réservé à une condition Box/Fibre; le prix mensuel principal conserve le tarif hors remise."
           ],
+          "evidence": [
+            "100Go 5G - 13€99; 100Go; **10,99€/mois pendant 1 an puis 13,99€/mois**"
+          ],
           "sourceUrl": "https://www.bouyguestelecom.fr/forfaits-mobiles/sans-engagement",
-          "retrievedAt": "2026-11-02T08:56:34.119Z",
-          "verifiedAt": "2026-11-02T08:56:34.119Z",
+          "retrievedAt": "2026-11-02T09:20:33.342Z",
+          "verifiedAt": "2026-11-02T09:20:33.342Z",
           "verificationStatus": "VERIFIED"
         },
         {
@@ -232,15 +287,21 @@
           "unlimitedData": false,
           "euDataGB": 1,
           "network": "Qualité du réseau Bouygues Telecom",
+          "technology": "4G",
           "commitmentMonths": 0,
           "promotionPrice": null,
           "promotionDuration": null,
           "priceAfterPromotion": null,
           "activationFees": 1,
           "simFees": 1,
+          "conditionalPrices": [],
+          "pricingTiers": [],
           "conditions": [],
+          "evidence": [
+            "1Go; 1Go; sans promotion explicite"
+          ],
           "sourceUrl": "https://www.bouyguestelecom.fr/forfaits-mobiles/sans-engagement",
-          "retrievedAt": "2026-11-02T08:56:34.119Z",
+          "retrievedAt": "2026-11-02T09:20:33.342Z",
           "verifiedAt": null,
           "verificationStatus": "PARTIAL"
         },
@@ -252,16 +313,22 @@
           "unlimitedData": false,
           "euDataGB": 20,
           "network": "Qualité du réseau Bouygues Telecom",
+          "technology": "5G",
           "commitmentMonths": 0,
           "promotionPrice": null,
           "promotionDuration": null,
           "priceAfterPromotion": null,
           "activationFees": 1,
           "simFees": 1,
+          "conditionalPrices": [],
+          "pricingTiers": [],
           "conditions": [],
+          "evidence": [
+            "20Go 5G - 9€99; 20Go; sans promotion explicite"
+          ],
           "sourceUrl": "https://www.bouyguestelecom.fr/forfaits-mobiles/sans-engagement",
-          "retrievedAt": "2026-11-02T08:56:34.119Z",
-          "verifiedAt": "2026-11-02T08:56:34.119Z",
+          "retrievedAt": "2026-11-02T09:20:33.342Z",
+          "verifiedAt": "2026-11-02T09:20:33.342Z",
           "verificationStatus": "VERIFIED"
         },
         {
@@ -272,20 +339,34 @@
           "unlimitedData": false,
           "euDataGB": 40,
           "network": "Qualité du réseau Bouygues Telecom",
+          "technology": "5G",
           "commitmentMonths": 0,
           "promotionPrice": 12.99,
           "promotionDuration": 12,
           "priceAfterPromotion": 15.99,
           "activationFees": 1,
           "simFees": 1,
+          "conditionalPrices": [
+            {
+              "kind": "BOX",
+              "monthlyPrice": 12.99,
+              "durationMonths": 12,
+              "priceAfter": 15.99,
+              "condition": "Souscription simultanée d'une offre Box/Fibre."
+            }
+          ],
+          "pricingTiers": [],
           "conditions": [
             "**12,99€/mois pendant 1 an puis 15,99€/mois**",
             "Bon plan avec Pure fibre",
             "Tarif promotionnel réservé à une condition Box/Fibre; le prix mensuel principal conserve le tarif hors remise."
           ],
+          "evidence": [
+            "200Go 5G - 15.99€ / 12.99€; 200Go Voyage; **12,99€/mois pendant 1 an puis 15,99€/mois**"
+          ],
           "sourceUrl": "https://www.bouyguestelecom.fr/forfaits-mobiles/sans-engagement",
-          "retrievedAt": "2026-11-02T08:56:34.119Z",
-          "verifiedAt": "2026-11-02T08:56:34.119Z",
+          "retrievedAt": "2026-11-02T09:20:33.342Z",
+          "verifiedAt": "2026-11-02T09:20:33.342Z",
           "verificationStatus": "VERIFIED"
         },
         {
@@ -296,18 +377,24 @@
           "unlimitedData": false,
           "euDataGB": 60,
           "network": "Qualité du réseau Bouygues Telecom",
+          "technology": "4G",
           "commitmentMonths": 0,
           "promotionPrice": null,
           "promotionDuration": null,
           "priceAfterPromotion": null,
           "activationFees": 1,
           "simFees": 1,
+          "conditionalPrices": [],
+          "pricingTiers": [],
           "conditions": [
             "**beIN SPORTS inclus au lieu de 15€/mois**🔥",
             "Nouveau"
           ],
+          "evidence": [
+            "170Go BeIN; 170Go; **beIN SPORTS inclus au lieu de 15€/mois**🔥"
+          ],
           "sourceUrl": "https://www.bouyguestelecom.fr/forfaits-mobiles/sans-engagement",
-          "retrievedAt": "2026-11-02T08:56:34.119Z",
+          "retrievedAt": "2026-11-02T09:20:33.342Z",
           "verifiedAt": null,
           "verificationStatus": "PARTIAL"
         },
@@ -319,20 +406,34 @@
           "unlimitedData": false,
           "euDataGB": 40,
           "network": "Qualité du réseau Bouygues Telecom",
+          "technology": "5G",
           "commitmentMonths": 0,
           "promotionPrice": 16.99,
           "promotionDuration": 12,
           "priceAfterPromotion": 19.99,
           "activationFees": 1,
           "simFees": 1,
+          "conditionalPrices": [
+            {
+              "kind": "BOX",
+              "monthlyPrice": 16.99,
+              "durationMonths": 12,
+              "priceAfter": 19.99,
+              "condition": "Souscription simultanée d'une offre Box/Fibre."
+            }
+          ],
+          "pricingTiers": [],
           "conditions": [
             "**16,99€/mois pendant 1 an puis 19,99€/mois**",
             "Bon plan avec Pure fibre",
             "Tarif promotionnel réservé à une condition Box/Fibre; le prix mensuel principal conserve le tarif hors remise."
           ],
+          "evidence": [
+            "300Go 5G dont 40Go valables dans + de 150 destinations à 19€99/mois; 300Go Voyage; **16,99€/mois pendant 1 an puis 19,99€/mois**"
+          ],
           "sourceUrl": "https://www.bouyguestelecom.fr/forfaits-mobiles/sans-engagement",
-          "retrievedAt": "2026-11-02T08:56:34.119Z",
-          "verifiedAt": "2026-11-02T08:56:34.119Z",
+          "retrievedAt": "2026-11-02T09:20:33.342Z",
+          "verifiedAt": "2026-11-02T09:20:33.342Z",
           "verificationStatus": "VERIFIED"
         },
         {
@@ -343,18 +444,24 @@
           "unlimitedData": false,
           "euDataGB": 60,
           "network": "Qualité du réseau Bouygues Telecom",
+          "technology": "4G",
           "commitmentMonths": 0,
           "promotionPrice": null,
           "promotionDuration": null,
           "priceAfterPromotion": null,
           "activationFees": 1,
           "simFees": 1,
+          "conditionalPrices": [],
+          "pricingTiers": [],
           "conditions": [
             "**Prime inclus au lieu de 6,99€/mois**🔥",
             "Nouveau"
           ],
+          "evidence": [
+            "170Go Prime; 170Go; **Prime inclus au lieu de 6,99€/mois**🔥"
+          ],
           "sourceUrl": "https://www.bouyguestelecom.fr/forfaits-mobiles/sans-engagement",
-          "retrievedAt": "2026-11-02T08:56:34.119Z",
+          "retrievedAt": "2026-11-02T09:20:33.342Z",
           "verifiedAt": null,
           "verificationStatus": "PARTIAL"
         },
@@ -366,23 +473,1114 @@
           "unlimitedData": false,
           "euDataGB": 60,
           "network": "Qualité du réseau Bouygues Telecom",
+          "technology": "4G",
           "commitmentMonths": 0,
           "promotionPrice": null,
           "promotionDuration": null,
           "priceAfterPromotion": null,
           "activationFees": 1,
           "simFees": 1,
+          "conditionalPrices": [],
+          "pricingTiers": [],
           "conditions": [
             "**Deezer Premium inclus au lieu de 11,99€/mois**🔥",
             "Nouveau"
           ],
+          "evidence": [
+            "170Go Dezeer; 170Go; **Deezer Premium inclus au lieu de 11,99€/mois**🔥"
+          ],
           "sourceUrl": "https://www.bouyguestelecom.fr/forfaits-mobiles/sans-engagement",
-          "retrievedAt": "2026-11-02T08:56:34.119Z",
+          "retrievedAt": "2026-11-02T09:20:33.342Z",
           "verifiedAt": null,
           "verificationStatus": "PARTIAL"
         }
       ],
       "failures": []
+    },
+    {
+      "provider": "Orange",
+      "sourceUrl": "https://boutique.orange.fr/mobile/offres",
+      "retrievedAt": "2026-11-02T09:20:33.344Z",
+      "offers": [
+        {
+          "provider": "Orange",
+          "offerName": "Série Spéciale SaferPhone 5Go",
+          "monthlyPrice": 17.99,
+          "includedDataGB": 5,
+          "unlimitedData": false,
+          "euDataGB": null,
+          "network": "Réseau Orange",
+          "technology": null,
+          "commitmentMonths": 0,
+          "promotionPrice": null,
+          "promotionDuration": null,
+          "priceAfterPromotion": null,
+          "activationFees": 10,
+          "simFees": null,
+          "conditionalPrices": [
+            {
+              "kind": "AGE",
+              "monthlyPrice": 11.99,
+              "durationMonths": null,
+              "priceAfter": 17.99,
+              "condition": "Tarif soumis à la condition d'âge indiquée dans le nom de l'offre; durée non publiée dans la carte."
+            },
+            {
+              "kind": "BOX",
+              "monthlyPrice": 7.99,
+              "durationMonths": null,
+              "priceAfter": 13.99,
+              "condition": "Tarif réservé aux clients Internet Orange."
+            }
+          ],
+          "pricingTiers": [],
+          "conditions": [
+            "Une tarification distincte est publiée pour les clients Internet Orange.",
+            "Tarif réduit soumis à la condition d'âge SaferPhone."
+          ],
+          "evidence": [
+            "Série Spéciale SaferPhone 5Go false bloqué (existe en non bloqué) Appels illimités SMS/MMS illimités 11,99€ par mois au lieu de 17,99€ par mois 11,99€ /mois au lieu de 17,99€/mois Sans engagement Idéal pour vos enfants ",
+            "Série Spéciale SaferPhone 5Go true bloqué (existe en non bloqué) Appels illimités SMS/MMS illimités 7,99€ par mois au lieu de 13,99€ par mois 7,99€ /mois au lieu de 13,99€/mois Sans engagement Idéal pour vos enfants"
+          ],
+          "sourceUrl": "https://boutique.orange.fr/mobile/offres",
+          "retrievedAt": "2026-11-02T09:20:33.344Z",
+          "verifiedAt": "2026-11-02T09:20:33.344Z",
+          "verificationStatus": "VERIFIED"
+        },
+        {
+          "provider": "Orange",
+          "offerName": "Série Spéciale 130Go 5G+",
+          "monthlyPrice": 24.99,
+          "includedDataGB": 130,
+          "unlimitedData": false,
+          "euDataGB": null,
+          "network": "Réseau Orange",
+          "technology": "5G+",
+          "commitmentMonths": 0,
+          "promotionPrice": null,
+          "promotionDuration": null,
+          "priceAfterPromotion": null,
+          "activationFees": 10,
+          "simFees": null,
+          "conditionalPrices": [
+            {
+              "kind": "NEW_CUSTOMER",
+              "monthlyPrice": 20.99,
+              "durationMonths": null,
+              "priceAfter": 24.99,
+              "condition": "Nouvelle souscription; durée de la remise non indiquée."
+            },
+            {
+              "kind": "BOX",
+              "monthlyPrice": 16.99,
+              "durationMonths": null,
+              "priceAfter": null,
+              "condition": "Tarif réservé aux clients Internet Orange."
+            }
+          ],
+          "pricingTiers": [],
+          "conditions": [
+            "Une tarification distincte est publiée pour les clients Internet Orange."
+          ],
+          "evidence": [
+            "Série Spéciale 130Go 5G+ false Appels illimités SMS/MMS illimités 20,99€ par mois 20,99€ /mois Sans engagement ",
+            "Série Spéciale 130Go 5G+ true Appels illimités SMS/MMS illimités 16,99€ par mois 16,99€ /mois Sans engagement "
+          ],
+          "sourceUrl": "https://boutique.orange.fr/mobile/offres",
+          "retrievedAt": "2026-11-02T09:20:33.344Z",
+          "verifiedAt": "2026-11-02T09:20:33.344Z",
+          "verificationStatus": "VERIFIED"
+        },
+        {
+          "provider": "Orange",
+          "offerName": "Forfait Voyage 250Go 5G+",
+          "monthlyPrice": 33.99,
+          "includedDataGB": 250,
+          "unlimitedData": false,
+          "euDataGB": null,
+          "network": "Réseau Orange",
+          "technology": "5G+",
+          "commitmentMonths": 0,
+          "promotionPrice": 24.99,
+          "promotionDuration": 12,
+          "priceAfterPromotion": 33.99,
+          "activationFees": 10,
+          "simFees": null,
+          "conditionalPrices": [
+            {
+              "kind": "BOX",
+              "monthlyPrice": 19.99,
+              "durationMonths": 12,
+              "priceAfter": 28.99,
+              "condition": "Tarif réservé aux clients Internet Orange."
+            }
+          ],
+          "pricingTiers": [],
+          "conditions": [
+            "Une tarification distincte est publiée pour les clients Internet Orange."
+          ],
+          "evidence": [
+            "Forfait Voyage 250Go 5G+ false Appels illimités SMS/MMS illimités 24,99€ par mois pendant 12 mois puis 33,99€ par mois 24,99€ /mois pendant 12 mois puis 33,99€/mois Sans engagement ",
+            "Forfait Voyage 250Go 5G+ true Appels illimités SMS/MMS illimités 19,99€ par mois pendant 12 mois puis 28,99€ par mois 19,99€ /mois pendant 12 mois puis 28,99€/mois Sans engagement "
+          ],
+          "sourceUrl": "https://boutique.orange.fr/mobile/offres",
+          "retrievedAt": "2026-11-02T09:20:33.344Z",
+          "verifiedAt": "2026-11-02T09:20:33.344Z",
+          "verificationStatus": "VERIFIED"
+        },
+        {
+          "provider": "Orange",
+          "offerName": "Forfait 2h 100Mo",
+          "monthlyPrice": 8.99,
+          "includedDataGB": 0.1,
+          "unlimitedData": false,
+          "euDataGB": null,
+          "network": "Réseau Orange",
+          "technology": null,
+          "commitmentMonths": 0,
+          "promotionPrice": 2.99,
+          "promotionDuration": 12,
+          "priceAfterPromotion": 8.99,
+          "activationFees": 10,
+          "simFees": null,
+          "conditionalPrices": [
+            {
+              "kind": "BOX",
+              "monthlyPrice": 2,
+              "durationMonths": null,
+              "priceAfter": null,
+              "condition": "Tarif réservé aux clients Internet Orange."
+            }
+          ],
+          "pricingTiers": [],
+          "conditions": [
+            "Une tarification distincte est publiée pour les clients Internet Orange."
+          ],
+          "evidence": [
+            "Forfait 2h 100Mo false bloqué (existe en non bloqué) Bloqué ou non 2h d'appels SMS/MMS illimités 2,99€ par mois pendant 12 mois puis 8,99€ par mois 2,99€ /mois pendant 12 mois puis 8,99€/mois Sans engagement ",
+            "Forfait 2h 100Mo true bloqué (existe en non bloqué) Bloqué ou non 2h d'appels SMS/MMS illimités 2€ par mois 2€ /mois Sans engagement Bon plan "
+          ],
+          "sourceUrl": "https://boutique.orange.fr/mobile/offres",
+          "retrievedAt": "2026-11-02T09:20:33.344Z",
+          "verifiedAt": "2026-11-02T09:20:33.344Z",
+          "verificationStatus": "VERIFIED"
+        },
+        {
+          "provider": "Orange",
+          "offerName": "Série Spéciale 20Go",
+          "monthlyPrice": 17.99,
+          "includedDataGB": 20,
+          "unlimitedData": false,
+          "euDataGB": null,
+          "network": "Réseau Orange",
+          "technology": null,
+          "commitmentMonths": 0,
+          "promotionPrice": null,
+          "promotionDuration": null,
+          "priceAfterPromotion": null,
+          "activationFees": 10,
+          "simFees": null,
+          "conditionalPrices": [
+            {
+              "kind": "BOX",
+              "monthlyPrice": 10.99,
+              "durationMonths": null,
+              "priceAfter": null,
+              "condition": "Tarif réservé aux clients Internet Orange."
+            }
+          ],
+          "pricingTiers": [],
+          "conditions": [
+            "Une tarification distincte est publiée pour les clients Internet Orange."
+          ],
+          "evidence": [
+            "Série Spéciale 20Go false Appels illimités SMS/MMS illimités 17,99€ par mois 17,99€ /mois Sans engagement ",
+            "Série Spéciale 20Go true Appels illimités SMS/MMS illimités 10,99€ par mois 10,99€ /mois Sans engagement Offre pour les 18-26ans "
+          ],
+          "sourceUrl": "https://boutique.orange.fr/mobile/offres",
+          "retrievedAt": "2026-11-02T09:20:33.344Z",
+          "verifiedAt": "2026-11-02T09:20:33.344Z",
+          "verificationStatus": "VERIFIED"
+        },
+        {
+          "provider": "Orange",
+          "offerName": "Série Spéciale 200Go 5G Cheat_Code_18_26",
+          "monthlyPrice": 34.99,
+          "includedDataGB": 200,
+          "unlimitedData": false,
+          "euDataGB": null,
+          "network": "Réseau Orange",
+          "technology": "5G",
+          "commitmentMonths": 0,
+          "promotionPrice": null,
+          "promotionDuration": null,
+          "priceAfterPromotion": null,
+          "activationFees": 10,
+          "simFees": null,
+          "conditionalPrices": [
+            {
+              "kind": "AGE",
+              "monthlyPrice": 15.99,
+              "durationMonths": null,
+              "priceAfter": 34.99,
+              "condition": "Tarif soumis à la condition d'âge indiquée dans le nom de l'offre; durée non publiée dans la carte."
+            },
+            {
+              "kind": "BOX",
+              "monthlyPrice": 15.99,
+              "durationMonths": null,
+              "priceAfter": 29.99,
+              "condition": "Tarif réservé aux clients Internet Orange."
+            }
+          ],
+          "pricingTiers": [],
+          "conditions": [
+            "Une tarification distincte est publiée pour les clients Internet Orange.",
+            "Offre réservée aux 18-26 ans après validation."
+          ],
+          "evidence": [
+            "Série Spéciale 200Go 5G Cheat_Code_18_26 false Appels illimités SMS/MMS illimités 15,99€ par mois au lieu de 34,99€ par mois 15,99€ /mois au lieu de 34,99€/mois Sans engagement Offre pour les 18-26ans ",
+            "Série Spéciale 200Go 5G Cheat_Code_18_26 true Appels illimités SMS/MMS illimités 15,99€ par mois au lieu de 29,99€ par mois 15,99€ /mois au lieu de 29,99€/mois Sans engagement Forfait + Mobile "
+          ],
+          "sourceUrl": "https://boutique.orange.fr/mobile/offres",
+          "retrievedAt": "2026-11-02T09:20:33.344Z",
+          "verifiedAt": "2026-11-02T09:20:33.344Z",
+          "verificationStatus": "VERIFIED"
+        },
+        {
+          "provider": "Orange",
+          "offerName": "Série Spéciale 80Go 5G",
+          "monthlyPrice": 29.99,
+          "includedDataGB": 80,
+          "unlimitedData": false,
+          "euDataGB": null,
+          "network": "Réseau Orange",
+          "technology": "5G",
+          "commitmentMonths": 24,
+          "promotionPrice": null,
+          "promotionDuration": null,
+          "priceAfterPromotion": null,
+          "activationFees": 10,
+          "simFees": null,
+          "conditionalPrices": [
+            {
+              "kind": "BOX",
+              "monthlyPrice": 22.99,
+              "durationMonths": null,
+              "priceAfter": null,
+              "condition": "Tarif réservé aux clients Internet Orange."
+            }
+          ],
+          "pricingTiers": [],
+          "conditions": [
+            "Une tarification distincte est publiée pour les clients Internet Orange."
+          ],
+          "evidence": [
+            "Série Spéciale 80Go 5G false Appels illimités SMS/MMS illimités Multi-SIM Internet sur demande 29,99€ par mois 29,99€ /mois Engagement 24 mois ",
+            "Série Spéciale 80Go 5G true Appels illimités SMS/MMS illimités Multi-SIM Internet sur demande 22,99€ par mois 22,99€ /mois Engagement 24 mois "
+          ],
+          "sourceUrl": "https://boutique.orange.fr/mobile/offres",
+          "retrievedAt": "2026-11-02T09:20:33.344Z",
+          "verifiedAt": "2026-11-02T09:20:33.344Z",
+          "verificationStatus": "VERIFIED"
+        },
+        {
+          "provider": "Orange",
+          "offerName": "Forfait 200Go 5G+",
+          "monthlyPrice": 47.99,
+          "includedDataGB": 200,
+          "unlimitedData": false,
+          "euDataGB": null,
+          "network": "Réseau Orange",
+          "technology": "5G+",
+          "commitmentMonths": 24,
+          "promotionPrice": 37.99,
+          "promotionDuration": 12,
+          "priceAfterPromotion": 47.99,
+          "activationFees": 10,
+          "simFees": null,
+          "conditionalPrices": [
+            {
+              "kind": "BOX",
+              "monthlyPrice": 29.99,
+              "durationMonths": 12,
+              "priceAfter": 39.99,
+              "condition": "Tarif réservé aux clients Internet Orange."
+            }
+          ],
+          "pricingTiers": [],
+          "conditions": [
+            "Une tarification distincte est publiée pour les clients Internet Orange."
+          ],
+          "evidence": [
+            "Forfait 200Go 5G+ false Appels illimités SMS/MMS illimités Multi-SIM Internet sur demande 37,99€ par mois pendant 12 mois puis 47,99€ par mois 37,99€ /mois pendant 12 mois puis 47,99€/mois Engagement 24 mois ",
+            "Forfait 200Go 5G+ true Appels illimités SMS/MMS illimités Multi-SIM Internet sur demande 29,99€ par mois pendant 12 mois puis 39,99€ par mois 29,99€ /mois pendant 12 mois puis 39,99€/mois Engagement 24 m"
+          ],
+          "sourceUrl": "https://boutique.orange.fr/mobile/offres",
+          "retrievedAt": "2026-11-02T09:20:33.344Z",
+          "verifiedAt": "2026-11-02T09:20:33.344Z",
+          "verificationStatus": "VERIFIED"
+        },
+        {
+          "provider": "Orange",
+          "offerName": "Forfait 300Go 5G+",
+          "monthlyPrice": 67.99,
+          "includedDataGB": 300,
+          "unlimitedData": false,
+          "euDataGB": null,
+          "network": "Réseau Orange",
+          "technology": "5G+",
+          "commitmentMonths": 24,
+          "promotionPrice": null,
+          "promotionDuration": null,
+          "priceAfterPromotion": null,
+          "activationFees": 10,
+          "simFees": null,
+          "conditionalPrices": [
+            {
+              "kind": "BOX",
+              "monthlyPrice": 52.99,
+              "durationMonths": null,
+              "priceAfter": null,
+              "condition": "Tarif réservé aux clients Internet Orange."
+            }
+          ],
+          "pricingTiers": [],
+          "conditions": [
+            "Une tarification distincte est publiée pour les clients Internet Orange."
+          ],
+          "evidence": [
+            "Forfait 300Go 5G+ false Appels/SMS/MMS illimités +40Go depuis 78 destinations à l’international Appels illimités vers USA/Canada 2 Multi-SIM Internet offertes sur demande eSIM Watch offerte sur demande 67,99€ par mois 67,99€ /mois Engagement 24 mois ",
+            "Forfait 300Go 5G+ true Appels/SMS/MMS illimités +40Go depuis 78 destinations à l’international Appels illimités vers USA/Canada 2 Multi-SIM Internet offertes sur demande eSIM Watch offerte sur demande 52"
+          ],
+          "sourceUrl": "https://boutique.orange.fr/mobile/offres",
+          "retrievedAt": "2026-11-02T09:20:33.344Z",
+          "verifiedAt": "2026-11-02T09:20:33.344Z",
+          "verificationStatus": "VERIFIED"
+        }
+      ],
+      "failures": []
+    },
+    {
+      "provider": "Sosh",
+      "sourceUrl": "https://shop.sosh.fr/information/tarifs-et-contrats",
+      "retrievedAt": "2026-11-02T09:20:33.346Z",
+      "offers": [
+        {
+          "provider": "Sosh",
+          "offerName": "Forfait Sosh 1Go",
+          "monthlyPrice": 2.99,
+          "includedDataGB": 1,
+          "unlimitedData": false,
+          "euDataGB": null,
+          "network": null,
+          "technology": null,
+          "commitmentMonths": null,
+          "promotionPrice": null,
+          "promotionDuration": null,
+          "priceAfterPromotion": null,
+          "activationFees": null,
+          "simFees": null,
+          "conditionalPrices": [],
+          "pricingTiers": [],
+          "conditions": [
+            "La page contractuelle associe le prix et le volume, mais ne détaille pas ici le réseau, l'engagement et l'enveloppe Europe/DOM."
+          ],
+          "evidence": [
+            "Forfait Sosh 2,99€ 1Go"
+          ],
+          "sourceUrl": "https://shop.sosh.fr/information/tarifs-et-contrats",
+          "retrievedAt": "2026-11-02T09:20:33.346Z",
+          "verifiedAt": null,
+          "verificationStatus": "PARTIAL"
+        },
+        {
+          "provider": "Sosh",
+          "offerName": "Forfait Sosh 20Go",
+          "monthlyPrice": 9.99,
+          "includedDataGB": 20,
+          "unlimitedData": false,
+          "euDataGB": null,
+          "network": null,
+          "technology": null,
+          "commitmentMonths": null,
+          "promotionPrice": null,
+          "promotionDuration": null,
+          "priceAfterPromotion": null,
+          "activationFees": null,
+          "simFees": null,
+          "conditionalPrices": [],
+          "pricingTiers": [],
+          "conditions": [
+            "La page contractuelle associe le prix et le volume, mais ne détaille pas ici le réseau, l'engagement et l'enveloppe Europe/DOM."
+          ],
+          "evidence": [
+            "Forfait Sosh 9,99€ 20Go"
+          ],
+          "sourceUrl": "https://shop.sosh.fr/information/tarifs-et-contrats",
+          "retrievedAt": "2026-11-02T09:20:33.346Z",
+          "verifiedAt": null,
+          "verificationStatus": "PARTIAL"
+        },
+        {
+          "provider": "Sosh",
+          "offerName": "Forfait Sosh 100Go",
+          "monthlyPrice": 13.99,
+          "includedDataGB": 100,
+          "unlimitedData": false,
+          "euDataGB": null,
+          "network": null,
+          "technology": null,
+          "commitmentMonths": null,
+          "promotionPrice": null,
+          "promotionDuration": null,
+          "priceAfterPromotion": null,
+          "activationFees": null,
+          "simFees": null,
+          "conditionalPrices": [],
+          "pricingTiers": [],
+          "conditions": [
+            "La page contractuelle associe le prix et le volume, mais ne détaille pas ici le réseau, l'engagement et l'enveloppe Europe/DOM."
+          ],
+          "evidence": [
+            "Forfait Sosh 13,99€ 100Go"
+          ],
+          "sourceUrl": "https://shop.sosh.fr/information/tarifs-et-contrats",
+          "retrievedAt": "2026-11-02T09:20:33.346Z",
+          "verifiedAt": null,
+          "verificationStatus": "PARTIAL"
+        },
+        {
+          "provider": "Sosh",
+          "offerName": "Forfait Voyage Sosh 200Go 5G",
+          "monthlyPrice": 15.99,
+          "includedDataGB": 200,
+          "unlimitedData": false,
+          "euDataGB": null,
+          "network": null,
+          "technology": "5G",
+          "commitmentMonths": null,
+          "promotionPrice": null,
+          "promotionDuration": null,
+          "priceAfterPromotion": null,
+          "activationFees": null,
+          "simFees": null,
+          "conditionalPrices": [],
+          "pricingTiers": [],
+          "conditions": [
+            "La page contractuelle associe le prix et le volume, mais ne détaille pas ici le réseau, l'engagement et l'enveloppe Europe/DOM."
+          ],
+          "evidence": [
+            "Forfait Voyage Sosh 15,99€ 200Go 5G"
+          ],
+          "sourceUrl": "https://shop.sosh.fr/information/tarifs-et-contrats",
+          "retrievedAt": "2026-11-02T09:20:33.346Z",
+          "verifiedAt": null,
+          "verificationStatus": "PARTIAL"
+        },
+        {
+          "provider": "Sosh",
+          "offerName": "Forfait Sosh 300Go 5G",
+          "monthlyPrice": 20.99,
+          "includedDataGB": 300,
+          "unlimitedData": false,
+          "euDataGB": null,
+          "network": null,
+          "technology": "5G",
+          "commitmentMonths": null,
+          "promotionPrice": null,
+          "promotionDuration": null,
+          "priceAfterPromotion": null,
+          "activationFees": null,
+          "simFees": null,
+          "conditionalPrices": [],
+          "pricingTiers": [],
+          "conditions": [
+            "La page contractuelle associe le prix et le volume, mais ne détaille pas ici le réseau, l'engagement et l'enveloppe Europe/DOM."
+          ],
+          "evidence": [
+            "Forfait Sosh 20,99€ 300Go 5G"
+          ],
+          "sourceUrl": "https://shop.sosh.fr/information/tarifs-et-contrats",
+          "retrievedAt": "2026-11-02T09:20:33.346Z",
+          "verifiedAt": null,
+          "verificationStatus": "PARTIAL"
+        }
+      ],
+      "failures": []
+    },
+    {
+      "provider": "SFR",
+      "sourceUrl": "https://www.sfr.fr/offre-mobile",
+      "retrievedAt": "2026-11-02T09:20:33.347Z",
+      "offers": [
+        {
+          "provider": "SFR",
+          "offerName": "2H 1 Go 5G",
+          "monthlyPrice": 5.99,
+          "includedDataGB": 1,
+          "unlimitedData": false,
+          "euDataGB": null,
+          "network": "Réseau SFR",
+          "technology": "5G",
+          "commitmentMonths": 0,
+          "promotionPrice": null,
+          "promotionDuration": null,
+          "priceAfterPromotion": null,
+          "activationFees": null,
+          "simFees": null,
+          "conditionalPrices": [
+            {
+              "kind": "BOX",
+              "monthlyPrice": 1.99,
+              "durationMonths": null,
+              "priceAfter": 5.99,
+              "condition": "Prix réservé aux clients Box SFR."
+            }
+          ],
+          "pricingTiers": [],
+          "conditions": [
+            "Un prix Client Box distinct est publié."
+          ],
+          "evidence": [
+            "2H 1 Go 5G; Le forfait 2h 1 Go 5G sans engagement inclus 2h d'appels, les SMS / MMS illimités et 1 Go de Data + jusqu'à 100 Go avec le partage SFR Multi ! Blocage possible.; Prix Standard 5.99; Prix Client Box 1.99"
+          ],
+          "sourceUrl": "https://www.sfr.fr/offre-mobile/forfait-2h-1go-5g",
+          "retrievedAt": "2026-11-02T09:20:33.347Z",
+          "verifiedAt": "2026-11-02T09:20:33.347Z",
+          "verificationStatus": "VERIFIED"
+        },
+        {
+          "provider": "SFR",
+          "offerName": "20 Go 5G",
+          "monthlyPrice": 15.99,
+          "includedDataGB": 20,
+          "unlimitedData": false,
+          "euDataGB": null,
+          "network": "Réseau SFR",
+          "technology": "5G",
+          "commitmentMonths": 0,
+          "promotionPrice": null,
+          "promotionDuration": null,
+          "priceAfterPromotion": null,
+          "activationFees": null,
+          "simFees": null,
+          "conditionalPrices": [
+            {
+              "kind": "BOX",
+              "monthlyPrice": 8.99,
+              "durationMonths": null,
+              "priceAfter": 15.99,
+              "condition": "Prix réservé aux clients Box SFR."
+            }
+          ],
+          "pricingTiers": [],
+          "conditions": [
+            "Un prix Client Box distinct est publié."
+          ],
+          "evidence": [
+            "20 Go 5G; Le forfait 20 Go 5G sans engagement inclus les appels, SMS, MMS illimités et 20Go de Data + jusqu'à 100 Go avec SFR Multi ! SFR TV et Plus Smartphone inclus.; Prix Standard 15.99; Prix Client Box 8.99"
+          ],
+          "sourceUrl": "https://www.sfr.fr/offre-mobile/forfait-20go-5g",
+          "retrievedAt": "2026-11-02T09:20:33.347Z",
+          "verifiedAt": "2026-11-02T09:20:33.347Z",
+          "verificationStatus": "VERIFIED"
+        },
+        {
+          "provider": "SFR",
+          "offerName": "80 Go 5G",
+          "monthlyPrice": 17.99,
+          "includedDataGB": 80,
+          "unlimitedData": false,
+          "euDataGB": null,
+          "network": "Réseau SFR",
+          "technology": "5G",
+          "commitmentMonths": 0,
+          "promotionPrice": null,
+          "promotionDuration": null,
+          "priceAfterPromotion": null,
+          "activationFees": null,
+          "simFees": null,
+          "conditionalPrices": [
+            {
+              "kind": "BOX",
+              "monthlyPrice": 11.99,
+              "durationMonths": null,
+              "priceAfter": 17.99,
+              "condition": "Prix réservé aux clients Box SFR."
+            }
+          ],
+          "pricingTiers": [],
+          "conditions": [
+            "Un prix Client Box distinct est publié."
+          ],
+          "evidence": [
+            "80 Go 5G; Avec le forfait 80 Go 5G sans engagement profitez des appels, SMS / MMS illimités et de 80 Go de data. SFR TV en illimité et les Plus Smartphone inclus !; Prix Standard 17.99; Prix Client Box 11.99"
+          ],
+          "sourceUrl": "https://www.sfr.fr/offre-mobile/forfait-80go-5g",
+          "retrievedAt": "2026-11-02T09:20:33.347Z",
+          "verifiedAt": "2026-11-02T09:20:33.347Z",
+          "verificationStatus": "VERIFIED"
+        },
+        {
+          "provider": "SFR",
+          "offerName": "200 Go 5G",
+          "monthlyPrice": 19.99,
+          "includedDataGB": 200,
+          "unlimitedData": false,
+          "euDataGB": null,
+          "network": "Réseau SFR",
+          "technology": "5G",
+          "commitmentMonths": 0,
+          "promotionPrice": null,
+          "promotionDuration": null,
+          "priceAfterPromotion": null,
+          "activationFees": null,
+          "simFees": null,
+          "conditionalPrices": [
+            {
+              "kind": "BOX",
+              "monthlyPrice": 14.99,
+              "durationMonths": null,
+              "priceAfter": 19.99,
+              "condition": "Prix réservé aux clients Box SFR."
+            }
+          ],
+          "pricingTiers": [],
+          "conditions": [
+            "Un prix Client Box distinct est publié."
+          ],
+          "evidence": [
+            "200 Go 5G; Avec le forfait 200 Go 5G sans engagement profitez des appels, SMS / MMS illimités et de 200 Go de data. SFR TV en illimité et les Plus Smartphone inclus !; Prix Standard 19.99; Prix Client Box 14.99"
+          ],
+          "sourceUrl": "https://www.sfr.fr/offre-mobile/forfait-200go-5g",
+          "retrievedAt": "2026-11-02T09:20:33.347Z",
+          "verifiedAt": "2026-11-02T09:20:33.347Z",
+          "verificationStatus": "VERIFIED"
+        },
+        {
+          "provider": "SFR",
+          "offerName": "500 Go 5G+",
+          "monthlyPrice": 24.99,
+          "includedDataGB": 500,
+          "unlimitedData": false,
+          "euDataGB": null,
+          "network": "Réseau SFR",
+          "technology": "5G+",
+          "commitmentMonths": null,
+          "promotionPrice": null,
+          "promotionDuration": null,
+          "priceAfterPromotion": null,
+          "activationFees": null,
+          "simFees": null,
+          "conditionalPrices": [
+            {
+              "kind": "BOX",
+              "monthlyPrice": 19.99,
+              "durationMonths": null,
+              "priceAfter": 24.99,
+              "condition": "Prix réservé aux clients Box SFR."
+            }
+          ],
+          "pricingTiers": [],
+          "conditions": [
+            "Un prix Client Box distinct est publié."
+          ],
+          "evidence": [
+            "500 Go 5G+; Avec le forfait 500 Go 5G+ profitez des appels, SMS, MMS illimités, de 500 Go de data et 35 Go depuis 69 pays. SFR TV et les Plus Smartphone inclus !; Prix Standard 24.99; Prix Client Box 19.99"
+          ],
+          "sourceUrl": "https://www.sfr.fr/offre-mobile/forfait-500go-5g-plus",
+          "retrievedAt": "2026-11-02T09:20:33.347Z",
+          "verifiedAt": null,
+          "verificationStatus": "PARTIAL"
+        },
+        {
+          "provider": "SFR",
+          "offerName": "Offre Spéciale Illimité 5G+",
+          "monthlyPrice": 39.99,
+          "includedDataGB": null,
+          "unlimitedData": true,
+          "euDataGB": null,
+          "network": "Réseau SFR",
+          "technology": "5G+",
+          "commitmentMonths": null,
+          "promotionPrice": null,
+          "promotionDuration": null,
+          "priceAfterPromotion": null,
+          "activationFees": null,
+          "simFees": null,
+          "conditionalPrices": [
+            {
+              "kind": "BOX",
+              "monthlyPrice": 31.99,
+              "durationMonths": null,
+              "priceAfter": 39.99,
+              "condition": "Prix réservé aux clients Box SFR."
+            }
+          ],
+          "pricingTiers": [],
+          "conditions": [
+            "Un prix Client Box distinct est publié."
+          ],
+          "evidence": [
+            "Offre Spéciale Illimité 5G+; Avec le forfait 5G+ illimité profitez des appels et SMS en illimités en 5G+ en France. SFR TV, Cloud, Multisurf et l'Option montre connectée inclus.; Prix Standard 39.99; Prix Client Box 31.99"
+          ],
+          "sourceUrl": "https://www.sfr.fr/offre-mobile/forfait-illimite-5g-plus",
+          "retrievedAt": "2026-11-02T09:20:33.347Z",
+          "verifiedAt": null,
+          "verificationStatus": "PARTIAL"
+        }
+      ],
+      "failures": []
+    },
+    {
+      "provider": "Prixtel",
+      "sourceUrl": "https://www.prixtel.com/",
+      "retrievedAt": "2026-11-02T09:20:33.349Z",
+      "offers": [
+        {
+          "provider": "Prixtel",
+          "offerName": "Forfait Prixtel Le géant",
+          "monthlyPrice": null,
+          "includedDataGB": 340,
+          "unlimitedData": false,
+          "euDataGB": 38,
+          "network": "Réseau SFR",
+          "technology": "5G",
+          "commitmentMonths": 0,
+          "promotionPrice": null,
+          "promotionDuration": null,
+          "priceAfterPromotion": null,
+          "activationFees": null,
+          "simFees": null,
+          "conditionalPrices": [],
+          "pricingTiers": [
+            {
+              "fromDataGB": 0,
+              "upToDataGB": 300,
+              "monthlyPrice": 14.99
+            },
+            {
+              "fromDataGB": 300,
+              "upToDataGB": 320,
+              "monthlyPrice": 16.99
+            },
+            {
+              "fromDataGB": 320,
+              "upToDataGB": 340,
+              "monthlyPrice": 18.99
+            }
+          ],
+          "conditions": [
+            "Forfait flexible: le prix mensuel dépend de la consommation de données.",
+            "Le tarif minimal ne constitue pas un prix garanti pour tous les paliers."
+          ],
+          "evidence": [
+            "De 300 à 340 Go/mois; 0-300 Go: 14.99 €; 300-320 Go: 16.99 €; 320-340 Go: 18.99 €"
+          ],
+          "sourceUrl": "https://www.prixtel.com/forfait-mobile/forfait-legeant/",
+          "retrievedAt": "2026-11-02T09:20:33.349Z",
+          "verifiedAt": "2026-11-02T09:20:33.349Z",
+          "verificationStatus": "VERIFIED"
+        },
+        {
+          "provider": "Prixtel",
+          "offerName": "Forfait Prixtel Le grand",
+          "monthlyPrice": null,
+          "includedDataGB": 240,
+          "unlimitedData": false,
+          "euDataGB": 32,
+          "network": null,
+          "technology": "5G",
+          "commitmentMonths": 0,
+          "promotionPrice": null,
+          "promotionDuration": null,
+          "priceAfterPromotion": null,
+          "activationFees": null,
+          "simFees": null,
+          "conditionalPrices": [],
+          "pricingTiers": [
+            {
+              "fromDataGB": 0,
+              "upToDataGB": 200,
+              "monthlyPrice": 11.99
+            },
+            {
+              "fromDataGB": 200,
+              "upToDataGB": 220,
+              "monthlyPrice": 13.99
+            },
+            {
+              "fromDataGB": 220,
+              "upToDataGB": 240,
+              "monthlyPrice": 15.99
+            }
+          ],
+          "conditions": [
+            "Forfait flexible: le prix mensuel dépend de la consommation de données.",
+            "Le tarif minimal ne constitue pas un prix garanti pour tous les paliers."
+          ],
+          "evidence": [
+            "De 200 à 240 Go/mois; 0-200 Go: 11.99 €; 200-220 Go: 13.99 €; 220-240 Go: 15.99 €"
+          ],
+          "sourceUrl": "https://www.prixtel.com/forfait-mobile/forfait-legrand/",
+          "retrievedAt": "2026-11-02T09:20:33.349Z",
+          "verifiedAt": null,
+          "verificationStatus": "PARTIAL"
+        },
+        {
+          "provider": "Prixtel",
+          "offerName": "Forfait Prixtel Le petit",
+          "monthlyPrice": null,
+          "includedDataGB": 40,
+          "unlimitedData": false,
+          "euDataGB": 10,
+          "network": null,
+          "technology": "4G",
+          "commitmentMonths": 0,
+          "promotionPrice": null,
+          "promotionDuration": null,
+          "priceAfterPromotion": null,
+          "activationFees": null,
+          "simFees": null,
+          "conditionalPrices": [],
+          "pricingTiers": [
+            {
+              "fromDataGB": 0,
+              "upToDataGB": 10,
+              "monthlyPrice": 6.99
+            },
+            {
+              "fromDataGB": 10,
+              "upToDataGB": 20,
+              "monthlyPrice": 8.99
+            },
+            {
+              "fromDataGB": 20,
+              "upToDataGB": 40,
+              "monthlyPrice": 10.99
+            }
+          ],
+          "conditions": [
+            "Forfait flexible: le prix mensuel dépend de la consommation de données.",
+            "Le tarif minimal ne constitue pas un prix garanti pour tous les paliers."
+          ],
+          "evidence": [
+            "De 10 à 40 Go/mois; 0-10 Go: 6.99 €; 10-20 Go: 8.99 €; 20-40 Go: 10.99 €"
+          ],
+          "sourceUrl": "https://www.prixtel.com/forfait-mobile/forfait-lepetit/",
+          "retrievedAt": "2026-11-02T09:20:33.349Z",
+          "verifiedAt": null,
+          "verificationStatus": "PARTIAL"
+        },
+        {
+          "provider": "Prixtel",
+          "offerName": "Forfait Prixtel Oxygène",
+          "monthlyPrice": null,
+          "includedDataGB": 140,
+          "unlimitedData": false,
+          "euDataGB": 32,
+          "network": null,
+          "technology": "5G",
+          "commitmentMonths": 0,
+          "promotionPrice": null,
+          "promotionDuration": null,
+          "priceAfterPromotion": null,
+          "activationFees": null,
+          "simFees": null,
+          "conditionalPrices": [],
+          "pricingTiers": [
+            {
+              "fromDataGB": 0,
+              "upToDataGB": 100,
+              "monthlyPrice": 9.99
+            },
+            {
+              "fromDataGB": 100,
+              "upToDataGB": 120,
+              "monthlyPrice": 11.99
+            },
+            {
+              "fromDataGB": 120,
+              "upToDataGB": 140,
+              "monthlyPrice": 13.99
+            }
+          ],
+          "conditions": [
+            "Forfait flexible: le prix mensuel dépend de la consommation de données.",
+            "Le tarif minimal ne constitue pas un prix garanti pour tous les paliers."
+          ],
+          "evidence": [
+            "De 100 à 140 Go/mois; 0-100 Go: 9.99 €; 100-120 Go: 11.99 €; 120-140 Go: 13.99 €"
+          ],
+          "sourceUrl": "https://www.prixtel.com/forfait-mobile/forfait-illimite/",
+          "retrievedAt": "2026-11-02T09:20:33.349Z",
+          "verifiedAt": null,
+          "verificationStatus": "PARTIAL"
+        }
+      ],
+      "failures": []
+    },
+    {
+      "provider": "NRJ Mobile",
+      "sourceUrl": "https://www.nrjmobile.fr/forfait-se",
+      "retrievedAt": "2026-11-02T09:20:33.354Z",
+      "offers": [
+        {
+          "provider": "NRJ Mobile",
+          "offerName": "Série spéciale NRJ Mobile Illimité",
+          "monthlyPrice": 17.49,
+          "includedDataGB": null,
+          "unlimitedData": true,
+          "euDataGB": 42,
+          "network": "Réseau Bouygues Telecom",
+          "technology": "5G",
+          "commitmentMonths": 0,
+          "promotionPrice": null,
+          "promotionDuration": null,
+          "priceAfterPromotion": null,
+          "activationFees": null,
+          "simFees": 1,
+          "conditionalPrices": [],
+          "pricingTiers": [],
+          "conditions": [
+            "Offre valable pour l'ouverture d'une nouvelle ligne."
+          ],
+          "evidence": [
+            "Carte SIM à 1€ Illimité POUR 17 €49 /mois SANS ENGAGEMENT jE VEUX ! Internet illimité en 5G depuis la France métropolitaine + 42 Go depuis l'Europe et DOM Appels et SMS/MMS illimités Voir le détail"
+          ],
+          "sourceUrl": "https://www.nrjmobile.fr/forfait-se",
+          "retrievedAt": "2026-11-02T09:20:33.354Z",
+          "verifiedAt": "2026-11-02T09:20:33.354Z",
+          "verificationStatus": "VERIFIED"
+        },
+        {
+          "provider": "NRJ Mobile",
+          "offerName": "Série spéciale NRJ Mobile 200 Go",
+          "monthlyPrice": 13.99,
+          "includedDataGB": 200,
+          "unlimitedData": false,
+          "euDataGB": 35,
+          "network": "Réseau Bouygues Telecom",
+          "technology": "5G",
+          "commitmentMonths": 0,
+          "promotionPrice": null,
+          "promotionDuration": null,
+          "priceAfterPromotion": null,
+          "activationFees": null,
+          "simFees": 1,
+          "conditionalPrices": [],
+          "pricingTiers": [],
+          "conditions": [
+            "Offre valable pour l'ouverture d'une nouvelle ligne."
+          ],
+          "evidence": [
+            "Carte SIM à 1€ 200 Go POUR 13 €99 /mois SANS ENGAGEMENT jE VEUX ! Internet 200 Go en 5G depuis la France métropolitaine + 35 Go depuis +160 destinations dont UE, DOM, USA, Canada, Suisse, Maroc, Tunisie, Algérie, Japon, Thaïlande... Appels et SMS/MMS illimités en France métropolitaine, Europe/DOM Voir le détail"
+          ],
+          "sourceUrl": "https://www.nrjmobile.fr/forfait-se",
+          "retrievedAt": "2026-11-02T09:20:33.354Z",
+          "verifiedAt": "2026-11-02T09:20:33.354Z",
+          "verificationStatus": "VERIFIED"
+        },
+        {
+          "provider": "NRJ Mobile",
+          "offerName": "Série spéciale NRJ Mobile 100 Go",
+          "monthlyPrice": 9.99,
+          "includedDataGB": 100,
+          "unlimitedData": false,
+          "euDataGB": 25,
+          "network": "Réseau Bouygues Telecom",
+          "technology": "5G",
+          "commitmentMonths": 0,
+          "promotionPrice": null,
+          "promotionDuration": null,
+          "priceAfterPromotion": null,
+          "activationFees": null,
+          "simFees": 1,
+          "conditionalPrices": [],
+          "pricingTiers": [],
+          "conditions": [
+            "Offre valable pour l'ouverture d'une nouvelle ligne."
+          ],
+          "evidence": [
+            "Carte SIM à 1€ 100 Go POUR 9 €99 /mois SANS ENGAGEMENT jE VEUX ! Internet 100 Go en 5G depuis la France métropolitaine + 25 Go depuis l'Europe et DOM Appels et SMS/MMS illimités Voir le détail"
+          ],
+          "sourceUrl": "https://www.nrjmobile.fr/forfait-se",
+          "retrievedAt": "2026-11-02T09:20:33.354Z",
+          "verifiedAt": "2026-11-02T09:20:33.354Z",
+          "verificationStatus": "VERIFIED"
+        },
+        {
+          "provider": "NRJ Mobile",
+          "offerName": "Série spéciale NRJ Mobile 10 Go",
+          "monthlyPrice": 7.99,
+          "includedDataGB": 10,
+          "unlimitedData": false,
+          "euDataGB": 10,
+          "network": "Réseau Bouygues Telecom",
+          "technology": "4G",
+          "commitmentMonths": 0,
+          "promotionPrice": null,
+          "promotionDuration": null,
+          "priceAfterPromotion": null,
+          "activationFees": null,
+          "simFees": 1,
+          "conditionalPrices": [],
+          "pricingTiers": [],
+          "conditions": [
+            "Offre valable pour l'ouverture d'une nouvelle ligne."
+          ],
+          "evidence": [
+            "Carte SIM à 1€ 10 Go POUR 7 €99 /mois SANS ENGAGEMENT jE VEUX ! Internet 10 Go en 4G depuis la France métropolitaine + 10 Go depuis l'Europe et DOM Appels et SMS/MMS illimités Voir le détail"
+          ],
+          "sourceUrl": "https://www.nrjmobile.fr/forfait-se",
+          "retrievedAt": "2026-11-02T09:20:33.354Z",
+          "verifiedAt": "2026-11-02T09:20:33.354Z",
+          "verificationStatus": "VERIFIED"
+        },
+        {
+          "provider": "NRJ Mobile",
+          "offerName": "Série spéciale NRJ Mobile 1 Go",
+          "monthlyPrice": 1.99,
+          "includedDataGB": 1,
+          "unlimitedData": false,
+          "euDataGB": 1,
+          "network": "Réseau Bouygues Telecom",
+          "technology": "4G",
+          "commitmentMonths": 0,
+          "promotionPrice": null,
+          "promotionDuration": null,
+          "priceAfterPromotion": null,
+          "activationFees": null,
+          "simFees": 5,
+          "conditionalPrices": [],
+          "pricingTiers": [],
+          "conditions": [
+            "Offre valable pour l'ouverture d'une nouvelle ligne."
+          ],
+          "evidence": [
+            "Carte SIM à 5€ 1 Go POUR 1 €99 /mois SANS ENGAGEMENT jE VEUX ! Internet 1 Go en 4G depuis la France métropolitaine + 1 Go depuis l'Europe et DOM Appels et SMS/MMS illimités Voir le détail"
+          ],
+          "sourceUrl": "https://www.nrjmobile.fr/forfait-se",
+          "retrievedAt": "2026-11-02T09:20:33.354Z",
+          "verifiedAt": "2026-11-02T09:20:33.354Z",
+          "verificationStatus": "VERIFIED"
+        }
+      ],
+      "failures": []
+    },
+    {
+      "provider": "Cdiscount Mobile",
+      "sourceUrl": "https://www.cdiscount.com/cdiscount-mobile/v-164-0.html",
+      "retrievedAt": "2026-11-02T09:20:33.356Z",
+      "offers": [],
+      "failures": [
+        {
+          "code": "STRUCTURE_CHANGED",
+          "message": "La page renvoyée ne contient pas de cartes d'offres exploitables (coquille JavaScript possible).",
+          "sourceUrl": "https://www.cdiscount.com/cdiscount-mobile/v-164-0.html"
+        }
+      ]
     }
   ],
   "summary": {
@@ -394,8 +1592,8 @@
     },
     "RED by SFR": {
       "detected": 4,
-      "verified": 0,
-      "partial": 4,
+      "verified": 4,
+      "partial": 0,
       "failed": 0
     },
     "B&You": {
@@ -403,6 +1601,42 @@
       "verified": 4,
       "partial": 4,
       "failed": 0
+    },
+    "Orange": {
+      "detected": 9,
+      "verified": 9,
+      "partial": 0,
+      "failed": 0
+    },
+    "Sosh": {
+      "detected": 5,
+      "verified": 0,
+      "partial": 5,
+      "failed": 0
+    },
+    "SFR": {
+      "detected": 6,
+      "verified": 4,
+      "partial": 2,
+      "failed": 0
+    },
+    "Prixtel": {
+      "detected": 4,
+      "verified": 1,
+      "partial": 3,
+      "failed": 0
+    },
+    "NRJ Mobile": {
+      "detected": 5,
+      "verified": 5,
+      "partial": 0,
+      "failed": 0
+    },
+    "Cdiscount Mobile": {
+      "detected": 0,
+      "verified": 0,
+      "partial": 0,
+      "failed": 1
     }
   }
 }

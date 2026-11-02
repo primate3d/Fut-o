@@ -1,6 +1,29 @@
-export type Provider = "Free Mobile" | "RED by SFR" | "B&You";
+export type Provider =
+  | "Free Mobile"
+  | "RED by SFR"
+  | "B&You"
+  | "Orange"
+  | "Sosh"
+  | "SFR"
+  | "Prixtel"
+  | "NRJ Mobile"
+  | "Cdiscount Mobile";
 
 export type VerificationStatus = "VERIFIED" | "PARTIAL" | "FAILED";
+
+export interface ConditionalPrice {
+  kind: "BOX" | "NEW_CUSTOMER" | "AGE" | "MULTILINE" | "OTHER";
+  monthlyPrice: number;
+  durationMonths: number | null;
+  priceAfter: number | null;
+  condition: string;
+}
+
+export interface PricingTier {
+  fromDataGB: number;
+  upToDataGB: number;
+  monthlyPrice: number;
+}
 
 export interface MobileOffer {
   provider: Provider;
@@ -10,13 +33,17 @@ export interface MobileOffer {
   unlimitedData: boolean | null;
   euDataGB: number | null;
   network: string | null;
+  technology: string | null;
   commitmentMonths: number | null;
   promotionPrice: number | null;
   promotionDuration: number | null;
   priceAfterPromotion: number | null;
   activationFees: number | null;
   simFees: number | null;
+  conditionalPrices: ConditionalPrice[];
+  pricingTiers: PricingTier[];
   conditions: string[];
+  evidence: string[];
   sourceUrl: string;
   retrievedAt: string;
   verifiedAt: string | null;
@@ -45,7 +72,7 @@ export interface CollectionSummary {
 }
 
 export interface CollectionSnapshot {
-  schemaVersion: 1;
+  schemaVersion: 1 | 2;
   retrievedAt: string;
   results: CollectorResult[];
   summary: Record<Provider, CollectionSummary>;
@@ -57,6 +84,7 @@ export type ChangeType =
   | "PRICE_CHANGED"
   | "DATA_CHANGED"
   | "PROMOTION_CHANGED"
+  | "TIERS_CHANGED"
   | "CONDITIONS_CHANGED";
 
 export interface OfferChange {

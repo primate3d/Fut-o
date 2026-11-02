@@ -95,14 +95,37 @@ export function compareSnapshots(
         },
       });
     }
+    if (changed(before.pricingTiers ?? [], after.pricingTiers ?? [])) {
+      changes.push({
+        ...base,
+        type: "TIERS_CHANGED",
+        before: { pricingTiers: before.pricingTiers ?? [] },
+        after: { pricingTiers: after.pricingTiers ?? [] },
+      });
+    }
     if (
-      changed([...before.conditions].sort(), [...after.conditions].sort())
+      changed(
+        {
+          conditions: [...before.conditions].sort(),
+          conditionalPrices: before.conditionalPrices ?? [],
+        },
+        {
+          conditions: [...after.conditions].sort(),
+          conditionalPrices: after.conditionalPrices ?? [],
+        },
+      )
     ) {
       changes.push({
         ...base,
         type: "CONDITIONS_CHANGED",
-        before: { conditions: before.conditions },
-        after: { conditions: after.conditions },
+        before: {
+          conditions: before.conditions,
+          conditionalPrices: before.conditionalPrices ?? [],
+        },
+        after: {
+          conditions: after.conditions,
+          conditionalPrices: after.conditionalPrices ?? [],
+        },
       });
     }
   }

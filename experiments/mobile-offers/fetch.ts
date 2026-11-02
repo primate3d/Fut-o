@@ -9,6 +9,16 @@ const OFFICIAL_HOSTS = new Set([
   "www.red-by-sfr.fr",
   "bouyguestelecom.fr",
   "www.bouyguestelecom.fr",
+  "boutique.orange.fr",
+  "shop.sosh.fr",
+  "sfr.fr",
+  "www.sfr.fr",
+  "prixtel.com",
+  "www.prixtel.com",
+  "nrjmobile.fr",
+  "www.nrjmobile.fr",
+  "cdiscount.com",
+  "www.cdiscount.com",
 ]);
 
 export function assertOfficialUrl(value: string): URL {

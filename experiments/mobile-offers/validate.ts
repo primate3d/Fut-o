@@ -37,6 +37,16 @@ export function validateOffer(offer: MobileOffer): MobileOffer {
     offer.priceAfterPromotion,
     offer.activationFees,
     offer.simFees,
+    ...offer.conditionalPrices.flatMap((price) => [
+      price.monthlyPrice,
+      price.durationMonths,
+      price.priceAfter,
+    ]),
+    ...offer.pricingTiers.flatMap((tier) => [
+      tier.fromDataGB,
+      tier.upToDataGB,
+      tier.monthlyPrice,
+    ]),
   ].some((value) => value !== null && (!Number.isFinite(value) || value < 0));
 
   const contradictoryData =
@@ -49,17 +59,26 @@ export function validateOffer(offer: MobileOffer): MobileOffer {
     offer.promotionPrice !== null &&
     offer.priceAfterPromotion !== null &&
     offer.promotionPrice > offer.priceAfterPromotion;
+  const invalidTiers = offer.pricingTiers.some(
+    (tier) =>
+      tier.monthlyPrice <= 0 ||
+      tier.fromDataGB < 0 ||
+      tier.upToDataGB <= tier.fromDataGB,
+  );
+  const hasUsablePrice =
+    offer.monthlyPrice !== null || offer.pricingTiers.length > 0;
 
   if (
     invalidNumber ||
     contradictoryData ||
     invalidPrice ||
     contradictoryPromotion ||
+    invalidTiers ||
     !offer.offerName.trim()
   ) {
     computed = "FAILED";
   } else if (
-    offer.monthlyPrice === null ||
+    !hasUsablePrice ||
     (offer.unlimitedData !== true && offer.includedDataGB === null) ||
     offer.unlimitedData === null ||
     offer.network === null ||
