@@ -358,12 +358,18 @@ test("mixed EDF / MACIF multi-contract / SFR box / mobile preserves every docume
   assert.equal(result.expenses.filter((expense) => expense.sourceDocumentId === "sfr").length, 1);
   assert.equal(result.expenses.find((expense) => expense.sourceDocumentId === "mobile")!.mobileDataGB, 100);
   const { findAlternativeOffers } = await import("../features/recommendations/service");
+  const { getEmbeddedMobileCatalog } = await import(
+    "../features/recommendations/mobile-catalog"
+  );
   const alternatives = findAlternativeOffers(
     result.expenses.map((expense) =>
       expense.subcategory === ExpenseSubcategory.MOBILE
         ? { ...expense, mobileAllowLowerDataOffers: true }
         : expense
-    )
+    ),
+    {
+      mobileCatalog: getEmbeddedMobileCatalog(new Date("2026-11-02T10:00:00.000Z"))
+    }
   );
   assert.ok(alternatives.length > 0);
   assert.ok(alternatives.some((offer) => offer.comparisonKind === "reduced_data"));
@@ -1027,6 +1033,9 @@ test("mobile PDF normalization separates recurring prices, invoice totals and da
 
 test("uncertain mobile recurring totals do not produce alternatives", async () => {
   const { findAlternativeOffers } = await import("../features/recommendations/service");
+  const { getEmbeddedMobileCatalog } = await import(
+    "../features/recommendations/mobile-catalog"
+  );
   const expense: Expense = {
     id: `mobile_${randomUUID()}`,
     label: "Forfait mobile",
@@ -1042,7 +1051,9 @@ test("uncertain mobile recurring totals do not produce alternatives", async () =
     mobileRecurringAmountNeedsConfirmation: true
   };
 
-  assert.deepEqual(findAlternativeOffers([expense]), []);
+  assert.deepEqual(findAlternativeOffers([expense], {
+    mobileCatalog: getEmbeddedMobileCatalog(new Date("2026-11-02T10:00:00.000Z"))
+  }), []);
 });
 
 test("latest alternatives request rejects stale out-of-order responses", async () => {
@@ -1066,6 +1077,12 @@ test("mobile comparison uses included data and separates opt-in lower-data compr
   const { findAlternativeOffers, isPrimaryAlternative } = await import(
     "../features/recommendations/service"
   );
+  const { getEmbeddedMobileCatalog } = await import(
+    "../features/recommendations/mobile-catalog"
+  );
+  const options = {
+    mobileCatalog: getEmbeddedMobileCatalog(new Date("2026-11-02T10:00:00.000Z"))
+  };
   const mobileExpense = (overrides: Partial<Expense> = {}): Expense => ({
     id: `mobile_${randomUUID()}`,
     label: "Forfait mobile",
@@ -1084,7 +1101,7 @@ test("mobile comparison uses included data and separates opt-in lower-data compr
   });
 
   const current = mobileExpense({ mobileConsumedDataGB: 10 });
-  const strictOffers = findAlternativeOffers([current]);
+  const strictOffers = findAlternativeOffers([current], options);
   assert.ok(strictOffers.length > 0);
   assert.ok(strictOffers.every(isPrimaryAlternative));
   assert.ok(
@@ -1095,7 +1112,7 @@ test("mobile comparison uses included data and separates opt-in lower-data compr
 
   const optedIn = findAlternativeOffers([
     { ...current, mobileAllowLowerDataOffers: true }
-  ]);
+  ], options);
   const primary = optedIn.filter(isPrimaryAlternative);
   const reduced = optedIn.filter((offer) => offer.comparisonKind === "reduced_data");
   assert.deepEqual(
@@ -1109,7 +1126,7 @@ test("mobile comparison uses included data and separates opt-in lower-data compr
 
   const decimalOffers = findAlternativeOffers([
     mobileExpense({ mobileDataGB: 12.5, mobileIncludedDataGB: 12.5 })
-  ]);
+  ], options);
   assert.ok(decimalOffers.every((offer) => (offer.mobileDataLimitGB ?? Infinity) >= 12.5));
 
   const unlimitedStrict = findAlternativeOffers([
@@ -1118,7 +1135,7 @@ test("mobile comparison uses included data and separates opt-in lower-data compr
       mobileIncludedDataGB: undefined,
       mobileDataUnlimited: true
     })
-  ]);
+  ], options);
   assert.ok(unlimitedStrict.every((offer) => offer.mobileDataUnlimited));
 
   const unlimitedOptIn = findAlternativeOffers([
@@ -1128,18 +1145,27 @@ test("mobile comparison uses included data and separates opt-in lower-data compr
       mobileDataUnlimited: true,
       mobileAllowLowerDataOffers: true
     })
-  ]);
+  ], options);
   assert.ok(unlimitedOptIn.length > 0);
-  assert.ok(unlimitedOptIn.every((offer) => offer.comparisonKind === "reduced_data"));
+  assert.ok(
+    unlimitedOptIn
+      .filter(isPrimaryAlternative)
+      .every((offer) => offer.mobileDataUnlimited)
+  );
+  assert.ok(
+    unlimitedOptIn
+      .filter((offer) => !offer.mobileDataUnlimited)
+      .every((offer) => offer.comparisonKind === "reduced_data")
+  );
 
   const legacyOffers = findAlternativeOffers([
     mobileExpense({ mobileDataGB: 100, mobileIncludedDataGB: undefined })
-  ]);
+  ], options);
   assert.ok(legacyOffers.length > 0);
   assert.ok(legacyOffers.every((offer) => (offer.mobileDataLimitGB ?? Infinity) >= 100));
 
   const second = mobileExpense({ mobileDataGB: 12.5, mobileIncludedDataGB: 12.5 });
-  const multiple = findAlternativeOffers([current, second]);
+  const multiple = findAlternativeOffers([current, second], options);
   assert.ok(multiple.some((offer) => offer.id.startsWith(`alternative_${current.id}_`)));
   assert.ok(multiple.some((offer) => offer.id.startsWith(`alternative_${second.id}_`)));
 });
@@ -1326,6 +1352,39 @@ test("letters API enforces key, expiration, plan and server-owned analysis", asy
   const payload = JSON.stringify(await response.json());
   assert.match(payload, /EDF/);
   assert.doesNotMatch(payload, /SFR/);
+});
+
+test("alternatives API ignores browser expenses and uses the key-owned analysis", async () => {
+  const owner = fakeKey();
+  const foreign = fakeKey();
+  await repo.saveKey(owner);
+  await repo.saveKey(foreign);
+  const ownerAnalysis = analysisWithProvider(owner.code, "EDF");
+  const foreignAnalysis = analysisWithProvider(foreign.code, "SFR");
+  ownerAnalysis.expenses[0].subcategory = ExpenseSubcategory.ELECTRICITY;
+  foreignAnalysis.expenses[0].subcategory = ExpenseSubcategory.ELECTRICITY;
+  await repo.saveAnalysis(owner.code, ownerAnalysis);
+  await repo.saveAnalysis(foreign.code, foreignAnalysis);
+
+  const { POST } = await import("../app/api/alternatives/route");
+  const response = await POST(new Request("http://local.test/api/alternatives", {
+    method: "POST",
+    body: JSON.stringify({
+      code: owner.code,
+      expenses: foreignAnalysis.expenses
+    })
+  }));
+  assert.equal(response.status, 200);
+  const payload = (await response.json()) as {
+    alternatives: Array<{ sourceExpenseId?: string }>;
+  };
+  assert.ok(payload.alternatives.length > 0);
+  assert.ok(payload.alternatives.every(
+    (offer) => offer.sourceExpenseId === ownerAnalysis.expenses[0].id
+  ));
+  assert.ok(payload.alternatives.every(
+    (offer) => offer.sourceExpenseId !== foreignAnalysis.expenses[0].id
+  ));
 });
 
 test("missing and invalid expirations are rejected fail-closed", async () => {

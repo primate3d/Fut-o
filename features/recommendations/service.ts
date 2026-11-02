@@ -11,6 +11,12 @@ import {
   type MobileProfile
 } from "@/config/marketOffers";
 import { getProviderBranding } from "@/lib/provider-branding";
+import type { MobileCatalog } from "./mobile-catalog";
+import type {
+  ConditionalPrice,
+  MobileOffer,
+  PricingTier
+} from "@/experiments/mobile-offers/types";
 
 export async function generateRecommendationsStub(
   _expenses: Expense[]
@@ -28,9 +34,29 @@ export type AlternativeOffer = {
   monthlyPrice: number;
   yearlyPrice: number;
   estimatedYearlySaving: number;
+  sourceExpenseId?: string;
   reason: string;
   action: string;
-  comparisonKind?: "equivalent" | "reduced_data";
+  comparisonKind?:
+    | "equivalent"
+    | "reduced_data"
+    | "additional_commitment"
+    | "requires_validation";
+  savingKind?: "certified" | "temporary" | "recurring_only";
+  recurringYearlySaving?: number;
+  netFirstYearSaving?: number;
+  publicMonthlyPrice?: number;
+  promotionPrice?: number;
+  promotionDurationMonths?: number;
+  priceAfterPromotion?: number;
+  knownEntryFees?: number;
+  entryFeesKnown?: boolean;
+  commitmentMonths?: number;
+  technology?: string;
+  conditions?: string[];
+  conditionalPrices?: ConditionalPrice[];
+  verifiedAt?: string;
+  priceRange?: { min: number; max: number };
   mobileDataLimitGB?: number;
   mobileDataUnlimited?: boolean;
 };
@@ -107,7 +133,12 @@ export function classifyMobileProfile(currentDataGB: number): MobileProfile | un
 }
 
 export function isPrimaryAlternative(offer: AlternativeOffer) {
-  return offer.comparisonKind !== "reduced_data";
+  return (
+    offer.comparisonKind !== "reduced_data" &&
+    offer.comparisonKind !== "additional_commitment" &&
+    offer.comparisonKind !== "requires_validation" &&
+    offer.savingKind !== "temporary"
+  );
 }
 
 const alternativesByCategory: Partial<Record<ExpenseCategory, AlternativeTemplate[]>> = {
@@ -217,80 +248,6 @@ const alternativesByCategory: Partial<Record<ExpenseCategory, AlternativeTemplat
       reason: "Débit ultra-rapide et services inclus très compétitifs pour la première année.",
       action: "Vérifier le prix hors promotion après la 1ère année."
     },
-    // --- MOBILE ---
-    {
-      provider: "Prixtel",
-      name: "Forfait flexible",
-      url: "https://www.prixtel.com/",
-      monthlyPrice: 5.99,
-      subcategories: [ExpenseSubcategory.MOBILE],
-      dataLimitGB: 40,
-      reason: "Le prix s'ajuste chaque mois à votre consommation réelle de data.",
-      action: "Idéal si votre consommation internet varie beaucoup d'un mois à l'autre."
-    },
-    {
-      provider: "Lebara",
-      name: "Forfait sans engagement",
-      url: "https://mobile.lebara.com/fr/fr/",
-      monthlyPrice: 5.99,
-      subcategories: [ExpenseSubcategory.MOBILE],
-      dataLimitGB: 40,
-      reason: "Forfait utilisant le réseau Orange, souvent avec beaucoup de data à petit prix.",
-      action: "Vérifier si l'absence de MMS (souvent non inclus) vous pose problème."
-    },
-    {
-      provider: "Syma Mobile",
-      name: "Le Neuf (5G)",
-      url: "https://www.symamobile.com/",
-      monthlyPrice: 9.99,
-      subcategories: [ExpenseSubcategory.MOBILE],
-      dataLimitGB: 150,
-      reason: "Très bonne offre 5G avec une large enveloppe data sur le réseau SFR.",
-      action: "Vérifier la couverture réseau SFR dans votre région."
-    },
-    {
-      provider: "La Poste Mobile",
-      name: "Forfait SIM sans engagement",
-      url: "https://www.lapostemobile.fr/",
-      monthlyPrice: 10.99,
-      subcategories: [ExpenseSubcategory.MOBILE],
-      dataLimitGB: 60,
-      reason: "Alternative solide avec l'avantage de pouvoir se rendre en bureau de poste en cas de besoin.",
-      action: "Comparer avec les offres 100% digitales si vous préférez un accompagnement."
-    },
-    {
-      provider: "Free Mobile",
-      name: "Forfait 2€ (ou 0€ abonnés Freebox)",
-      url: "https://mobile.free.fr/",
-      monthlyPrice: 2.00,
-      subcategories: [ExpenseSubcategory.MOBILE],
-      dataLimitGB: 0.05,
-      requiresBundle: { category: "INTERNET", provider: "free" },
-      reason: "Imbattable pour les très petits besoins (peu d'appels, peu de data).",
-      action: "Attention au hors-forfait si vous utilisez beaucoup internet."
-    },
-    {
-      provider: "Cdiscount Mobile",
-      name: "Forfait 300 Go 5G",
-      url: "https://www.cdiscount.com/cdiscountmobile",
-      monthlyPrice: 12.99,
-      subcategories: [ExpenseSubcategory.MOBILE],
-      dataLimitGB: 300,
-      reason:
-        "Forfait 300 Go 5G sans engagement affiche a 12,99 EUR/mois sur la page Cdiscount Mobile le 26/05/2026.",
-      action:
-        "Verifier le tarif en vigueur, la couverture reseau et que 300 Go couvrent votre usage habituel."
-    },
-    {
-      provider: "B&You",
-      name: "Série Spéciale",
-      url: "https://www.bouyguestelecom.fr/forfaits-mobiles/sans-engagement",
-      monthlyPrice: 8.99,
-      subcategories: [ExpenseSubcategory.MOBILE],
-      dataLimitGB: 100,
-      reason: "Excellente couverture (Bouygues) et forfaits souvent riches en data pour moins de 10€.",
-      action: "Comparer les promotions du moment."
-    }
   ],
   [ExpenseCategory.INSURANCE]: [
     {
@@ -449,8 +406,296 @@ function adaptInternetTemplateToDetectedServices(
   return template;
 }
 
-export function findAlternativeOffers(expenses: Expense[]): AlternativeOffer[] {
+type AlternativeSearchOptions = {
+  mobileCatalog?: MobileCatalog;
+};
+
+type MobilePrice = {
+  monthlyPrice: number;
+  publicMonthlyPrice: number;
+  durableMonthlyPrice: number;
+  firstYearRecurringCost: number;
+  promotionPrice?: number;
+  promotionDurationMonths?: number;
+  priceAfterPromotion?: number;
+  priceRange?: { min: number; max: number };
+};
+
+function roundMoney(value: number) {
+  return Math.round(value * 100) / 100;
+}
+
+function stableOfferToken(value: string) {
+  let hash = 2166136261;
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0).toString(36);
+}
+
+function isConditionalPromotion(offer: MobileOffer) {
+  return offer.promotionPrice !== null && offer.conditionalPrices.some(
+    (conditional) =>
+      conditional.monthlyPrice === offer.promotionPrice &&
+      conditional.durationMonths === offer.promotionDuration
+  );
+}
+
+function tierForConsumption(tiers: PricingTier[], consumption: number) {
+  const sorted = [...tiers].sort((left, right) => left.upToDataGB - right.upToDataGB);
+  return sorted.find((tier, index) =>
+    consumption <= tier.upToDataGB &&
+    (index === 0 ? consumption >= tier.fromDataGB : consumption > tier.fromDataGB)
+  );
+}
+
+function mobilePrice(offer: MobileOffer, expense: Expense): MobilePrice | null {
+  if (offer.pricingTiers.length > 0) {
+    const prices = offer.pricingTiers.map((tier) => tier.monthlyPrice);
+    const selectedTier = typeof expense.mobileConsumedDataGB === "number"
+      ? tierForConsumption(offer.pricingTiers, expense.mobileConsumedDataGB)
+      : [...offer.pricingTiers].sort(
+          (left, right) => right.monthlyPrice - left.monthlyPrice
+        )[0];
+    if (!selectedTier) return null;
+    return {
+      monthlyPrice: selectedTier.monthlyPrice,
+      publicMonthlyPrice: selectedTier.monthlyPrice,
+      durableMonthlyPrice: selectedTier.monthlyPrice,
+      firstYearRecurringCost: roundMoney(selectedTier.monthlyPrice * 12),
+      priceRange: {
+        min: Math.min(...prices),
+        max: Math.max(...prices)
+      }
+    };
+  }
+
+  if (offer.monthlyPrice === null) return null;
+  const publicPromotion =
+    offer.promotionPrice !== null &&
+    offer.promotionDuration !== null &&
+    offer.priceAfterPromotion !== null &&
+    !isConditionalPromotion(offer);
+  if (!publicPromotion) {
+    return {
+      monthlyPrice: offer.monthlyPrice,
+      publicMonthlyPrice: offer.monthlyPrice,
+      durableMonthlyPrice: offer.monthlyPrice,
+      firstYearRecurringCost: roundMoney(offer.monthlyPrice * 12)
+    };
+  }
+
+  const promotionMonths = Math.min(12, offer.promotionDuration!);
+  const firstYearRecurringCost =
+    offer.promotionPrice! * promotionMonths +
+    offer.priceAfterPromotion! * (12 - promotionMonths);
+  return {
+    monthlyPrice: offer.promotionPrice!,
+    publicMonthlyPrice: offer.monthlyPrice,
+    durableMonthlyPrice: offer.priceAfterPromotion!,
+    firstYearRecurringCost: roundMoney(firstYearRecurringCost),
+    promotionPrice: offer.promotionPrice!,
+    promotionDurationMonths: offer.promotionDuration!,
+    priceAfterPromotion: offer.priceAfterPromotion!
+  };
+}
+
+function mobileComparisonKind(
+  expense: Expense,
+  offer: MobileOffer
+): AlternativeOffer["comparisonKind"] | null {
+  const currentIncluded = typeof expense.mobileIncludedDataGB === "number"
+    ? expense.mobileIncludedDataGB
+    : expense.mobileDataGB;
+  const offerIncluded = offer.includedDataGB;
+  let reducedData = false;
+
+  if (expense.mobileDataUnlimited) {
+    reducedData = offer.unlimitedData !== true;
+  } else {
+    if (typeof currentIncluded !== "number") return null;
+    if (offer.unlimitedData !== true) {
+      if (typeof offerIncluded !== "number") return null;
+      reducedData = offerIncluded < currentIncluded;
+    }
+  }
+
+  if (reducedData) {
+    if (!expense.mobileAllowLowerDataOffers) return null;
+    if (
+      typeof expense.mobileConsumedDataGB === "number" &&
+      (offerIncluded === null || offerIncluded < expense.mobileConsumedDataGB)
+    ) {
+      return null;
+    }
+    return "reduced_data";
+  }
+
+  if ((offer.commitmentMonths ?? 0) > 0) {
+    return "additional_commitment";
+  }
+
+  if (
+    typeof expense.mobileRoamingIncludedDataGB === "number" &&
+    (offer.euDataGB === null || offer.euDataGB < expense.mobileRoamingIncludedDataGB)
+  ) {
+    return "requires_validation";
+  }
+
+  return "equivalent";
+}
+
+function mobileReason(
+  offer: MobileOffer,
+  expense: Expense,
+  kind: NonNullable<AlternativeOffer["comparisonKind"]>,
+  price: MobilePrice,
+  entryFeesKnown: boolean
+) {
+  const notes = [
+    offer.unlimitedData
+      ? "Données mobiles illimitées."
+      : `${formatMobileData(offer.includedDataGB ?? 0)} Go inclus.`,
+    offer.technology ? `Réseau ${offer.technology}.` : null,
+    kind === "reduced_data"
+      ? "Volume inférieur : compromis accepté par l'utilisateur, jamais traité comme équivalent."
+      : null,
+    kind === "additional_commitment"
+      ? `Engagement de ${offer.commitmentMonths} mois : validation nécessaire.`
+      : null,
+    kind === "requires_validation"
+      ? `Enveloppe Europe insuffisante ou non vérifiée par rapport aux ${formatMobileData(expense.mobileRoamingIncludedDataGB ?? 0)} Go actuels.`
+      : null,
+    price.promotionPrice !== undefined
+      ? `Promotion à ${formatCurrency(price.promotionPrice)} pendant ${price.promotionDurationMonths} mois, puis ${formatCurrency(price.priceAfterPromotion ?? price.publicMonthlyPrice)}.`
+      : null,
+    price.priceRange
+      ? `Tarif évolutif de ${formatCurrency(price.priceRange.min)} à ${formatCurrency(price.priceRange.max)} selon la consommation.`
+      : null,
+    !entryFeesKnown
+      ? "Frais d'entrée incomplets : économie nette sur 12 mois non certifiable."
+      : null
+  ].filter((note): note is string => Boolean(note));
+  return notes.join(" ");
+}
+
+function mobileAlternativesForExpense(
+  expense: Expense,
+  catalog: MobileCatalog
+): AlternativeOffer[] {
+  if (
+    expense.mobileRecurringAmountNeedsConfirmation ||
+    catalog.status !== "fresh"
+  ) {
+    return [];
+  }
+
+  const currentYearlyCost = roundMoney(expense.monthlyAmount * 12);
+  const offers = catalog.offers.flatMap((offer) => {
+    const comparisonKind = mobileComparisonKind(expense, offer);
+    const price = mobilePrice(offer, expense);
+    if (!comparisonKind || !price) return [];
+
+    const knownEntryFees = roundMoney(
+      (offer.activationFees ?? 0) + (offer.simFees ?? 0)
+    );
+    const entryFeesKnown =
+      offer.activationFees !== null && offer.simFees !== null;
+    const firstYearCost = roundMoney(price.firstYearRecurringCost + knownEntryFees);
+    const netFirstYearSaving = entryFeesKnown
+      ? Math.max(0, roundMoney(currentYearlyCost - firstYearCost))
+      : undefined;
+    const recurringYearlySaving = Math.max(
+      0,
+      roundMoney((expense.monthlyAmount - price.durableMonthlyPrice) * 12)
+    );
+    const temporary =
+      price.promotionPrice !== undefined &&
+      netFirstYearSaving !== undefined &&
+      netFirstYearSaving > 0 &&
+      recurringYearlySaving === 0;
+    const savingKind: NonNullable<AlternativeOffer["savingKind"]> = temporary
+      ? "temporary"
+      : entryFeesKnown && netFirstYearSaving !== undefined
+        ? "certified"
+        : "recurring_only";
+
+    if ((netFirstYearSaving ?? 0) <= 0 && recurringYearlySaving <= 0) {
+      return [];
+    }
+
+    const estimatedYearlySaving =
+      savingKind === "certified" ? netFirstYearSaving ?? 0 : 0;
+    const idToken = stableOfferToken(
+      `${offer.provider}|${offer.offerName}|${offer.sourceUrl}`
+    );
+
+    return [{
+      id: `alternative_${expense.id}_${idToken}`,
+      sourceExpenseId: expense.id,
+      category: expense.category,
+      provider: offer.provider,
+      logoUrl: getProviderBranding(offer.provider).logoUrl,
+      name: offer.offerName,
+      url: offer.sourceUrl,
+      monthlyPrice: price.monthlyPrice,
+      publicMonthlyPrice: price.publicMonthlyPrice,
+      yearlyPrice: firstYearCost,
+      estimatedYearlySaving,
+      recurringYearlySaving,
+      ...(netFirstYearSaving !== undefined ? { netFirstYearSaving } : {}),
+      reason: mobileReason(offer, expense, comparisonKind, price, entryFeesKnown),
+      action: "Vérifier les conditions sur la source officielle avant toute souscription.",
+      comparisonKind,
+      savingKind,
+      ...(price.promotionPrice !== undefined
+        ? {
+            promotionPrice: price.promotionPrice,
+            promotionDurationMonths: price.promotionDurationMonths,
+            priceAfterPromotion: price.priceAfterPromotion
+          }
+        : {}),
+      knownEntryFees,
+      entryFeesKnown,
+      commitmentMonths: offer.commitmentMonths ?? undefined,
+      technology: offer.technology ?? undefined,
+      conditions: offer.conditions,
+      conditionalPrices: offer.conditionalPrices,
+      verifiedAt: offer.verifiedAt ?? undefined,
+      ...(price.priceRange ? { priceRange: price.priceRange } : {}),
+      ...(typeof offer.includedDataGB === "number"
+        ? { mobileDataLimitGB: offer.includedDataGB }
+        : {}),
+      ...(offer.unlimitedData ? { mobileDataUnlimited: true } : {})
+    }];
+  });
+
+  const score = (offer: AlternativeOffer) =>
+    offer.netFirstYearSaving ?? offer.recurringYearlySaving ?? 0;
+  const sorted = offers.sort((left, right) => score(right) - score(left));
+  const equivalent = sorted.filter(isPrimaryAlternative).slice(0, 4);
+  const temporary = sorted.filter((offer) => offer.savingKind === "temporary").slice(0, 2);
+  const compromises = sorted.filter(
+    (offer) => !isPrimaryAlternative(offer) && offer.savingKind !== "temporary"
+  ).slice(0, 4);
+  return [...equivalent, ...temporary, ...compromises];
+}
+
+export function findAlternativeOffers(
+  expenses: Expense[],
+  options: AlternativeSearchOptions = {}
+): AlternativeOffer[] {
+  const mobileOffers = options.mobileCatalog
+    ? expenses
+        .filter((expense) => expense.subcategory === ExpenseSubcategory.MOBILE)
+        .flatMap((expense) => mobileAlternativesForExpense(
+          expense,
+          options.mobileCatalog!
+        ))
+    : [];
   const offers = expenses
+    .filter((expense) => expense.subcategory !== ExpenseSubcategory.MOBILE)
     .flatMap((expense) => {
       if (
         expense.subcategory === ExpenseSubcategory.MOBILE &&
@@ -567,6 +812,7 @@ export function findAlternativeOffers(expenses: Expense[]): AlternativeOffer[] {
 
         return {
           id: `alternative_${expense.id}_${templateIndex}`,
+          sourceExpenseId: expense.id,
           category: expense.category,
           provider: template.provider,
           logoUrl: getProviderBranding(template.provider).logoUrl,
@@ -599,7 +845,7 @@ export function findAlternativeOffers(expenses: Expense[]): AlternativeOffer[] {
   const reducedDataOffers = offers
     .filter((offer) => offer.comparisonKind === "reduced_data")
     .slice(0, 8);
-  return [...primaryOffers, ...reducedDataOffers];
+  return [...primaryOffers, ...reducedDataOffers, ...mobileOffers];
 }
 
 export function findConditionalInternetSupportOffers(

@@ -90,6 +90,7 @@ function isManualAnalysis(analysis: MockAnalysis | null) {
 }
 
 function getExpenseIdFromAlternativeId(offer: AlternativeOffer, analysis: MockAnalysis) {
+  if (offer.sourceExpenseId) return offer.sourceExpenseId;
   return analysis.expenses.find((expense) =>
     offer.id.startsWith(`alternative_${expense.id}_`)
   )?.id;
@@ -114,16 +115,14 @@ function computeAlternativeSavings(analysis: MockAnalysis, alternatives: Alterna
 }
 
 function computeVerifiedOfferSaving(offer: AlternativeOffer, analysis: MockAnalysis) {
-  const expense = analysis.expenses.find((candidate) =>
-    offer.id.startsWith(`alternative_${candidate.id}_`)
-  );
-
-  if (!expense) return offer.estimatedYearlySaving;
-
-  return Math.max(0, expense.yearlyAmount - offer.yearlyPrice);
+  void analysis;
+  return offer.estimatedYearlySaving;
 }
 
 function getExpenseForAlternative(offer: AlternativeOffer, analysis: MockAnalysis) {
+  if (offer.sourceExpenseId) {
+    return analysis.expenses.find((expense) => expense.id === offer.sourceExpenseId);
+  }
   return analysis.expenses.find((expense) =>
     offer.id.startsWith(`alternative_${expense.id}_`)
   );
@@ -239,6 +238,8 @@ export function ResultsPanel() {
   const [alternatives, setAlternatives] = useState<AlternativeOffer[]>([]);
   const [isLoadingAlternatives, setIsLoadingAlternatives] = useState(false);
   const [alternativesUpdatedAt, setAlternativesUpdatedAt] = useState<string | null>(null);
+  const [catalogStatus, setCatalogStatus] = useState<"fresh" | "stale" | "empty" | null>(null);
+  const [comparisonMessage, setComparisonMessage] = useState<string | null>(null);
   const [selectedOffer, setSelectedOffer] = useState<SelectedAlternativeOffer | null>(null);
   const [serviceMessage, setServiceMessage] = useState<string | null>(null);
   const [manualForm, setManualForm] = useState<ManualEntryForm>({
@@ -462,7 +463,7 @@ export function ResultsPanel() {
           "Content-Type": "application/json"
         },
         signal: request.signal,
-        body: JSON.stringify({ code: activeKey?.code, expenses: analysisToLoad.expenses })
+        body: JSON.stringify({ code: activeKey?.code })
       });
 
       if (!response.ok) {
@@ -471,6 +472,11 @@ export function ResultsPanel() {
 
       const payload = (await response.json()) as {
         alternatives?: AlternativeOffer[];
+        catalog?: {
+          status?: "fresh" | "stale" | "empty";
+          verifiedAt?: string | null;
+        };
+        comparisonMessage?: string | null;
       };
       if (!requestController.isCurrent(request)) return;
 
@@ -497,11 +503,16 @@ export function ResultsPanel() {
       setSelectedOffer((currentOffer) =>
         refreshSelectedAlternativeOffer(currentOffer, nextAlternatives)
       );
-      setAlternativesUpdatedAt(new Date().toISOString());
+      setAlternativesUpdatedAt(payload.catalog?.verifiedAt ?? null);
+      setCatalogStatus(payload.catalog?.status ?? null);
+      setComparisonMessage(payload.comparisonMessage ?? null);
     } catch {
       if (!requestController.isCurrent(request)) return;
 
       setAlternatives([]);
+      setAlternativesUpdatedAt(null);
+      setCatalogStatus(null);
+      setComparisonMessage(null);
       setServiceMessage(
         "Les alternatives détaillées seront affichées quand le service de comparaison sera connecté."
       );
@@ -599,8 +610,16 @@ export function ResultsPanel() {
     () => alternatives.filter(isPrimaryAlternative),
     [alternatives]
   );
-  const reducedDataAlternatives = useMemo(
-    () => alternatives.filter((offer) => offer.comparisonKind === "reduced_data"),
+  const temporaryPromotionAlternatives = useMemo(
+    () => alternatives.filter((offer) => offer.savingKind === "temporary"),
+    [alternatives]
+  );
+  const compromiseAlternatives = useMemo(
+    () => alternatives.filter((offer) =>
+      offer.comparisonKind === "reduced_data" ||
+      offer.comparisonKind === "additional_commitment" ||
+      offer.comparisonKind === "requires_validation"
+    ),
     [alternatives]
   );
   const mobileExpensesNeedingConfirmation = useMemo(
@@ -1364,11 +1383,19 @@ export function ResultsPanel() {
             </p>
             {alternativesUpdatedAt ? (
               <p className="mt-1 text-xs font-medium text-slate-500">
-                Actualisé à{" "}
-                {new Date(alternativesUpdatedAt).toLocaleTimeString("fr-FR", {
+                Offres vérifiées le{" "}
+                {new Date(alternativesUpdatedAt).toLocaleString("fr-FR", {
+                  day: "2-digit",
+                  month: "2-digit",
+                  year: "numeric",
                   hour: "2-digit",
                   minute: "2-digit"
                 })}
+              </p>
+            ) : null}
+            {catalogStatus && catalogStatus !== "fresh" ? (
+              <p className="mt-1 text-xs font-semibold text-amber-700">
+                Catalogue mobile non exploitable actuellement.
               </p>
             ) : null}
           </div>
@@ -1386,6 +1413,11 @@ export function ResultsPanel() {
             Actualiser
           </Button>
         </div>
+        {comparisonMessage ? (
+          <p className="mt-4 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+            {comparisonMessage}
+          </p>
+        ) : null}
         <div className="mt-4 grid gap-3 md:grid-cols-2">
           {isLoadingAlternatives && alternatives.length === 0 ? (
             <div className="flex items-center gap-3 rounded-lg border border-navy-100 p-4 text-sm font-medium text-slate-600">
@@ -1395,6 +1427,8 @@ export function ResultsPanel() {
           ) : primaryAlternatives.length > 0 ? (
             primaryAlternatives.map((offer) => {
               const verifiedSaving = computeVerifiedOfferSaving(offer, analysis);
+              const recurringSaving = offer.recurringYearlySaving ?? verifiedSaving;
+              const sourceExpense = getExpenseForAlternative(offer, analysis);
 
               if (isDiscoveryAccess) {
                 return (
@@ -1402,7 +1436,9 @@ export function ResultsPanel() {
                     <div className="flex flex-wrap items-start justify-between gap-3">
                       <Badge tone="green">{expenseCategoryLabels[offer.category]}</Badge>
                       <p className="font-semibold text-sage-700">
-                        Économie potentielle : {formatCurrency(verifiedSaving)} / an
+                        {offer.savingKind === "recurring_only"
+                          ? `Écart récurrent estimé : ${formatCurrency(recurringSaving)} / an`
+                          : `Économie nette estimée : ${formatCurrency(verifiedSaving)} / an`}
                       </p>
                     </div>
                     <p className="mt-4 font-semibold text-navy-900">
@@ -1439,9 +1475,16 @@ export function ResultsPanel() {
                     ) : null}
                   </div>
                   <p className="font-semibold text-sage-700">
-                    Économie : {formatCurrency(verifiedSaving)} / an
+                    {offer.savingKind === "recurring_only"
+                      ? `Écart récurrent : ${formatCurrency(recurringSaving)} / an`
+                      : `Économie nette 12 mois : ${formatCurrency(verifiedSaving)}`}
                   </p>
                 </div>
+                {sourceExpense ? (
+                  <p className="mt-3 text-xs font-semibold text-slate-500">
+                    Forfait actuel : {sourceExpense.provider} - {formatCurrency(sourceExpense.monthlyAmount)} / mois
+                  </p>
+                ) : null}
                 <div className="mt-3 flex items-center gap-3">
                   <ProviderLogo logoUrl={offer.logoUrl} provider={offer.provider} />
                   <div>
@@ -1454,13 +1497,31 @@ export function ResultsPanel() {
                 <p className="mt-3 text-sm leading-6 text-slate-600">
                   {offer.reason}
                 </p>
+                {offer.conditions && offer.conditions.length > 0 ? (
+                  <ul className="mt-2 space-y-1 text-xs text-slate-500">
+                    {offer.conditions.map((condition) => (
+                      <li key={condition}>Condition : {condition}</li>
+                    ))}
+                  </ul>
+                ) : null}
+                {offer.conditionalPrices && offer.conditionalPrices.length > 0 ? (
+                  <p className="mt-2 text-xs font-medium text-amber-700">
+                    Des remises conditionnelles existent mais ne sont pas incluses dans le calcul.
+                  </p>
+                ) : null}
                 <p className="mt-2 text-sm font-medium text-navy-900">
                   {offer.action}
                 </p>
                 <div className="mt-4 flex flex-wrap gap-2">
-                  <Button onClick={() => handleSelectOffer(offer)} type="button" variant="secondary">
-                    Choisir pour mon courrier et mon rapport
-                  </Button>
+                  {offer.savingKind !== "recurring_only" ? (
+                    <Button onClick={() => handleSelectOffer(offer)} type="button" variant="secondary">
+                      Choisir pour mon courrier et mon rapport
+                    </Button>
+                  ) : (
+                    <p className="text-sm text-amber-800">
+                      Vérifiez les frais de souscription avant de retenir cette offre.
+                    </p>
+                  )}
                   <a
                     className="inline-flex min-h-10 items-center justify-center gap-2 rounded-lg border border-sage-200 bg-white px-4 py-2 text-sm font-semibold text-sage-800 transition hover:bg-sage-50"
                     href={offer.url}
@@ -1481,7 +1542,40 @@ export function ResultsPanel() {
         </div>
       </Card>
 
-      {reducedDataAlternatives.length > 0 ? (
+      {temporaryPromotionAlternatives.length > 0 ? (
+        <Card className="border-blue-200 bg-blue-50">
+          <h2 className="text-lg font-semibold text-navy-900">Promotions temporaires</h2>
+          <p className="mt-2 text-sm leading-6 text-slate-600">
+            Ces offres sont moins chères pendant une durée limitée. Leur économie n'est pas
+            présentée comme durable et n'est pas ajoutée au total principal.
+          </p>
+          <div className="mt-4 grid gap-3 md:grid-cols-2">
+            {temporaryPromotionAlternatives.map((offer) => (
+              <div className="rounded-lg border border-blue-200 bg-white p-4" key={offer.id}>
+                <Badge tone="blue">Promotion temporaire</Badge>
+                <h3 className="mt-3 font-semibold text-navy-900">{offer.provider} - {offer.name}</h3>
+                <p className="mt-1 text-sm text-slate-600">
+                  {formatCurrency(offer.monthlyPrice)} / mois
+                  {offer.priceAfterPromotion !== undefined
+                    ? ` puis ${formatCurrency(offer.priceAfterPromotion)} / mois`
+                    : ""}
+                </p>
+                <p className="mt-2 text-sm leading-6 text-slate-600">{offer.reason}</p>
+                <a
+                  className="mt-4 inline-flex min-h-10 items-center justify-center gap-2 rounded-lg border border-blue-200 bg-white px-4 py-2 text-sm font-semibold text-navy-900"
+                  href={offer.url}
+                  rel="noopener noreferrer"
+                  target="_blank"
+                >
+                  Vérifier la promotion <ExternalLink size={15} />
+                </a>
+              </div>
+            ))}
+          </div>
+        </Card>
+      ) : null}
+
+      {compromiseAlternatives.length > 0 ? (
         <Card className="border-amber-200 bg-amber-50">
           <div className="flex items-center gap-2">
             <Lightbulb className="text-amber-700" size={22} />
@@ -1490,21 +1584,28 @@ export function ResultsPanel() {
             </h2>
           </div>
           <p className="mt-2 text-sm leading-6 text-slate-600">
-            Ces forfaits sont moins généreux en données mobiles. Ils sont présentés comme des
-            compromis éventuels, jamais comme des offres équivalentes, et leurs économies ne sont
-            pas ajoutées au total principal.
+            Ces offres réduisent le volume de données, ajoutent un engagement ou nécessitent une
+            vérification complémentaire. Elles ne sont jamais traitées comme équivalentes et leurs
+            économies ne sont pas ajoutées au total principal.
           </p>
           <div className="mt-4 grid gap-3 md:grid-cols-2">
-            {reducedDataAlternatives.map((offer) => (
+            {compromiseAlternatives.map((offer) => (
               <div className="rounded-lg border border-amber-200 bg-white p-4" key={offer.id}>
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div className="flex flex-wrap gap-2">
-                    <Badge tone="amber">Volume réduit</Badge>
+                    <Badge tone="amber">
+                      {offer.comparisonKind === "reduced_data"
+                        ? "Volume réduit"
+                        : offer.comparisonKind === "additional_commitment"
+                          ? "Engagement supplémentaire"
+                          : "À vérifier"}
+                    </Badge>
                     <Badge tone="neutral">Forfait mobile</Badge>
                   </div>
                   <p className="font-semibold text-amber-800">
-                    Économie possible : {formatCurrency(computeVerifiedOfferSaving(offer, analysis))}
-                    {" "}/ an
+                    {offer.netFirstYearSaving !== undefined
+                      ? `Écart net possible : ${formatCurrency(offer.netFirstYearSaving)}`
+                      : `Écart récurrent possible : ${formatCurrency(offer.recurringYearlySaving ?? 0)} / an`}
                   </p>
                 </div>
                 {isDiscoveryAccess ? (

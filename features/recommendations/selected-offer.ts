@@ -16,6 +16,7 @@ export type SelectedAlternativeOffer = Pick<
 };
 
 function getSourceExpenseId(offer: AlternativeOffer) {
+  if (offer.sourceExpenseId) return offer.sourceExpenseId;
   const match = offer.id.match(/^alternative_(.+)_\d+$/);
   return match?.[1];
 }

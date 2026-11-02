@@ -34,6 +34,7 @@ const providerDomains: Record<string, string> = {
   "Syma Mobile": "symamobile.com",
   "La Poste Mobile": "lapostemobile.fr",
   "Cdiscount Mobile": "cdiscount.com",
+  "NRJ Mobile": "nrjmobile.fr",
   "RED by SFR": "red-by-sfr.fr",
   "Boursorama": "boursobank.com",
   "Credit Agricole": "credit-agricole.fr",

@@ -4,6 +4,7 @@
   "private": true,
   "scripts": {
     "test:phase1": "tsx --test tests/phase1.test.ts",
+    "test:mobile-catalog": "tsx --test tests/mobile-catalog.test.ts",
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
