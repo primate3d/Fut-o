@@ -31,6 +31,7 @@ let root: string;
 let aiServer: http.Server;
 let aiReply: unknown = aiHouseholdPayload();
 let aiRequests = 0;
+const aiRequestBodies: unknown[] = [];
 let aiWait: Promise<void> | undefined;
 let onAiStarted: (() => void) | undefined;
 const fakeKey = (code = randomUUID().toUpperCase()) => ({
@@ -93,7 +94,9 @@ before(async () => {
   process.env.STRIPE_SECRET_KEY = "sk_test_phase15";
   process.env.STRIPE_WEBHOOK_SECRET = "whsec_phase15";
   aiServer = http.createServer(async (request, response) => {
-    for await (const chunk of request) { void chunk; }
+    const chunks: Buffer[] = [];
+    for await (const chunk of request) chunks.push(Buffer.from(chunk));
+    aiRequestBodies.push(JSON.parse(Buffer.concat(chunks).toString("utf8")));
     aiRequests++;
     onAiStarted?.();
     if (aiWait) await aiWait;
@@ -397,6 +400,25 @@ test("mixed EDF / MACIF multi-contract / SFR box / mobile preserves every docume
   assert.ok(report?.startsWith("%PDF-"));
   for (const provider of ["EDF", "MACIF", "SFR", "NRJ Mobile"]) assert.ok(report.includes(provider), `PDF missing ${provider}`);
   assert.ok(report.includes("Autres possibilites pour reduire votre facture"));
+});
+
+test("OpenAI SDK keeps the existing mocked chat completions contract", async () => {
+  const { analyzeDocumentsWithAI } = await import("../features/analysis/ai-service");
+  aiReply = aiHouseholdPayload();
+  const requestCount = aiRequestBodies.length;
+
+  await analyzeDocumentsWithAI([householdDocuments[0]], "OPENAI-SDK-MOCK");
+
+  assert.equal(aiRequestBodies.length, requestCount + 1);
+  const body = aiRequestBodies.at(-1) as {
+    model?: string;
+    messages?: Array<{ role?: string; content?: unknown }>;
+    response_format?: { type?: string };
+  };
+  assert.equal(body.model, "gpt-4o");
+  assert.deepEqual(body.response_format, { type: "json_object" });
+  assert.deepEqual(body.messages?.map((message) => message.role), ["system", "user"]);
+  assert.equal(typeof body.messages?.[1]?.content, "string");
 });
 
 test("manual selection in MACIF does not suppress mobile or box", async () => {
@@ -1753,6 +1775,21 @@ test("redirect sanitizer refuses external and executable destinations", async ()
 test("production environment and cron purge fail closed", async () => {
   const { parseEnvironment } = await import("../lib/env");
   assert.throws(() => parseEnvironment({ NODE_ENV: "production" }), /Configuration de production invalide/);
+  const productionEnv = parseEnvironment({
+    NODE_ENV: "production",
+    DATABASE_URL: "postgresql://futeo:test@127.0.0.1:5432/futeo",
+    NEXT_PUBLIC_BASE_URL: "https://www.futeo.fr",
+    NEXT_PUBLIC_APP_URL: "https://www.futeo.fr",
+    UPLOADS_DIR: "/app/server-data/uploads",
+    BREVO_FROM_EMAIL: ""
+  });
+  assert.equal(productionEnv.NEXT_PUBLIC_BASE_URL, "https://www.futeo.fr");
+  assert.equal(productionEnv.BREVO_FROM_EMAIL, undefined);
+  assert.throws(() => parseEnvironment({
+    ...productionEnv,
+    NODE_ENV: "production",
+    BREVO_FROM_EMAIL: "not-an-email"
+  }), /Configuration de production invalide/);
 
   const previousSecret = process.env.CRON_SECRET;
   delete process.env.CRON_SECRET;
