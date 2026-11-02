@@ -1,0 +1,408 @@
+{
+  "schemaVersion": 1,
+  "retrievedAt": "2026-11-02T08:56:34.517Z",
+  "results": [
+    {
+      "provider": "Free Mobile",
+      "sourceUrl": "https://mobile.free.fr/",
+      "retrievedAt": "2026-11-02T08:56:34.056Z",
+      "offers": [
+        {
+          "provider": "Free Mobile",
+          "offerName": "Forfait Free 5G+",
+          "monthlyPrice": 19.99,
+          "includedDataGB": 350,
+          "unlimitedData": false,
+          "euDataGB": 35,
+          "network": "Free Mobile 5G/4G",
+          "commitmentMonths": 0,
+          "promotionPrice": null,
+          "promotionDuration": null,
+          "priceAfterPromotion": null,
+          "activationFees": null,
+          "simFees": null,
+          "conditions": [
+            "Des remises distinctes sont réservées aux abonnés Freebox; le prix public affiché n'en tient pas compte."
+          ],
+          "sourceUrl": "https://mobile.free.fr/",
+          "retrievedAt": "2026-11-02T08:56:34.056Z",
+          "verifiedAt": "2026-11-02T08:56:34.056Z",
+          "verificationStatus": "VERIFIED"
+        },
+        {
+          "provider": "Free Mobile",
+          "offerName": "Forfait 2€",
+          "monthlyPrice": 2,
+          "includedDataGB": 0.05,
+          "unlimitedData": false,
+          "euDataGB": 0.05,
+          "network": "Free Mobile 4G",
+          "commitmentMonths": 0,
+          "promotionPrice": null,
+          "promotionDuration": null,
+          "priceAfterPromotion": null,
+          "activationFees": null,
+          "simFees": null,
+          "conditions": [
+            "Des remises distinctes sont réservées aux abonnés Freebox; le prix public affiché n'en tient pas compte."
+          ],
+          "sourceUrl": "https://mobile.free.fr/",
+          "retrievedAt": "2026-11-02T08:56:34.056Z",
+          "verifiedAt": "2026-11-02T08:56:34.056Z",
+          "verificationStatus": "VERIFIED"
+        },
+        {
+          "provider": "Free Mobile",
+          "offerName": "Série Free",
+          "monthlyPrice": 12.99,
+          "includedDataGB": 110,
+          "unlimitedData": false,
+          "euDataGB": 30,
+          "network": "Free Mobile 5G/4G",
+          "commitmentMonths": 0,
+          "promotionPrice": 12.99,
+          "promotionDuration": 12,
+          "priceAfterPromotion": 19.99,
+          "activationFees": null,
+          "simFees": null,
+          "conditions": [
+            "Pendant 12 mois, puis bascule vers le Forfait Free 5G+."
+          ],
+          "sourceUrl": "https://mobile.free.fr/",
+          "retrievedAt": "2026-11-02T08:56:34.056Z",
+          "verifiedAt": "2026-11-02T08:56:34.056Z",
+          "verificationStatus": "VERIFIED"
+        },
+        {
+          "provider": "Free Mobile",
+          "offerName": "Forfait Free Max",
+          "monthlyPrice": 29.99,
+          "includedDataGB": null,
+          "unlimitedData": true,
+          "euDataGB": null,
+          "network": "Free Mobile 5G/4G",
+          "commitmentMonths": 0,
+          "promotionPrice": null,
+          "promotionDuration": null,
+          "priceAfterPromotion": null,
+          "activationFees": null,
+          "simFees": null,
+          "conditions": [
+            "Des remises distinctes sont réservées aux abonnés Freebox; le prix public affiché n'en tient pas compte."
+          ],
+          "sourceUrl": "https://mobile.free.fr/",
+          "retrievedAt": "2026-11-02T08:56:34.056Z",
+          "verifiedAt": "2026-11-02T08:56:34.056Z",
+          "verificationStatus": "VERIFIED"
+        }
+      ],
+      "failures": []
+    },
+    {
+      "provider": "RED by SFR",
+      "sourceUrl": "https://www.red-by-sfr.fr/forfaits-mobiles/",
+      "retrievedAt": "2026-11-02T08:56:34.117Z",
+      "offers": [
+        {
+          "provider": "RED by SFR",
+          "offerName": "Forfait RED 1 Go",
+          "monthlyPrice": null,
+          "includedDataGB": 1,
+          "unlimitedData": false,
+          "euDataGB": null,
+          "network": "Réseau SFR 4G",
+          "commitmentMonths": 0,
+          "promotionPrice": null,
+          "promotionDuration": null,
+          "priceAfterPromotion": null,
+          "activationFees": null,
+          "simFees": null,
+          "conditions": [
+            "Le volume est visible sur la page officielle, mais le HTML public ne relie pas de façon fiable chaque volume à son prix dynamique."
+          ],
+          "sourceUrl": "https://www.red-by-sfr.fr/forfaits-mobiles/",
+          "retrievedAt": "2026-11-02T08:56:34.117Z",
+          "verifiedAt": null,
+          "verificationStatus": "PARTIAL"
+        },
+        {
+          "provider": "RED by SFR",
+          "offerName": "Forfait RED 40 Go",
+          "monthlyPrice": null,
+          "includedDataGB": 40,
+          "unlimitedData": false,
+          "euDataGB": null,
+          "network": "Réseau SFR 4G",
+          "commitmentMonths": 0,
+          "promotionPrice": null,
+          "promotionDuration": null,
+          "priceAfterPromotion": null,
+          "activationFees": null,
+          "simFees": null,
+          "conditions": [
+            "Le volume est visible sur la page officielle, mais le HTML public ne relie pas de façon fiable chaque volume à son prix dynamique."
+          ],
+          "sourceUrl": "https://www.red-by-sfr.fr/forfaits-mobiles/",
+          "retrievedAt": "2026-11-02T08:56:34.117Z",
+          "verifiedAt": null,
+          "verificationStatus": "PARTIAL"
+        },
+        {
+          "provider": "RED by SFR",
+          "offerName": "Forfait RED 120 Go 5G",
+          "monthlyPrice": null,
+          "includedDataGB": 120,
+          "unlimitedData": false,
+          "euDataGB": null,
+          "network": "Réseau SFR 5G/4G",
+          "commitmentMonths": 0,
+          "promotionPrice": null,
+          "promotionDuration": null,
+          "priceAfterPromotion": null,
+          "activationFees": null,
+          "simFees": null,
+          "conditions": [
+            "Le volume est visible sur la page officielle, mais le HTML public ne relie pas de façon fiable chaque volume à son prix dynamique."
+          ],
+          "sourceUrl": "https://www.red-by-sfr.fr/forfaits-mobiles/",
+          "retrievedAt": "2026-11-02T08:56:34.117Z",
+          "verifiedAt": null,
+          "verificationStatus": "PARTIAL"
+        },
+        {
+          "provider": "RED by SFR",
+          "offerName": "Forfait RED 250 Go 5G Voyage",
+          "monthlyPrice": null,
+          "includedDataGB": 250,
+          "unlimitedData": false,
+          "euDataGB": null,
+          "network": "Réseau SFR 5G/4G",
+          "commitmentMonths": 0,
+          "promotionPrice": null,
+          "promotionDuration": null,
+          "priceAfterPromotion": null,
+          "activationFees": null,
+          "simFees": null,
+          "conditions": [
+            "Le volume est visible sur la page officielle, mais le HTML public ne relie pas de façon fiable chaque volume à son prix dynamique.",
+            "Variante Voyage; les destinations exactes restent à vérifier."
+          ],
+          "sourceUrl": "https://www.red-by-sfr.fr/forfaits-mobiles/",
+          "retrievedAt": "2026-11-02T08:56:34.117Z",
+          "verifiedAt": null,
+          "verificationStatus": "PARTIAL"
+        }
+      ],
+      "failures": []
+    },
+    {
+      "provider": "B&You",
+      "sourceUrl": "https://www.bouyguestelecom.fr/forfaits-mobiles/sans-engagement",
+      "retrievedAt": "2026-11-02T08:56:34.119Z",
+      "offers": [
+        {
+          "provider": "B&You",
+          "offerName": "100Go 5G - 13€99",
+          "monthlyPrice": 13.99,
+          "includedDataGB": 100,
+          "unlimitedData": false,
+          "euDataGB": 35,
+          "network": "Qualité du réseau Bouygues Telecom",
+          "commitmentMonths": 0,
+          "promotionPrice": 10.99,
+          "promotionDuration": 12,
+          "priceAfterPromotion": 13.99,
+          "activationFees": 1,
+          "simFees": 1,
+          "conditions": [
+            "**10,99€/mois pendant 1 an puis 13,99€/mois**",
+            "Bon plan avec Pure fibre",
+            "Tarif promotionnel réservé à une condition Box/Fibre; le prix mensuel principal conserve le tarif hors remise."
+          ],
+          "sourceUrl": "https://www.bouyguestelecom.fr/forfaits-mobiles/sans-engagement",
+          "retrievedAt": "2026-11-02T08:56:34.119Z",
+          "verifiedAt": "2026-11-02T08:56:34.119Z",
+          "verificationStatus": "VERIFIED"
+        },
+        {
+          "provider": "B&You",
+          "offerName": "1Go",
+          "monthlyPrice": null,
+          "includedDataGB": 1,
+          "unlimitedData": false,
+          "euDataGB": 1,
+          "network": "Qualité du réseau Bouygues Telecom",
+          "commitmentMonths": 0,
+          "promotionPrice": null,
+          "promotionDuration": null,
+          "priceAfterPromotion": null,
+          "activationFees": 1,
+          "simFees": 1,
+          "conditions": [],
+          "sourceUrl": "https://www.bouyguestelecom.fr/forfaits-mobiles/sans-engagement",
+          "retrievedAt": "2026-11-02T08:56:34.119Z",
+          "verifiedAt": null,
+          "verificationStatus": "PARTIAL"
+        },
+        {
+          "provider": "B&You",
+          "offerName": "20Go 5G - 9€99",
+          "monthlyPrice": 9.99,
+          "includedDataGB": 20,
+          "unlimitedData": false,
+          "euDataGB": 20,
+          "network": "Qualité du réseau Bouygues Telecom",
+          "commitmentMonths": 0,
+          "promotionPrice": null,
+          "promotionDuration": null,
+          "priceAfterPromotion": null,
+          "activationFees": 1,
+          "simFees": 1,
+          "conditions": [],
+          "sourceUrl": "https://www.bouyguestelecom.fr/forfaits-mobiles/sans-engagement",
+          "retrievedAt": "2026-11-02T08:56:34.119Z",
+          "verifiedAt": "2026-11-02T08:56:34.119Z",
+          "verificationStatus": "VERIFIED"
+        },
+        {
+          "provider": "B&You",
+          "offerName": "200Go 5G - 15.99€ / 12.99€",
+          "monthlyPrice": 15.99,
+          "includedDataGB": 200,
+          "unlimitedData": false,
+          "euDataGB": 40,
+          "network": "Qualité du réseau Bouygues Telecom",
+          "commitmentMonths": 0,
+          "promotionPrice": 12.99,
+          "promotionDuration": 12,
+          "priceAfterPromotion": 15.99,
+          "activationFees": 1,
+          "simFees": 1,
+          "conditions": [
+            "**12,99€/mois pendant 1 an puis 15,99€/mois**",
+            "Bon plan avec Pure fibre",
+            "Tarif promotionnel réservé à une condition Box/Fibre; le prix mensuel principal conserve le tarif hors remise."
+          ],
+          "sourceUrl": "https://www.bouyguestelecom.fr/forfaits-mobiles/sans-engagement",
+          "retrievedAt": "2026-11-02T08:56:34.119Z",
+          "verifiedAt": "2026-11-02T08:56:34.119Z",
+          "verificationStatus": "VERIFIED"
+        },
+        {
+          "provider": "B&You",
+          "offerName": "170Go BeIN",
+          "monthlyPrice": null,
+          "includedDataGB": 170,
+          "unlimitedData": false,
+          "euDataGB": 60,
+          "network": "Qualité du réseau Bouygues Telecom",
+          "commitmentMonths": 0,
+          "promotionPrice": null,
+          "promotionDuration": null,
+          "priceAfterPromotion": null,
+          "activationFees": 1,
+          "simFees": 1,
+          "conditions": [
+            "**beIN SPORTS inclus au lieu de 15€/mois**🔥",
+            "Nouveau"
+          ],
+          "sourceUrl": "https://www.bouyguestelecom.fr/forfaits-mobiles/sans-engagement",
+          "retrievedAt": "2026-11-02T08:56:34.119Z",
+          "verifiedAt": null,
+          "verificationStatus": "PARTIAL"
+        },
+        {
+          "provider": "B&You",
+          "offerName": "300Go 5G dont 40Go valables dans + de 150 destinations à 19€99/mois",
+          "monthlyPrice": 19.99,
+          "includedDataGB": 300,
+          "unlimitedData": false,
+          "euDataGB": 40,
+          "network": "Qualité du réseau Bouygues Telecom",
+          "commitmentMonths": 0,
+          "promotionPrice": 16.99,
+          "promotionDuration": 12,
+          "priceAfterPromotion": 19.99,
+          "activationFees": 1,
+          "simFees": 1,
+          "conditions": [
+            "**16,99€/mois pendant 1 an puis 19,99€/mois**",
+            "Bon plan avec Pure fibre",
+            "Tarif promotionnel réservé à une condition Box/Fibre; le prix mensuel principal conserve le tarif hors remise."
+          ],
+          "sourceUrl": "https://www.bouyguestelecom.fr/forfaits-mobiles/sans-engagement",
+          "retrievedAt": "2026-11-02T08:56:34.119Z",
+          "verifiedAt": "2026-11-02T08:56:34.119Z",
+          "verificationStatus": "VERIFIED"
+        },
+        {
+          "provider": "B&You",
+          "offerName": "170Go Prime",
+          "monthlyPrice": null,
+          "includedDataGB": 170,
+          "unlimitedData": false,
+          "euDataGB": 60,
+          "network": "Qualité du réseau Bouygues Telecom",
+          "commitmentMonths": 0,
+          "promotionPrice": null,
+          "promotionDuration": null,
+          "priceAfterPromotion": null,
+          "activationFees": 1,
+          "simFees": 1,
+          "conditions": [
+            "**Prime inclus au lieu de 6,99€/mois**🔥",
+            "Nouveau"
+          ],
+          "sourceUrl": "https://www.bouyguestelecom.fr/forfaits-mobiles/sans-engagement",
+          "retrievedAt": "2026-11-02T08:56:34.119Z",
+          "verifiedAt": null,
+          "verificationStatus": "PARTIAL"
+        },
+        {
+          "provider": "B&You",
+          "offerName": "170Go Dezeer",
+          "monthlyPrice": null,
+          "includedDataGB": 170,
+          "unlimitedData": false,
+          "euDataGB": 60,
+          "network": "Qualité du réseau Bouygues Telecom",
+          "commitmentMonths": 0,
+          "promotionPrice": null,
+          "promotionDuration": null,
+          "priceAfterPromotion": null,
+          "activationFees": 1,
+          "simFees": 1,
+          "conditions": [
+            "**Deezer Premium inclus au lieu de 11,99€/mois**🔥",
+            "Nouveau"
+          ],
+          "sourceUrl": "https://www.bouyguestelecom.fr/forfaits-mobiles/sans-engagement",
+          "retrievedAt": "2026-11-02T08:56:34.119Z",
+          "verifiedAt": null,
+          "verificationStatus": "PARTIAL"
+        }
+      ],
+      "failures": []
+    }
+  ],
+  "summary": {
+    "Free Mobile": {
+      "detected": 4,
+      "verified": 4,
+      "partial": 0,
+      "failed": 0
+    },
+    "RED by SFR": {
+      "detected": 4,
+      "verified": 0,
+      "partial": 4,
+      "failed": 0
+    },
+    "B&You": {
+      "detected": 8,
+      "verified": 4,
+      "partial": 4,
+      "failed": 0
+    }
+  }
+}
