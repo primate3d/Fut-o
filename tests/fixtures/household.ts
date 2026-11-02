@@ -9,7 +9,7 @@ const examples = [
   { id: "sfr", type: "internet_invoice", provider: "SFR", amount: 49.99, category: ExpenseCategory.TELECOM,
     text: "SFR Box Fibre internet\nOffre sans engagement avec TV incluse\nMontant total TTC : 49,99 EUR" },
   { id: "mobile", type: "mobile_invoice", provider: "NRJ Mobile", amount: 29.99, category: ExpenseCategory.TELECOM,
-    text: "NRJ Mobile\nForfait mobile 100 Go inclus\nMontant total TTC : 29,99 EUR" }
+    text: "NRJ Mobile\nSerie speciale NRJ Mobile illimitee 29,99 24,99\nForfait mobile 100 Go inclus\nMontant de votre facture 24,99 29,99" }
 ] as const;
 
 export const householdDocuments = examples.map((example) => ({

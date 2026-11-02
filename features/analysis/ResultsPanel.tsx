@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import {
   AlertTriangle,
@@ -20,6 +20,7 @@ import { StatCard } from "@/components/ui/StatCard";
 import { getStoredAccessKey, isDiscoveryPlan } from "@/features/billing/access-keys";
 import {
   findConditionalInternetSupportOffers,
+  isPrimaryAlternative,
   type AlternativeOffer
 } from "@/features/recommendations/service";
 import {
@@ -29,11 +30,7 @@ import {
   storeSelectedAlternativeOffer,
   type SelectedAlternativeOffer
 } from "@/features/recommendations/selected-offer";
-import {
-  getCategoryForDocumentType,
-  getDocumentTypeLabel,
-  visibleDocumentTypeOptions
-} from "@/features/upload/document-types";
+import { visibleDocumentTypeOptions } from "@/features/upload/document-types";
 import {
   getStoredUploadedDocuments,
   getStoredUploadedDocumentsServer,
@@ -41,17 +38,19 @@ import {
 } from "@/features/upload/storage";
 import {
   expenseCategoryLabels,
+  getExpenseDisplayLabel,
   getTopExpenses,
   summarizeExpensesByCategory
 } from "@/lib/expense-summary";
 import { getProviderBranding } from "@/lib/provider-branding";
-import {
-  ExpenseSubcategory,
-  type DocumentUserCorrections,
-  type MockAnalysis,
-  type UploadedDocument,
-  type UploadedDocumentType
+import { LatestRequestController } from "@/features/analysis/latest-request";
+import type {
+  DocumentUserCorrections,
+  Expense,
+  MockAnalysis,
+  UploadedDocumentType
 } from "@/types";
+import { ExpenseSubcategory } from "@/types";
 import {
   addAnalysisToReportPortfolio,
   getStoredAnalysisServer,
@@ -97,7 +96,7 @@ function getExpenseIdFromAlternativeId(offer: AlternativeOffer, analysis: MockAn
 }
 
 function computeAlternativeSavings(analysis: MockAnalysis, alternatives: AlternativeOffer[]) {
-  const bestSavingByExpense = alternatives.reduce<Record<string, number>>((savings, offer) => {
+  const bestSavingByExpense = alternatives.filter(isPrimaryAlternative).reduce<Record<string, number>>((savings, offer) => {
     const expenseId = getExpenseIdFromAlternativeId(offer, analysis);
     if (!expenseId) return savings;
 
@@ -177,6 +176,10 @@ function formatBillingHint(expense: MockAnalysis["expenses"][number]) {
 }
 
 function formatFrequencyWarning(expense: MockAnalysis["expenses"][number]) {
+  if (expense.mobileRecurringAmountNeedsConfirmation) {
+    return "Prix mensuel récurrent à confirmer : le total de la facture n'est pas utilisé pour calculer des économies.";
+  }
+
   if (
     expense.billingFrequency ||
     expense.monthlyAmount > 0 ||
@@ -195,6 +198,8 @@ type ManualEntryForm = {
   amount: string;
   frequency: NonNullable<DocumentUserCorrections["frequency"]>;
   mobileDataGB: string;
+  mobileDataUnlimited: boolean;
+  mobileAllowLowerDataOffers: boolean;
   internetTvIncluded: boolean;
   clientFirstName: string;
   clientLastName: string;
@@ -205,6 +210,12 @@ type ManualEntryForm = {
   phone: string;
   email: string;
   providerAddress: string;
+};
+
+type MobileDataConfirmation = {
+  mobileDataGB: string;
+  mobileDataUnlimited: boolean;
+  mobileAllowLowerDataOffers: boolean;
 };
 
 const manualInputClass =
@@ -222,50 +233,6 @@ const manualFrequencyOptions: Array<{
   { value: "schedule", label: "Echeancier" }
 ];
 
-function getManualSubcategory(documentType: UploadedDocumentType) {
-  if (documentType === "electricity_invoice") return ExpenseSubcategory.ELECTRICITY;
-  if (documentType === "gas_invoice") return ExpenseSubcategory.GAS;
-  if (documentType === "internet_invoice") return ExpenseSubcategory.INTERNET;
-  if (documentType === "mobile_invoice") return ExpenseSubcategory.MOBILE;
-  if (documentType === "two_wheeler_insurance") {
-    return ExpenseSubcategory.TWO_WHEELER_INSURANCE;
-  }
-  if (documentType === "home_insurance") return ExpenseSubcategory.HOME_INSURANCE;
-  if (documentType === "health_insurance") return ExpenseSubcategory.MUTUAL_HEALTH;
-  if (documentType === "bank_statement" || documentType === "credit") {
-    return ExpenseSubcategory.BANK_FEES;
-  }
-
-  return ExpenseSubcategory.OTHER;
-}
-
-function getManualAmounts(
-  amount: number,
-  frequency: NonNullable<DocumentUserCorrections["frequency"]>
-) {
-  if (frequency === "bimonthly") {
-    return { monthlyAmount: amount / 2, yearlyAmount: amount * 6 };
-  }
-
-  if (frequency === "quarterly") {
-    return { monthlyAmount: amount / 3, yearlyAmount: amount * 4 };
-  }
-
-  if (frequency === "yearly" || frequency === "one_time") {
-    return { monthlyAmount: amount / 12, yearlyAmount: amount };
-  }
-
-  return { monthlyAmount: amount, yearlyAmount: amount * 12 };
-}
-
-function getManualRecurrence(
-  frequency: NonNullable<DocumentUserCorrections["frequency"]>
-): "monthly" | "yearly" | "one_time" {
-  if (frequency === "yearly") return "yearly";
-  if (frequency === "one_time") return "one_time";
-  return "monthly";
-}
-
 export function ResultsPanel() {
   const router = useRouter();
   const [analysis, setAnalysis] = useState<MockAnalysis | null>(null);
@@ -280,6 +247,8 @@ export function ResultsPanel() {
     amount: "",
     frequency: "monthly",
     mobileDataGB: "",
+    mobileDataUnlimited: false,
+    mobileAllowLowerDataOffers: false,
     internetTvIncluded: false,
     clientFirstName: "",
     clientLastName: "",
@@ -292,12 +261,26 @@ export function ResultsPanel() {
     providerAddress: ""
   });
   const [manualFormMessage, setManualFormMessage] = useState<string | null>(null);
+  const [isSubmittingManualForm, setIsSubmittingManualForm] = useState(false);
   const [showManualForm, setShowManualForm] = useState(false);
+  const [mobileDataConfirmations, setMobileDataConfirmations] = useState<
+    Record<string, MobileDataConfirmation>
+  >({});
+  const [savingMobileExpenseId, setSavingMobileExpenseId] = useState<string | null>(null);
+  const alternativesRequestController = useRef<LatestRequestController | null>(null);
+  if (!alternativesRequestController.current) {
+    alternativesRequestController.current = new LatestRequestController();
+  }
 
   useEffect(() => {
     const mode = new URLSearchParams(window.location.search).get("mode");
     setShowManualForm(mode === "manuel");
   }, []);
+
+  useEffect(
+    () => () => alternativesRequestController.current?.cancel(),
+    []
+  );
 
   function updateManualForm<K extends keyof ManualEntryForm>(
     field: K,
@@ -309,7 +292,7 @@ export function ResultsPanel() {
     }));
   }
 
-  function handleManualAnalysisSubmit(event: FormEvent<HTMLFormElement>) {
+  async function handleManualAnalysisSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
     const provider = manualForm.provider.trim();
@@ -320,137 +303,142 @@ export function ResultsPanel() {
       return;
     }
 
-    const documentId = `manual_${Date.now()}`;
-    const now = new Date().toISOString();
-    const documentType = manualForm.documentType;
-    const category = getCategoryForDocumentType(documentType);
-    const label = getDocumentTypeLabel(documentType);
-    const { monthlyAmount, yearlyAmount } = getManualAmounts(
-      amount,
-      manualForm.frequency
-    );
-    const mobileDataGB = Number(manualForm.mobileDataGB.replace(",", "."));
-    const manualComparisonCriteria =
-      documentType === "mobile_invoice" &&
-      manualForm.mobileDataGB.trim() !== "" &&
-      Number.isFinite(mobileDataGB) &&
-      mobileDataGB >= 0
-        ? { mobileDataGB }
-        : documentType === "internet_invoice"
-          ? { internetTvIncluded: manualForm.internetTvIncluded }
-          : {};
-    const documentName = `Saisie manuelle - ${label}`;
-    const customerFullName = [
-      manualForm.clientFirstName.trim(),
-      manualForm.clientLastName.trim()
-    ]
-      .filter(Boolean)
-      .join(" ");
-    const customerProfile =
-      customerFullName ||
-      manualForm.clientAddress.trim() ||
-      manualForm.customerNumber.trim() ||
-      manualForm.contractNumber.trim() ||
-      manualForm.invoiceNumber.trim() ||
-      manualForm.phone.trim() ||
-      manualForm.email.trim()
-        ? {
-            firstName: manualForm.clientFirstName.trim() || undefined,
-            lastName: manualForm.clientLastName.trim() || undefined,
-            fullName: customerFullName || undefined,
-            address: manualForm.clientAddress.trim() || undefined,
-            customerNumber: manualForm.customerNumber.trim() || undefined,
-            contractNumber: manualForm.contractNumber.trim() || undefined,
-            invoiceNumber: manualForm.invoiceNumber.trim() || undefined,
-            phone: manualForm.phone.trim() || undefined,
-            email: manualForm.email.trim() || undefined
-          }
-        : undefined;
-    const providerProfile = {
-      name: provider,
-      address: manualForm.providerAddress.trim() || undefined
-    };
+    const parsedMobileDataGB = Number(manualForm.mobileDataGB.replace(",", "."));
+    if (
+      manualForm.documentType === "mobile_invoice" &&
+      !manualForm.mobileDataUnlimited &&
+      (!manualForm.mobileDataGB.trim() ||
+        !Number.isFinite(parsedMobileDataGB) ||
+        parsedMobileDataGB < 0)
+    ) {
+      setManualFormMessage("Renseignez le volume de donnees inclus ou choisissez Illimite.");
+      return;
+    }
 
-    const manualDocument: UploadedDocument = {
-      id: documentId,
-      fileName: documentName,
-      fileSize: 0,
-      mimeType: "manual/input",
-      documentType,
-      detectedCategory: category,
-      status: "ready",
-      uploadedAt: now,
-      provider,
-      userCorrections: {
-        provider,
-        documentType,
-        amount,
-        frequency: manualForm.frequency,
-        isMultiContract: true
+    const activeKey = getStoredAccessKey();
+    if (!activeKey) {
+      setManualFormMessage("Activez une clé d'accès avant d'ajouter un contrat.");
+      return;
+    }
+
+    setIsSubmittingManualForm(true);
+    setManualFormMessage("Enregistrement du contrat en cours...");
+    try {
+      const response = await fetch("/api/analyse", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          code: activeKey.code,
+          manualContract: {
+            ...manualForm,
+            requestId: crypto.randomUUID(),
+            amount,
+            mobileDataGB:
+              manualForm.documentType === "mobile_invoice" &&
+              !manualForm.mobileDataUnlimited &&
+              manualForm.mobileDataGB.trim()
+              ? parsedMobileDataGB
+              : undefined
+          }
+        })
+      });
+      const payload = (await response.json()) as { analysis?: MockAnalysis; error?: string };
+      if (!response.ok || !payload.analysis) {
+        throw new Error(payload.error || "Enregistrement du contrat indisponible.");
       }
-    };
 
-    const manualAnalysis: MockAnalysis = {
-      id: `analysis_${documentId}`,
-      generatedAt: now,
-      documents: [manualDocument],
-      detectedParties: {
-        customer: customerProfile,
-        providers: {
-          [provider]: providerProfile
-        },
-        documents: {
-          [documentId]: {
-            documentId,
-            fileName: documentName,
-            documentType,
-            providerName: provider,
-            invoiceAmount: amount,
-            customer: customerProfile,
-            provider: providerProfile
-          }
-        }
-      },
-      expenses: [
+      const manualAnalysis = payload.analysis;
+      storeUploadedDocuments(manualAnalysis.documents);
+      storeMockAnalysis(manualAnalysis);
+      addAnalysisToReportPortfolio(manualAnalysis);
+      window.localStorage.removeItem(SELECTED_ALTERNATIVE_OFFER_STORAGE_KEY);
+      setSelectedOffer(null);
+      setAnalysis(manualAnalysis);
+      setShowManualForm(false);
+      router.replace("/resultats");
+      setManualFormMessage("Contrat manuel ajouté. Recherche des alternatives en cours.");
+      void loadAlternatives(manualAnalysis);
+    } catch (error) {
+      setManualFormMessage(
+        error instanceof Error ? error.message : "Enregistrement du contrat indisponible."
+      );
+    } finally {
+      setIsSubmittingManualForm(false);
+    }
+  }
+
+  function updateMobileDataConfirmation(
+    expenseId: string,
+    update: Partial<MobileDataConfirmation>
+  ) {
+    setMobileDataConfirmations((current) => ({
+      ...current,
+      [expenseId]: Object.assign(
         {
-          id: `expense_${documentId}`,
-          label,
-          provider,
-          category,
-          subcategory: getManualSubcategory(documentType),
-          isRecurring: manualForm.frequency !== "one_time",
-          monthlyAmount,
-          yearlyAmount,
-          documentType,
-          sourceDocumentId: documentId,
-          sourceDocumentName: documentName,
-          customerNumber: manualForm.customerNumber.trim() || undefined,
-          contractNumber: manualForm.contractNumber.trim() || undefined,
-          invoiceNumber: manualForm.invoiceNumber.trim() || undefined,
-          phone: manualForm.phone.trim() || undefined,
-          recurrence: getManualRecurrence(manualForm.frequency),
-          billingAmount: amount,
-          billingFrequency: manualForm.frequency,
-          ...manualComparisonCriteria
-        }
-      ],
-      recommendations: [],
-      anomalies: [],
-      totalMonthlyAmount: monthlyAmount,
-      totalYearlyAmount: yearlyAmount,
-      yearlyPotentialSavings: 0
-    };
+          mobileDataGB: "",
+          mobileDataUnlimited: false,
+          mobileAllowLowerDataOffers: false
+        },
+        current[expenseId],
+        update
+      )
+    }));
+  }
 
-    storeUploadedDocuments([manualDocument]);
-    storeMockAnalysis(manualAnalysis);
-    addAnalysisToReportPortfolio(manualAnalysis);
-    window.localStorage.removeItem(SELECTED_ALTERNATIVE_OFFER_STORAGE_KEY);
-    setSelectedOffer(null);
-    setAnalysis(manualAnalysis);
-    setShowManualForm(false);
-    router.replace("/resultats");
-    setManualFormMessage("Contrat manuel ajoute. Recherche des alternatives en cours.");
-    void loadAlternatives(manualAnalysis);
+  async function handleMobileDataConfirmation(expense: Expense) {
+    const confirmation = mobileDataConfirmations[expense.id] ?? {
+      mobileDataGB: "",
+      mobileDataUnlimited: false,
+      mobileAllowLowerDataOffers: false
+    };
+    const mobileDataGB = Number(confirmation.mobileDataGB.replace(",", "."));
+    if (
+      !confirmation.mobileDataUnlimited &&
+      (!confirmation.mobileDataGB.trim() || !Number.isFinite(mobileDataGB) || mobileDataGB < 0)
+    ) {
+      setServiceMessage("Confirmez le volume inclus ou choisissez le forfait illimite.");
+      return;
+    }
+
+    const activeKey = getStoredAccessKey();
+    if (!activeKey) {
+      setServiceMessage("Activez une cle d'acces avant de confirmer le forfait mobile.");
+      return;
+    }
+
+    setSavingMobileExpenseId(expense.id);
+    setServiceMessage(null);
+    try {
+      const response = await fetch("/api/analyse", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          code: activeKey.code,
+          mobileContractPreferences: {
+            expenseId: expense.id,
+            mobileDataGB: confirmation.mobileDataUnlimited ? undefined : mobileDataGB,
+            mobileDataUnlimited: confirmation.mobileDataUnlimited,
+            mobileAllowLowerDataOffers: confirmation.mobileAllowLowerDataOffers
+          }
+        })
+      });
+      const payload = (await response.json()) as { analysis?: MockAnalysis; error?: string };
+      if (!response.ok || !payload.analysis) {
+        throw new Error(payload.error || "Confirmation du forfait mobile indisponible.");
+      }
+
+      storeMockAnalysis(payload.analysis);
+      addAnalysisToReportPortfolio(payload.analysis);
+      setAnalysis(payload.analysis);
+      setServiceMessage("Volume mobile confirme. Comparaison actualisee.");
+      void loadAlternatives(payload.analysis);
+    } catch (error) {
+      setServiceMessage(
+        error instanceof Error ? error.message : "Confirmation du forfait mobile indisponible."
+      );
+    } finally {
+      setSavingMobileExpenseId(null);
+    }
   }
 
   function handleSelectOffer(offer: AlternativeOffer) {
@@ -461,6 +449,8 @@ export function ResultsPanel() {
   }
 
   async function loadAlternatives(analysisToLoad: MockAnalysis) {
+    const requestController = alternativesRequestController.current!;
+    const request = requestController.start();
     setIsLoadingAlternatives(true);
     setServiceMessage(null);
 
@@ -471,6 +461,7 @@ export function ResultsPanel() {
         headers: {
           "Content-Type": "application/json"
         },
+        signal: request.signal,
         body: JSON.stringify({ code: activeKey?.code, expenses: analysisToLoad.expenses })
       });
 
@@ -481,6 +472,8 @@ export function ResultsPanel() {
       const payload = (await response.json()) as {
         alternatives?: AlternativeOffer[];
       };
+      if (!requestController.isCurrent(request)) return;
+
       const nextAlternatives = payload.alternatives ?? [];
       const alternativeSavings = computeAlternativeSavings(
         analysisToLoad,
@@ -506,12 +499,17 @@ export function ResultsPanel() {
       );
       setAlternativesUpdatedAt(new Date().toISOString());
     } catch {
+      if (!requestController.isCurrent(request)) return;
+
       setAlternatives([]);
       setServiceMessage(
         "Les alternatives détaillées seront affichées quand le service de comparaison sera connecté."
       );
     } finally {
-      setIsLoadingAlternatives(false);
+      if (requestController.isCurrent(request)) {
+        setIsLoadingAlternatives(false);
+        requestController.finish(request);
+      }
     }
   }
 
@@ -597,8 +595,28 @@ export function ResultsPanel() {
     () => (analysis ? getTopExpenses(analysis.expenses, 5) : []),
     [analysis]
   );
+  const primaryAlternatives = useMemo(
+    () => alternatives.filter(isPrimaryAlternative),
+    [alternatives]
+  );
+  const reducedDataAlternatives = useMemo(
+    () => alternatives.filter((offer) => offer.comparisonKind === "reduced_data"),
+    [alternatives]
+  );
+  const mobileExpensesNeedingConfirmation = useMemo(
+    () =>
+      analysis?.expenses.filter(
+        (expense) =>
+          expense.subcategory === ExpenseSubcategory.MOBILE &&
+          !expense.mobileDataUnlimited &&
+          !(typeof expense.mobileIncludedDataGB === "number" &&
+            Number.isFinite(expense.mobileIncludedDataGB)) &&
+          !(typeof expense.mobileDataGB === "number" && Number.isFinite(expense.mobileDataGB))
+      ) ?? [],
+    [analysis]
+  );
   const bestAlternativeByCategory = useMemo(() => {
-    return alternatives.reduce<Partial<Record<string, AlternativeOffer>>>(
+    return primaryAlternatives.reduce<Partial<Record<string, AlternativeOffer>>>(
       (bestOffers, offer) => {
         const currentOffer = bestOffers[offer.category];
         const verifiedSaving = analysis
@@ -619,9 +637,9 @@ export function ResultsPanel() {
       },
       {}
     );
-  }, [alternatives, analysis]);
+  }, [primaryAlternatives, analysis]);
   const bestAlternativeByExpense = useMemo(() => {
-    return alternatives.reduce<Record<string, AlternativeOffer>>(
+    return primaryAlternatives.reduce<Record<string, AlternativeOffer>>(
       (bestOffers, offer) => {
         const expenseId = analysis ? getExpenseIdFromAlternativeId(offer, analysis) : undefined;
         if (!analysis || !expenseId) return bestOffers;
@@ -639,7 +657,7 @@ export function ResultsPanel() {
       },
       {}
     );
-  }, [alternatives, analysis]);
+  }, [primaryAlternatives, analysis]);
 
   if (showManualForm || !analysis || analysis.expenses.length === 0) {
     return (
@@ -757,19 +775,33 @@ export function ResultsPanel() {
             </div>
 
             {manualForm.documentType === "mobile_invoice" ? (
-              <div className="grid gap-4 md:grid-cols-3">
+              <div className="grid gap-4 rounded-xl border border-navy-100 bg-navy-50/40 p-4 md:grid-cols-2">
                 <label className="text-sm font-semibold text-navy-900">
-                  Volume de Data (Go)
+                  Volume de donnees inclus (Go)
                   <input
                     className={manualInputClass}
-                    inputMode="numeric"
+                    disabled={manualForm.mobileDataUnlimited}
+                    inputMode="decimal"
                     min="0"
                     onChange={(event) => updateManualForm("mobileDataGB", event.target.value)}
-                    placeholder="Ex : 100"
-                    step="1"
+                    placeholder="Ex : 100 ou 12,5"
+                    required={!manualForm.mobileDataUnlimited}
+                    step="any"
                     type="number"
                     value={manualForm.mobileDataGB}
                   />
+                </label>
+                <label className="flex items-center gap-3 self-end rounded-lg border border-navy-100 bg-white px-4 py-3 text-sm font-semibold text-navy-900">
+                  <input
+                    checked={manualForm.mobileDataUnlimited}
+                    className="h-4 w-4 accent-sage-600"
+                    onChange={(event) => {
+                      updateManualForm("mobileDataUnlimited", event.target.checked);
+                      if (event.target.checked) updateManualForm("mobileDataGB", "");
+                    }}
+                    type="checkbox"
+                  />
+                  Internet mobile illimite
                 </label>
               </div>
             ) : null}
@@ -867,8 +899,44 @@ export function ResultsPanel() {
               </label>
             </div>
 
+            {manualForm.documentType === "mobile_invoice" ? (
+              <fieldset className="rounded-xl border border-sage-200 bg-sage-50 p-4">
+                <legend className="px-1 text-sm font-semibold text-navy-900">
+                  Avez-vous réellement besoin d&apos;autant de Go ?
+                </legend>
+                <p className="mt-1 text-sm leading-6 text-slate-600">
+                  Si vous n&apos;utilisez pas toutes les données incluses dans votre forfait,
+                  une offre avec moins de Go pourrait vous permettre d&apos;économiser davantage.
+                </p>
+                <div className="mt-3 grid gap-2">
+                  <label className="flex items-center gap-3 text-sm font-medium text-navy-900">
+                    <input
+                      checked={!manualForm.mobileAllowLowerDataOffers}
+                      className="h-4 w-4 accent-sage-600"
+                      name="mobile-lower-data"
+                      onChange={() => updateManualForm("mobileAllowLowerDataOffers", false)}
+                      type="radio"
+                    />
+                    Non, je souhaite conserver mon volume actuel.
+                  </label>
+                  <label className="flex items-center gap-3 text-sm font-medium text-navy-900">
+                    <input
+                      checked={manualForm.mobileAllowLowerDataOffers}
+                      className="h-4 w-4 accent-sage-600"
+                      name="mobile-lower-data"
+                      onChange={() => updateManualForm("mobileAllowLowerDataOffers", true)}
+                      type="radio"
+                    />
+                    Oui, je souhaite également découvrir des forfaits avec moins de Go.
+                  </label>
+                </div>
+              </fieldset>
+            ) : null}
+
             <div className="flex flex-wrap gap-3">
-              <Button type="submit">Comparer ce contrat</Button>
+              <Button disabled={isSubmittingManualForm} type="submit">
+                {isSubmittingManualForm ? "Enregistrement..." : "Comparer ce contrat"}
+              </Button>
               <Button href="/importer" variant="secondary">
                 Importer un document
               </Button>
@@ -898,7 +966,7 @@ export function ResultsPanel() {
         </div>
         {isDiscoveryAccess ? (
           <Button href="/tarifs">🔓 Débloquer mon audit complet</Button>
-        ) : hasMeaningfulSavings ? (
+        ) : hasMeaningfulSavings || isManualAnalysis(analysis) ? (
           <Button href="/courriers">Préparer mes courriers</Button>
         ) : (
           <div className="flex flex-wrap gap-3">
@@ -927,6 +995,121 @@ export function ResultsPanel() {
         <div className="rounded-xl border border-sage-200 bg-sage-50 px-4 py-3 text-sm leading-6 text-sage-900">
           {serviceMessage}
         </div>
+      ) : null}
+
+      {mobileExpensesNeedingConfirmation.length > 0 ? (
+        <Card className="border-amber-200 bg-amber-50">
+          <div className="flex items-center gap-2">
+            <AlertTriangle className="text-amber-700" size={22} />
+            <h2 className="text-lg font-semibold text-navy-900">
+              Confirmez le volume inclus avant la comparaison mobile
+            </h2>
+          </div>
+          <p className="mt-2 text-sm leading-6 text-slate-600">
+            Le document ne permet pas d'identifier avec certitude le volume inclus. Futéo ne
+            présentera aucune offre comme équivalente avant votre confirmation.
+          </p>
+          <div className="mt-4 space-y-4">
+            {mobileExpensesNeedingConfirmation.map((expense) => {
+              const confirmation = mobileDataConfirmations[expense.id] ?? {
+                mobileDataGB: "",
+                mobileDataUnlimited: false,
+                mobileAllowLowerDataOffers: false
+              };
+
+              return (
+                <div className="rounded-xl border border-amber-200 bg-white p-4" key={expense.id}>
+                  <p className="font-semibold text-navy-900">
+                    {getExpenseDisplayLabel(expense)} - {expense.provider}
+                  </p>
+                  <div className="mt-3 grid gap-3 md:grid-cols-2">
+                    <label className="text-sm font-semibold text-navy-900">
+                      Volume de données inclus (Go)
+                      <input
+                        className={manualInputClass}
+                        disabled={confirmation.mobileDataUnlimited}
+                        inputMode="decimal"
+                        min="0"
+                        onChange={(event) =>
+                          updateMobileDataConfirmation(expense.id, {
+                            mobileDataGB: event.target.value
+                          })
+                        }
+                        placeholder="Ex : 100 ou 12,5"
+                        step="any"
+                        type="number"
+                        value={confirmation.mobileDataGB}
+                      />
+                    </label>
+                    <label className="flex items-center gap-3 self-end rounded-lg border border-navy-100 px-4 py-3 text-sm font-semibold text-navy-900">
+                      <input
+                        checked={confirmation.mobileDataUnlimited}
+                        className="h-4 w-4 accent-sage-600"
+                        onChange={(event) =>
+                          updateMobileDataConfirmation(expense.id, {
+                            mobileDataUnlimited: event.target.checked,
+                            ...(event.target.checked ? { mobileDataGB: "" } : {})
+                          })
+                        }
+                        type="checkbox"
+                      />
+                      Internet mobile illimité
+                    </label>
+                  </div>
+                  <fieldset className="mt-4 rounded-xl border border-sage-200 bg-sage-50 p-4">
+                    <legend className="px-1 text-sm font-semibold text-navy-900">
+                      Avez-vous réellement besoin d&apos;autant de Go ?
+                    </legend>
+                    <p className="mt-1 text-sm leading-6 text-slate-600">
+                      Si vous n&apos;utilisez pas toutes les données incluses dans votre forfait,
+                      une offre avec moins de Go pourrait vous permettre d&apos;économiser davantage.
+                    </p>
+                    <div className="mt-3 grid gap-2">
+                      <label className="flex items-center gap-3 text-sm font-medium text-navy-900">
+                        <input
+                          checked={!confirmation.mobileAllowLowerDataOffers}
+                          className="h-4 w-4 accent-sage-600"
+                          name={`mobile-lower-data-${expense.id}`}
+                          onChange={() =>
+                            updateMobileDataConfirmation(expense.id, {
+                              mobileAllowLowerDataOffers: false
+                            })
+                          }
+                          type="radio"
+                        />
+                        Non, je souhaite conserver mon volume actuel.
+                      </label>
+                      <label className="flex items-center gap-3 text-sm font-medium text-navy-900">
+                        <input
+                          checked={confirmation.mobileAllowLowerDataOffers}
+                          className="h-4 w-4 accent-sage-600"
+                          name={`mobile-lower-data-${expense.id}`}
+                          onChange={() =>
+                            updateMobileDataConfirmation(expense.id, {
+                              mobileAllowLowerDataOffers: true
+                            })
+                          }
+                          type="radio"
+                        />
+                        Oui, je souhaite également découvrir des forfaits avec moins de Go.
+                      </label>
+                    </div>
+                  </fieldset>
+                  <Button
+                    className="mt-4"
+                    disabled={savingMobileExpenseId === expense.id}
+                    onClick={() => void handleMobileDataConfirmation(expense)}
+                    type="button"
+                  >
+                    {savingMobileExpenseId === expense.id
+                      ? "Confirmation..."
+                      : "Confirmer et comparer"}
+                  </Button>
+                </div>
+              );
+            })}
+          </div>
+        </Card>
       ) : null}
 
       <div className="grid gap-4 md:grid-cols-3">
@@ -1007,11 +1190,12 @@ export function ResultsPanel() {
                     <p className="mt-2 text-xs font-medium text-slate-500">
                       {billingHint}
                     </p>
-                  ) : (
+                  ) : null}
+                  {!bestOffer && !isLoadingAlternatives ? (
                     <p className="mt-3 text-xs font-medium text-slate-500">
                       Aucune alternative fiable disponible pour ce type de contrat.
                     </p>
-                  )}
+                  ) : null}
                   {frequencyWarning ? (
                     <p className="mt-2 text-xs font-medium text-amber-700">
                       {frequencyWarning}
@@ -1090,7 +1274,9 @@ export function ResultsPanel() {
                         provider={expense.provider}
                       />
                       <div>
-                        <p className="font-medium text-navy-900">{expense.label}</p>
+                        <p className="font-medium text-navy-900">
+                          {getExpenseDisplayLabel(expense)}
+                        </p>
                         <p className="text-sm text-slate-500">
                           {expenseCategoryLabels[expense.category]} - {expense.provider}
                         </p>
@@ -1206,8 +1392,8 @@ export function ResultsPanel() {
               <Loader2 className="animate-spin text-sage-700" size={18} />
               Recherche des offres concurrentes...
             </div>
-          ) : alternatives.length > 0 ? (
-            alternatives.map((offer) => {
+          ) : primaryAlternatives.length > 0 ? (
+            primaryAlternatives.map((offer) => {
               const verifiedSaving = computeVerifiedOfferSaving(offer, analysis);
 
               if (isDiscoveryAccess) {
@@ -1294,6 +1480,67 @@ export function ResultsPanel() {
           )}
         </div>
       </Card>
+
+      {reducedDataAlternatives.length > 0 ? (
+        <Card className="border-amber-200 bg-amber-50">
+          <div className="flex items-center gap-2">
+            <Lightbulb className="text-amber-700" size={22} />
+            <h2 className="text-lg font-semibold text-navy-900">
+              Autres possibilités pour réduire votre facture
+            </h2>
+          </div>
+          <p className="mt-2 text-sm leading-6 text-slate-600">
+            Ces forfaits sont moins généreux en données mobiles. Ils sont présentés comme des
+            compromis éventuels, jamais comme des offres équivalentes, et leurs économies ne sont
+            pas ajoutées au total principal.
+          </p>
+          <div className="mt-4 grid gap-3 md:grid-cols-2">
+            {reducedDataAlternatives.map((offer) => (
+              <div className="rounded-lg border border-amber-200 bg-white p-4" key={offer.id}>
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div className="flex flex-wrap gap-2">
+                    <Badge tone="amber">Volume réduit</Badge>
+                    <Badge tone="neutral">Forfait mobile</Badge>
+                  </div>
+                  <p className="font-semibold text-amber-800">
+                    Économie possible : {formatCurrency(computeVerifiedOfferSaving(offer, analysis))}
+                    {" "}/ an
+                  </p>
+                </div>
+                {isDiscoveryAccess ? (
+                  <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 p-4">
+                    <p className="font-semibold text-navy-900">Opérateur sélectionné caché</p>
+                    <Button className="mt-3" href="/tarifs" variant="secondary">
+                      Débloquer mon audit complet
+                    </Button>
+                  </div>
+                ) : (
+                  <>
+                    <div className="mt-3 flex items-center gap-3">
+                      <ProviderLogo logoUrl={offer.logoUrl} provider={offer.provider} />
+                      <div>
+                        <h3 className="font-semibold text-navy-900">{offer.name}</h3>
+                        <p className="text-sm text-slate-500">
+                          {offer.provider} - {formatCurrency(offer.monthlyPrice)} / mois
+                        </p>
+                      </div>
+                    </div>
+                    <p className="mt-3 text-sm leading-6 text-slate-600">{offer.reason}</p>
+                    <a
+                      className="mt-4 inline-flex min-h-10 items-center justify-center gap-2 rounded-lg border border-amber-200 bg-white px-4 py-2 text-sm font-semibold text-navy-900 transition hover:bg-amber-100"
+                      href={offer.url}
+                      rel="noopener noreferrer"
+                      target="_blank"
+                    >
+                      Voir le compromis <ExternalLink size={15} />
+                    </a>
+                  </>
+                )}
+              </div>
+            ))}
+          </div>
+        </Card>
+      ) : null}
 
       {conditionalSupportOffers.length > 0 ? (
         <Card className="border-amber-200 bg-amber-50">

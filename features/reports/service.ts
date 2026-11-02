@@ -1,9 +1,13 @@
 import { jsPDF } from "jspdf";
 import type { GeneratedLetter, MockAnalysis } from "@/types";
-import type { AlternativeOffer } from "@/features/recommendations/service";
+import {
+  isPrimaryAlternative,
+  type AlternativeOffer
+} from "@/features/recommendations/service";
 import type { SelectedAlternativeOffer } from "@/features/recommendations/selected-offer";
 import type { AuditActionLog } from "@/features/privacy/action-log";
 import {
+  getExpenseDisplayLabel,
   getTopExpenses,
   summarizeExpensesByCategory
 } from "@/lib/expense-summary";
@@ -59,7 +63,11 @@ function getBestAlternativeForExpense(
   analysis: MockAnalysis
 ) {
   return alternatives
-    .filter((offer) => getExpenseIdFromAlternativeId(offer, analysis) === expenseId)
+    .filter(
+      (offer) =>
+        isPrimaryAlternative(offer) &&
+        getExpenseIdFromAlternativeId(offer, analysis) === expenseId
+    )
     .sort((first, second) => second.estimatedYearlySaving - first.estimatedYearlySaving)[0];
 }
 
@@ -167,7 +175,7 @@ export async function generatePdfReport(
     doc.setTextColor(hasSaving ? navy[0] : 125, hasSaving ? navy[1] : 125, hasSaving ? navy[2] : 125);
     doc.text(
       truncateText(
-        `${normalizeDisplayText(expense.provider || expense.label)} - ${formatCurrency(expense.monthlyAmount)}/mois`,
+        `${getExpenseDisplayLabel(expense)} - ${normalizeDisplayText(expense.provider)} - ${formatCurrency(expense.monthlyAmount)}/mois`,
         39
       ),
       25,
@@ -190,6 +198,44 @@ export async function generatePdfReport(
     });
     y += 8;
   });
+
+  const reducedDataAlternatives = alternatives.filter(
+    (offer) => offer.comparisonKind === "reduced_data"
+  );
+  if (reducedDataAlternatives.length > 0) {
+    y += 8;
+    ensurePageSpace(18 + reducedDataAlternatives.length * 13);
+    doc.setTextColor(navy[0], navy[1], navy[2]);
+    doc.setFontSize(13);
+    doc.setFont("helvetica", "bold");
+    doc.text("Autres possibilites pour reduire votre facture", 20, y);
+    y += 7;
+    doc.setFontSize(9);
+    doc.setFont("helvetica", "normal");
+    doc.setTextColor(100, 100, 100);
+    doc.text(
+      "Forfaits mobiles moins genereux, non equivalents et exclus du total principal.",
+      20,
+      y
+    );
+    y += 7;
+    reducedDataAlternatives.forEach((offer) => {
+      ensurePageSpace(13);
+      doc.setTextColor(navy[0], navy[1], navy[2]);
+      doc.setFont("helvetica", "bold");
+      doc.text(
+        truncateText(`${normalizeDisplayText(offer.provider)} - ${normalizeDisplayText(offer.name)}`, 60),
+        25,
+        y
+      );
+      doc.setFont("helvetica", "normal");
+      doc.setTextColor(125, 90, 20);
+      doc.text(`Compromis: ${formatCurrency(offer.estimatedYearlySaving)}/an`, 185, y, {
+        align: "right"
+      });
+      y += 7;
+    });
+  }
 
   y += 12;
   const categorySummaries = summarizeExpensesByCategory(analysis.expenses);

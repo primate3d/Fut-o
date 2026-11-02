@@ -30,6 +30,9 @@ export type AlternativeOffer = {
   estimatedYearlySaving: number;
   reason: string;
   action: string;
+  comparisonKind?: "equivalent" | "reduced_data";
+  mobileDataLimitGB?: number;
+  mobileDataUnlimited?: boolean;
 };
 
 export type ConditionalSupportOffer = {
@@ -58,6 +61,7 @@ type AlternativeTemplate = {
     provider: string;
   };
   dataLimitGB?: number;
+  dataUnlimited?: boolean;
   reason: string;
   action: string;
 };
@@ -100,6 +104,10 @@ export function classifyMobileProfile(currentDataGB: number): MobileProfile | un
   return MOBILE_PROFILES.find(
     (profile) => currentDataGB >= profile.minData && currentDataGB <= profile.maxData
   );
+}
+
+export function isPrimaryAlternative(offer: AlternativeOffer) {
+  return offer.comparisonKind !== "reduced_data";
 }
 
 const alternativesByCategory: Partial<Record<ExpenseCategory, AlternativeTemplate[]>> = {
@@ -442,52 +450,74 @@ function adaptInternetTemplateToDetectedServices(
 }
 
 export function findAlternativeOffers(expenses: Expense[]): AlternativeOffer[] {
-  return expenses
+  const offers = expenses
     .flatMap((expense) => {
-      const internetExpense = expense as InternetAwareExpense;
-      const mobileComparisonDataGB =
+      if (
         expense.subcategory === ExpenseSubcategory.MOBILE &&
-        typeof expense.mobileConsumedDataGB === "number"
-          ? expense.mobileConsumedDataGB
+        expense.mobileRecurringAmountNeedsConfirmation
+      ) {
+        return [];
+      }
+
+      const internetExpense = expense as InternetAwareExpense;
+      const mobileIncludedDataGB =
+        typeof expense.mobileIncludedDataGB === "number"
+          ? expense.mobileIncludedDataGB
           : expense.mobileDataGB;
       const mobileProfile =
         expense.subcategory === ExpenseSubcategory.MOBILE &&
-        typeof mobileComparisonDataGB === "number"
-          ? classifyMobileProfile(mobileComparisonDataGB)
+        typeof mobileIncludedDataGB === "number"
+          ? classifyMobileProfile(mobileIncludedDataGB)
           : undefined;
       const templates = (alternativesByCategory[expense.category] ?? [])
+        .map((template, templateIndex) => ({ template, templateIndex }))
         .filter(
-          (template) =>
+          ({ template }) =>
           hasRequiredBundle(template, expenses) &&
           (!template.documentTypes ||
             (expense.documentType && template.documentTypes.includes(expense.documentType))) &&
           (!template.subcategories ||
             (expense.subcategory && template.subcategories.includes(expense.subcategory))) &&
-          !(
-            expense.subcategory === ExpenseSubcategory.MOBILE &&
-            typeof mobileComparisonDataGB === "number" &&
-            typeof template.dataLimitGB === "number" &&
-            template.dataLimitGB < mobileComparisonDataGB
-          ) &&
+          (expense.subcategory !== ExpenseSubcategory.MOBILE || (() => {
+            if (expense.mobileDataUnlimited) {
+              return template.dataUnlimited === true || expense.mobileAllowLowerDataOffers === true;
+            }
+            if (typeof mobileIncludedDataGB !== "number") return false;
+            if (template.dataUnlimited) return true;
+            if (typeof template.dataLimitGB !== "number") return false;
+            if (template.dataLimitGB >= mobileIncludedDataGB) return true;
+            if (!expense.mobileAllowLowerDataOffers) return false;
+            return (
+              typeof expense.mobileConsumedDataGB !== "number" ||
+              template.dataLimitGB >= expense.mobileConsumedDataGB
+            );
+          })()) &&
           !(
             expense.subcategory === ExpenseSubcategory.INTERNET &&
             internetExpense.internetAccessTechnology === "adsl" &&
             template.accessTechnology === "fiber"
           )
         )
-        .flatMap((template) => {
+        .flatMap(({ template, templateIndex }) => {
           if (expense.subcategory !== ExpenseSubcategory.INTERNET) {
-            return [template];
+            return [{ template, templateIndex }];
           }
 
           const comparableTemplate = adaptInternetTemplateToDetectedServices(
             template,
             internetExpense
           );
-          return comparableTemplate ? [comparableTemplate] : [];
+          return comparableTemplate ? [{ template: comparableTemplate, templateIndex }] : [];
         });
 
-      return templates.flatMap((template, index) => {
+      return templates.flatMap(({ template, templateIndex }) => {
+        const isReducedMobileOffer =
+          expense.subcategory === ExpenseSubcategory.MOBILE &&
+          !template.dataUnlimited &&
+          (expense.mobileDataUnlimited ||
+            (typeof mobileIncludedDataGB === "number" &&
+              typeof template.dataLimitGB === "number" &&
+              template.dataLimitGB < mobileIncludedDataGB));
         const yearlyPrice = template.monthlyPrice * 12;
         const estimatedYearlySaving =
           expense.subcategory === ExpenseSubcategory.INTERNET ||
@@ -513,28 +543,30 @@ export function findAlternativeOffers(expenses: Expense[]): AlternativeOffer[] {
                   ? "Ligne ADSL detectee : verifier les offres compatibles avec votre logement."
                   : null
               ].filter((note): note is string => Boolean(note))
-            : expense.subcategory === ExpenseSubcategory.MOBILE &&
-                typeof expense.mobileConsumedDataGB === "number" &&
-                typeof template.dataLimitGB === "number"
+            : isReducedMobileOffer && typeof template.dataLimitGB === "number"
             ? [
-                `Consommation observee : ${formatMobileData(expense.mobileConsumedDataGB)} Go${
-                  typeof expense.mobileIncludedDataGB === "number"
-                    ? ` sur ${formatMobileData(expense.mobileIncludedDataGB)} Go inclus`
+                `Volume reduit : ${formatMobileData(template.dataLimitGB)} Go au lieu de ${
+                  expense.mobileDataUnlimited
+                    ? "votre forfait illimite"
+                    : `${formatMobileData(mobileIncludedDataGB ?? 0)} Go inclus`
+                }. Il s'agit d'un compromis, pas d'une offre equivalente.${
+                  typeof expense.mobileConsumedDataGB === "number"
+                    ? ` Consommation observee : ${formatMobileData(expense.mobileConsumedDataGB)} Go.`
                     : ""
-                }. Cette offre couvre l'usage releve, a confirmer sur une periode representative.`
+                }`
               ]
             : expense.subcategory === ExpenseSubcategory.MOBILE &&
-                typeof expense.mobileDataGB === "number" &&
+                (expense.mobileDataUnlimited || typeof mobileIncludedDataGB === "number") &&
                 typeof template.dataLimitGB === "number"
             ? [
-                `Compatible avec une enveloppe déclarée de ${expense.mobileDataGB} Go${
+                `Volume equivalent ou superieur a ${formatMobileData(mobileIncludedDataGB ?? 0)} Go${
                   mobileProfile ? ` (${mobileProfile.label})` : ""
                 }.`
               ]
             : [];
 
         return {
-          id: `alternative_${expense.id}_${index}`,
+          id: `alternative_${expense.id}_${templateIndex}`,
           category: expense.category,
           provider: template.provider,
           logoUrl: getProviderBranding(template.provider).logoUrl,
@@ -549,13 +581,25 @@ export function findAlternativeOffers(expenses: Expense[]): AlternativeOffer[] {
               : `${template.reason}${cautionNotes.length ? ` ${cautionNotes.join(" ")}` : ""}`,
           action:
             template.action +
-            (cautionNotes.length ? " Confirmer les points a verifier avant toute demarche." : "")
+            (cautionNotes.length ? " Confirmer les points a verifier avant toute demarche." : ""),
+          comparisonKind: isReducedMobileOffer
+            ? ("reduced_data" as const)
+            : ("equivalent" as const),
+          ...(typeof template.dataLimitGB === "number"
+            ? { mobileDataLimitGB: template.dataLimitGB }
+            : {}),
+          ...(template.dataUnlimited ? { mobileDataUnlimited: true } : {})
         };
       });
     })
 
-    .sort((a, b) => b.estimatedYearlySaving - a.estimatedYearlySaving)
+    .sort((a, b) => b.estimatedYearlySaving - a.estimatedYearlySaving);
+
+  const primaryOffers = offers.filter(isPrimaryAlternative).slice(0, 8);
+  const reducedDataOffers = offers
+    .filter((offer) => offer.comparisonKind === "reduced_data")
     .slice(0, 8);
+  return [...primaryOffers, ...reducedDataOffers];
 }
 
 export function findConditionalInternetSupportOffers(

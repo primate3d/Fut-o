@@ -443,16 +443,9 @@ export function LettersPanel() {
 
     if (storedAnalysis && hasUsableStoredAnalysis) {
       applyAnalysis(storedAnalysis);
-      if (isManualAnalysis(storedAnalysis)) {
-        return;
-      }
     }
 
     async function loadServerState() {
-      if (isManualAnalysis(getStoredMockAnalysis())) {
-        return;
-      }
-
       const serverDocuments = await getStoredUploadedDocumentsServer();
       const readyServerDocuments = serverDocuments.filter(
         (document) => document.status === "ready"
@@ -472,8 +465,7 @@ export function LettersPanel() {
       if (
         serverAnalysis &&
         isAnalysisForDocuments(serverAnalysis, serverDocuments) &&
-        hasAnalysisDataForLetters(serverAnalysis) &&
-        !isManualAnalysis(getStoredMockAnalysis())
+        hasAnalysisDataForLetters(serverAnalysis)
       ) {
         storeMockAnalysis(serverAnalysis);
         applyAnalysis(serverAnalysis);
@@ -602,14 +594,24 @@ export function LettersPanel() {
 
       {!isFollowupDraft && !hasDetectedCustomer ? (
         <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm leading-6 text-amber-900 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-          <p>
-            Aucune coordonnée client n'a été détectée dans l'analyse actuelle. Relancez
-            l'analyse depuis la page Importer avec la facture d'origine pour préremplir
-            le nom, l'adresse, l'email et le numéro client quand ils sont lisibles.
-          </p>
-          <Button onClick={handleForceAnalysis} disabled={isReloading} type="button" variant="secondary" className="whitespace-nowrap shrink-0">
-            {isReloading ? "Analyse..." : "Relancer l'analyse (IA)"}
-          </Button>
+          {isManualAnalysis(analysis) ? (
+            <p>
+              Certaines coordonnées nécessaires au courrier sont absentes de la saisie
+              manuelle. Complétez uniquement les champs utiles dans la section de
+              personnalisation ci-dessous avant l'envoi.
+            </p>
+          ) : (
+            <>
+              <p>
+                Aucune coordonnée client n'a été détectée dans l'analyse actuelle. Relancez
+                l'analyse depuis la page Importer avec la facture d'origine pour préremplir
+                le nom, l'adresse, l'email et le numéro client quand ils sont lisibles.
+              </p>
+              <Button onClick={handleForceAnalysis} disabled={isReloading} type="button" variant="secondary" className="whitespace-nowrap shrink-0">
+                {isReloading ? "Analyse..." : "Relancer l'analyse (IA)"}
+              </Button>
+            </>
+          )}
         </div>
       ) : !isFollowupDraft && analysis && !hasDocumentProfiles(analysis) ? (
         <div className="rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm leading-6 text-blue-900 flex flex-col sm:flex-row sm:items-center justify-between gap-4">

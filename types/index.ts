@@ -50,6 +50,9 @@ export type DocumentUserCorrections = {
   frequency?: "monthly" | "bimonthly" | "quarterly" | "yearly" | "one_time" | "schedule";
   isMultiContract?: boolean;
   notes?: string;
+  mobileDataGB?: number;
+  mobileDataUnlimited?: boolean;
+  mobileAllowLowerDataOffers?: boolean;
 };
 
 export type UploadedDocumentType =
@@ -117,8 +120,20 @@ export type Expense = {
   billingAmount?: number;
   billingFrequency?: DocumentUserCorrections["frequency"];
   mobileDataGB?: number;
+  internetTvIncluded?: boolean;
   mobileIncludedDataGB?: number;
   mobileConsumedDataGB?: number;
+  mobileRoamingIncludedDataGB?: number;
+  mobileDataUnlimited?: boolean;
+  mobileAllowLowerDataOffers?: boolean;
+  mobileInvoiceTotalTTC?: number;
+  mobileInvoiceTotalHT?: number;
+  mobileSubscriptionBeforeDiscount?: number;
+  mobileDiscountAmount?: number;
+  mobileRecurringAmountNeedsConfirmation?: boolean;
+  mobileHasOneOffCharges?: boolean;
+  mobileHasOutOfPlanCharges?: boolean;
+  mobileCommitment?: "none" | "unknown";
 };
 
 export type Recommendation = {

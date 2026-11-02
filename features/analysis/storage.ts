@@ -244,9 +244,23 @@ export function isAnalysisForDocuments(
     .filter((document) => document.status !== "error")
     .map((document) => document.id)
     .sort();
+  const includesManualDocuments = documents.some(
+    (document) => document.mimeType === "manual/input"
+  );
   const analysisDocumentIds = analysis.documents
+    .filter(
+      (document) => includesManualDocuments || document.mimeType !== "manual/input"
+    )
     .map((document) => document.id)
     .sort();
+
+  if (
+    currentDocumentIds.length === 0 &&
+    analysis.documents.length > 0 &&
+    analysis.documents.every((document) => document.mimeType === "manual/input")
+  ) {
+    return true;
+  }
 
   return (
     currentDocumentIds.length > 0 &&

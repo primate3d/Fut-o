@@ -53,6 +53,20 @@ type MobilePlanInfo = {
   dataGB?: number;
   includedDataGB?: number;
   consumedDataGB?: number;
+  roamingIncludedDataGB?: number;
+  dataUnlimited?: boolean;
+};
+
+type MobileBillingInfo = {
+  invoiceTotalTTC?: number;
+  invoiceTotalHT?: number;
+  subscriptionBeforeDiscount?: number;
+  discountAmount?: number;
+  recurringMonthlyAmount?: number;
+  recurringAmountNeedsConfirmation: boolean;
+  hasOneOffCharges: boolean;
+  hasOutOfPlanCharges: boolean;
+  commitment: "none" | "unknown";
 };
 
 type ManualBillingInfo = {
@@ -69,6 +83,13 @@ function normalize(value?: string) {
     .toLowerCase()
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "");
+}
+
+function normalizeMobileText(value?: string) {
+  return normalize(clean(value))
+    .replace(/([a-z])\s*[´`ˆ]\s*(?=[a-z])/g, "$1")
+    .replace(/([a-z])-\s+(?=[a-z])/g, "$1")
+    .replace(/\s+/g, " ");
 }
 
 function clean(value?: string) {
@@ -426,7 +447,14 @@ function extractMobilePlanInfo(
 ): MobilePlanInfo | undefined {
   if (documentType !== "mobile_invoice") return undefined;
 
-  const normalizedText = normalize(clean(text));
+  const normalizedText = normalizeMobileText(text);
+  if (
+    /\b(?:(?:internet|data|web)\s+(?:mobile\s+)?illimite(?:e|es|s)?|go\s+illimite(?:e|es|s)?)\b/.test(
+      normalizedText
+    )
+  ) {
+    return { dataUnlimited: true };
+  }
   const nrjUsageMatch = normalizedText.match(
     /\bweb\s*:\s*(\d+(?:[.,]\d+)?)\s*go\s+debit\s+ajuste\s+au[-\s]+dela\s+(\d+(?:[.,]\d+)?)\s*go\s+inclus\b/i
   );
@@ -439,37 +467,169 @@ function extractMobilePlanInfo(
       Number.isFinite(consumedDataGB) &&
       consumedDataGB >= 0
     ) {
+      const roamingMatch = normalizedText.match(
+        /(\d+(?:[.,]\d+)?)\s*go\s+(?:depuis|en)\s+(?:l[' ]?)?europe(?:\s+et|\s*\/\s*)\s*(?:les\s+)?dom\b/i
+      );
+      const roamingIncludedDataGB = roamingMatch
+        ? Number(roamingMatch[1].replace(",", "."))
+        : undefined;
       return {
-        dataGB: Math.round(includedDataGB),
-        includedDataGB: Math.round(includedDataGB),
-        consumedDataGB: Math.round(consumedDataGB * 100) / 100
+        dataGB: includedDataGB,
+        includedDataGB,
+        consumedDataGB,
+        ...(Number.isFinite(roamingIncludedDataGB) ? { roamingIncludedDataGB } : {})
       };
     }
   }
 
-  const consumedDataPattern =
-    /\b\d+(?:[.,]\d+)?\s*go\s*(?:utilises?|utilisees?|consommes?|consommees?|restants?)\b/i;
-  const candidatePatterns = [
-    /(?:forfait|enveloppe|data|internet\s+mobile)[^.\n]{0,40}?(\d+(?:[.,]\d+)?)\s*go\b/i,
-    /(\d+(?:[.,]\d+)?)\s*go\s*(?:inclus|incluse|incluses|compris|comprise)\b/i,
-    /(?:jusqu['’]?\s+a|volume\s+inclus)\s*(\d+(?:[.,]\d+)?)\s*go\b/i
+  const includedPatterns = [
+    {
+      pattern: /(\d+(?:[.,]\d+)?)\s*go\s*(?:inclus|incluse|incluses|compris|comprise)\b/i
+    },
+    {
+      pattern: /(?:jusqu['’]?\s+a|volume\s+inclus)\s*(\d+(?:[.,]\d+)?)\s*go\b/i
+    },
+    {
+      pattern: /(?:forfait|enveloppe|data|internet\s+mobile)[^.\n]{0,40}?(\d+(?:[.,]\d+)?)\s*go\b/i,
+      rejectUsageContext: true
+    }
   ];
 
-  for (const pattern of candidatePatterns) {
+  let includedDataGB: number | undefined;
+  for (const { pattern, rejectUsageContext } of includedPatterns) {
     const match = normalizedText.match(pattern);
     if (!match) continue;
+    if (
+      rejectUsageContext &&
+      /\b(consommation|consomme(?:e|es|s)?|utilise(?:e|es|s)?|restant(?:e|es|s)?)\b/i.test(
+        match[0]
+      )
+    ) {
+      continue;
+    }
 
-    const matchStart = match.index ?? 0;
-    const matchContext = normalizedText.slice(matchStart, matchStart + match[0].length + 30);
-    if (consumedDataPattern.test(matchContext)) continue;
-
-    const dataGB = Number(match[1].replace(",", "."));
-    if (Number.isFinite(dataGB) && dataGB >= 0) {
-      return { dataGB: Math.round(dataGB) };
+    const value = Number(match[1].replace(",", "."));
+    if (Number.isFinite(value) && value >= 0) {
+      includedDataGB = value;
+      break;
     }
   }
 
-  return undefined;
+  const consumedPatterns = [
+    /(?:consommation|data|web)\s*(?:utilisee|consommee)?\s*:?\s*(\d+(?:[.,]\d+)?)\s*go\b/i,
+    /internet\s+depuis\s+la\s+france\s+metropolitaine\s*:?\s*(\d+(?:[.,]\d+)?)\s*go\b/i,
+    /(\d+(?:[.,]\d+)?)\s*go\s*(?:utilises?|utilisees?|consommes?|consommees?)\b/i
+  ];
+  let consumedDataGB: number | undefined;
+  for (const pattern of consumedPatterns) {
+    const match = normalizedText.match(pattern);
+    if (!match) continue;
+    const value = Number(match[1].replace(",", "."));
+    if (Number.isFinite(value) && value >= 0) {
+      consumedDataGB = value;
+      break;
+    }
+  }
+
+  const roamingMatch = normalizedText.match(
+    /(\d+(?:[.,]\d+)?)\s*go\s+(?:depuis|en)\s+(?:l[' ]?)?europe(?:\s+et|\s*\/\s*)\s*(?:les\s+)?dom\b/i
+  );
+  const roamingIncludedDataGB = roamingMatch
+    ? Number(roamingMatch[1].replace(",", "."))
+    : undefined;
+
+  return {
+    dataGB: includedDataGB,
+    includedDataGB,
+    consumedDataGB,
+    ...(Number.isFinite(roamingIncludedDataGB) ? { roamingIncludedDataGB } : {})
+  };
+}
+
+function extractMobileBillingInfo(
+  text: string,
+  documentType?: UploadedDocumentType,
+  providerName?: string
+): MobileBillingInfo | undefined {
+  if (documentType !== "mobile_invoice") return undefined;
+
+  const normalizedText = normalizeMobileText(text);
+  const freeInvoiceHT = normalizedText.match(
+    /total\s+de\s+la\s+facture\s+ht\s*([0-9]+(?:[.,][0-9]{2}))/i
+  )?.[1];
+  const freeInvoiceTTC = normalizedText.match(
+    /somme\s*a\s+payer\s+ttc\*?\s*([0-9]+(?:[.,][0-9]{2}))/i
+  )?.[1];
+  const genericTotals = normalizedText.match(
+    /montant\s+de\s+votre\s+facture\s+([0-9][0-9\s.,]*[.,][0-9]{2})\s+([0-9][0-9\s.,]*[.,][0-9]{2})/i
+  );
+  const invoiceTotalHT = parseAmount(freeInvoiceHT ?? genericTotals?.[1]);
+  const invoiceTotalTTC = parseAmount(freeInvoiceTTC ?? genericTotals?.[2]);
+  const isFreeMobile = providerName === "Free Mobile" || /\bfree\s+mobile\b/.test(normalizedText);
+  const isNrjMobile = providerName === "NRJ Mobile" || /\bnrj\s+mobile\b/.test(normalizedText);
+
+  let subscriptionBeforeDiscount: number | undefined;
+  let discountAmount: number | undefined;
+
+  if (isFreeMobile) {
+    subscriptionBeforeDiscount = parseAmount(
+      normalizedText.match(
+        /abonnement\s+["'“”]?forfait\s+free\s+5g\+?["'“”]?\s*([0-9]+(?:[.,][0-9]+)?)/i
+      )?.[1]
+    );
+    discountAmount = parseAmount(
+      normalizedText.match(
+        /remise\s+abonne\s+freebox.{0,80}?(-\s*\d+(?:[.,]\d+)?)/i
+      )?.[1]
+    );
+  } else if (isNrjMobile) {
+    subscriptionBeforeDiscount = parseAmount(
+      normalizedText.match(
+        /serie\s+speciale\s+nrj\s+mobile\s+illimitee?\s*([0-9]+(?:[.,][0-9]+)?)/i
+      )?.[1]
+    );
+    const discountMatch = normalizedText.match(
+      /remise\s+\d+(?:[.,]\d+)?\s*(?:€|eur)\s+(-\s*\d+(?:[.,]\d+)?)\s+(-\s*\d+(?:[.,]\d+)?)/i
+    );
+    discountAmount = parseAmount(discountMatch?.[2]);
+  }
+
+  if (
+    subscriptionBeforeDiscount !== undefined &&
+    discountAmount === undefined &&
+    !/\bremise\b/.test(normalizedText)
+  ) {
+    discountAmount = 0;
+  }
+
+  const recurringMonthlyAmount =
+    subscriptionBeforeDiscount !== undefined && discountAmount !== undefined
+      ? normalizeAmount(subscriptionBeforeDiscount + discountAmount)
+      : undefined;
+  const hasOneOffCharges =
+    /\b(?:services?\s+ponctuels?|frais\s+ponctuels?|services?\s+fournis\s+par\s+des\s+tiers)\b/.test(
+      normalizedText
+    );
+  const hasOutOfPlanCharges =
+    /\b(?:hors\s+forfait|communications?\s+hors\s+forfait|au[-\s]+dela\s+du\s+forfait)\b/.test(
+      normalizedText
+    );
+
+  return {
+    invoiceTotalTTC,
+    invoiceTotalHT,
+    subscriptionBeforeDiscount,
+    discountAmount,
+    recurringMonthlyAmount:
+      recurringMonthlyAmount !== undefined && recurringMonthlyAmount > 0
+        ? recurringMonthlyAmount
+        : undefined,
+    recurringAmountNeedsConfirmation:
+      recurringMonthlyAmount === undefined || recurringMonthlyAmount <= 0,
+    hasOneOffCharges,
+    hasOutOfPlanCharges,
+    commitment: /\bsans\s+engagement\b/.test(normalizedText) ? "none" : "unknown"
+  };
 }
 
 function lastAmountBeforeMarker(text: string, marker: string) {
@@ -871,7 +1031,14 @@ export function extractDocumentPartyProfile(document: ExtractedDocument): Docume
   const manualCorrections = document.userCorrections;
   const manualProvider = clean(manualCorrections?.provider);
   const manualBilling = buildManualBillingInfo(manualCorrections);
-  const providerName = manualProvider || detectProvider(document);
+  const detectedProviderName = manualProvider || detectProvider(document);
+  const providerName =
+    detectedProviderName === "Free" &&
+    (manualCorrections?.documentType === "mobile_invoice" ||
+      document.documentType === "mobile_invoice" ||
+      /\bfree\s+mobile\b/i.test(text))
+      ? "Free Mobile"
+      : detectedProviderName;
   const fullName = firstMatch(text, [
     /(?:titulaire|client|factur[ée]\s*à|destinataire)\s*:?\s*([A-ZÀ-Ÿ][A-Za-zÀ-ÿ' -]{2,}\s+[A-ZÀ-Ÿ][A-Za-zÀ-ÿ' -]{2,})/i,
     /(?:m\.|mme|madame|monsieur)\s+([A-ZÀ-Ÿ][A-Za-zÀ-ÿ' -]{2,}\s+[A-ZÀ-Ÿ][A-Za-zÀ-ÿ' -]{2,})/i
@@ -950,6 +1117,7 @@ export function extractDocumentPartyProfile(document: ExtractedDocument): Docume
   );
   const internetBox = extractInternetBoxInfo(text, inferredDocumentType);
   const mobilePlan = extractMobilePlanInfo(text, inferredDocumentType);
+  const mobileBilling = extractMobileBillingInfo(text, inferredDocumentType, providerName);
   const insuranceContracts = extractMacifInsuranceContracts(text);
   const insuranceCustomerNumber = extractInsuranceCustomerNumber(text);
   const postalAddress = extractPostalAddress(text, inferredDocumentType, providerName);
@@ -983,6 +1151,7 @@ export function extractDocumentPartyProfile(document: ExtractedDocument): Docume
     energyServiceLines?: EnergyServiceLineInfo[];
     internetBox?: InternetBoxInfo;
     mobilePlan?: MobilePlanInfo;
+    mobileBilling?: MobileBillingInfo;
     insuranceContracts?: InsuranceContractInfo[];
     manualBilling?: ManualBillingInfo;
     hasManualContractSelection?: boolean;
@@ -1005,6 +1174,7 @@ export function extractDocumentPartyProfile(document: ExtractedDocument): Docume
     energyServiceLines: energyServiceLines.length > 0 ? energyServiceLines : undefined,
     internetBox,
     mobilePlan,
+    mobileBilling,
     manualBilling: effectiveManualBilling,
     insuranceContracts:
       !useSingleManualContract && insuranceContracts.length > 0
@@ -1090,6 +1260,14 @@ function inferDocumentTypeFromContent(
 
   if (/\b(engie|gaz|grdf|kwh pcs|consommation gaz)\b/.test(text)) {
     return "gas_invoice";
+  }
+
+  if (
+    /\b(forfait\s+mobile|internet\s+mobile|ligne\s+mobile|telephone\s+mobile|carte\s+sim|sim|nrj\s+mobile|free\s+mobile|la\s+poste\s+mobile|syma\s+mobile|lebara|prixtel)\b/.test(
+      text
+    )
+  ) {
+    return "mobile_invoice";
   }
 
   if (/\b(box|internet|fibre|adsl|wifi|livebox|freebox|bbox)\b/.test(text)) {
@@ -1330,6 +1508,12 @@ function getMobilePlanInfoFromProfile(profile?: DocumentPartyProfile) {
   )?.mobilePlan;
 }
 
+function getMobileBillingInfoFromProfile(profile?: DocumentPartyProfile) {
+  return (
+    profile as (DocumentPartyProfile & { mobileBilling?: MobileBillingInfo }) | undefined
+  )?.mobileBilling;
+}
+
 function getManualBillingInfoFromProfile(
   profile?: DocumentPartyProfile
 ) {
@@ -1379,6 +1563,26 @@ export function attachDocumentProfileToExpense(
   const energyBilling = getEnergyBillingInfoFromProfile(profile);
   const internetBox = getInternetBoxInfoFromProfile(profile);
   const mobilePlan = getMobilePlanInfoFromProfile(profile);
+  const mobileBilling = getMobileBillingInfoFromProfile(profile);
+  const isMobileDocument = inferenceDocumentType === "mobile_invoice";
+  const safeMobileNumber = (value: unknown) =>
+    typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : undefined;
+  const mobileDataUnlimited = isMobileDocument
+    ? mobilePlan
+      ? mobilePlan.dataUnlimited === true
+      : expense.mobileDataUnlimited === true
+    : undefined;
+  const mobileIncludedDataGB = mobileDataUnlimited
+    ? undefined
+    : mobilePlan
+      ? safeMobileNumber(mobilePlan.includedDataGB ?? mobilePlan.dataGB)
+      : safeMobileNumber(expense.mobileIncludedDataGB ?? expense.mobileDataGB);
+  const mobileConsumedDataGB = mobilePlan
+    ? safeMobileNumber(mobilePlan.consumedDataGB)
+    : safeMobileNumber(expense.mobileConsumedDataGB);
+  const mobileRoamingIncludedDataGB = mobilePlan
+    ? safeMobileNumber(mobilePlan.roamingIncludedDataGB)
+    : safeMobileNumber(expense.mobileRoamingIncludedDataGB);
   const shouldApplyManualBilling = Boolean(manualBilling);
   const isSeparatedEnergyExpense =
     expense.category === ExpenseCategory.ENERGY &&
@@ -1402,6 +1606,8 @@ export function attachDocumentProfileToExpense(
       ? expense.monthlyAmount
       : inferredCategory === ExpenseCategory.ENERGY && energyBilling?.monthlyAmount != null
       ? energyBilling.monthlyAmount
+      : isMobileDocument
+      ? mobileBilling?.recurringMonthlyAmount ?? 0
       : expense.category === ExpenseCategory.INSURANCE
         ? expense.monthlyAmount
       : profile.invoiceAmount ?? expense.monthlyAmount;
@@ -1439,12 +1645,23 @@ export function attachDocumentProfileToExpense(
           internetBundledMobile: internetBox.isBundledMobile
         }
       : {}),
-    ...(mobilePlan?.dataGB != null ? { mobileDataGB: mobilePlan.dataGB } : {}),
-    ...(mobilePlan?.includedDataGB != null
-      ? { mobileIncludedDataGB: mobilePlan.includedDataGB }
-      : {}),
-    ...(mobilePlan?.consumedDataGB != null
-      ? { mobileConsumedDataGB: mobilePlan.consumedDataGB }
+    ...(isMobileDocument
+      ? {
+          mobileDataGB: mobileIncludedDataGB,
+          mobileIncludedDataGB,
+          mobileConsumedDataGB,
+          mobileRoamingIncludedDataGB,
+          mobileDataUnlimited,
+          mobileInvoiceTotalTTC: mobileBilling?.invoiceTotalTTC,
+          mobileInvoiceTotalHT: mobileBilling?.invoiceTotalHT,
+          mobileSubscriptionBeforeDiscount: mobileBilling?.subscriptionBeforeDiscount,
+          mobileDiscountAmount: mobileBilling?.discountAmount,
+          mobileRecurringAmountNeedsConfirmation:
+            mobileBilling?.recurringAmountNeedsConfirmation ?? true,
+          mobileHasOneOffCharges: mobileBilling?.hasOneOffCharges,
+          mobileHasOutOfPlanCharges: mobileBilling?.hasOutOfPlanCharges,
+          mobileCommitment: mobileBilling?.commitment
+        }
       : {}),
     provider: finalProvider,
     label:
@@ -1454,7 +1671,9 @@ export function attachDocumentProfileToExpense(
     documentType:
       hasManualContractSelection && profile.documentType
         ? profile.documentType
-        : expense.documentType ?? profile.documentType,
+        : !expense.documentType || expense.documentType === "other"
+          ? profile.documentType
+          : expense.documentType,
     sourceDocumentId: profile.documentId,
     sourceDocumentName: profile.fileName,
     customerNumber: expense.customerNumber ?? profile.customer?.customerNumber,
@@ -1480,6 +1699,8 @@ export function attachDocumentProfileToExpense(
     subcategory:
       hasManualContractSelection
         ? finalSubcategory
+        : inferenceDocumentType === "mobile_invoice"
+        ? ExpenseSubcategory.MOBILE
         : inferenceDocumentType === "internet_invoice"
         ? ExpenseSubcategory.INTERNET
       : expense.category === ExpenseCategory.INSURANCE && expense.subcategory

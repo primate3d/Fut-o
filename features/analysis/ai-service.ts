@@ -191,7 +191,10 @@ Sortie JSON OBLIGATOIRE :
     "subcategory": "MOBILE",
     "monthlyAmount": 25,
     "customerNumber": "987654",
-    "mobileDataGB": 100
+    "mobileDataGB": 100,
+    "mobileIncludedDataGB": 100,
+    "mobileConsumedDataGB": 12.5,
+    "mobileDataUnlimited": false
   }]
 }
 
@@ -266,7 +269,11 @@ REGLES MULTI-LIGNES / MULTI-CONTRATS - EXEMPLES CONCRETS OBLIGATOIRES :
     marque recurrence = "one_time", et ajoute une anomalie
     plutot que d'inventer une mensualite.
 
-13. Pour une facture mobile, extrais l'enveloppe data internet incluse dans le forfait sous forme de nombre (en Go) dans expense.mobileDataGB (ex: 100 pour 100 Go).`
+13. Pour une facture mobile, distingue strictement :
+    - l'enveloppe incluse dans expense.mobileIncludedDataGB et, pour compatibilite, expense.mobileDataGB
+    - la consommation observee dans expense.mobileConsumedDataGB uniquement si elle est explicitement indiquee
+    - un forfait internet mobile illimite avec expense.mobileDataUnlimited = true, sans valeur numerique artificielle
+    N'arrondis pas les valeurs decimales et n'invente jamais une consommation absente.`
         },
         {
           role: "user",

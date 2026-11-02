@@ -13,7 +13,13 @@ import postgres from "postgres";
 import snapshot from "../drizzle/meta/0000_snapshot.json";
 import { householdDocuments, aiHouseholdPayload, emptyAnalysis } from "./fixtures/household";
 import { registerE2eWorkflows } from "./e2e-workflows.test";
-import { ExpenseCategory, type MockAnalysis, type UploadedDocument } from "../types";
+import {
+  ExpenseCategory,
+  ExpenseSubcategory,
+  type Expense,
+  type MockAnalysis,
+  type UploadedDocument
+} from "../types";
 import { jsPDF } from "jspdf";
 import type Stripe from "stripe";
 
@@ -195,6 +201,35 @@ function analysisRequest(code: string, documents: unknown[]) {
   return new Request("http://local.test/api/analyse", { method: "POST", body: JSON.stringify({ code, documents, force: true }) });
 }
 
+function manualAnalysisRequest(
+  code: string,
+  overrides: Record<string, unknown> = {}
+) {
+  return new Request("http://local.test/api/analyse", {
+    method: "POST",
+    body: JSON.stringify({
+      code,
+      manualContract: {
+        requestId: randomUUID(),
+        provider: "EDF",
+        documentType: "electricity_invoice",
+        amount: 120,
+        frequency: "monthly",
+        clientFirstName: "Jean",
+        clientLastName: "DUPONT",
+        clientAddress: "1 rue Exemple 75001 Paris",
+        customerNumber: "CLIENT-123",
+        contractNumber: "CONTRAT-123",
+        invoiceNumber: "FACTURE-123",
+        phone: "0102030405",
+        email: "jean.dupont@example.invalid",
+        providerAddress: "Service clients EDF",
+        ...overrides
+      }
+    })
+  });
+}
+
 function remapAiPayload(fixturesToDocumentIds: Record<string, string>) {
   const fixtureIds = Object.keys(fixturesToDocumentIds);
   const payload = aiHouseholdPayload(fixtureIds);
@@ -323,8 +358,15 @@ test("mixed EDF / MACIF multi-contract / SFR box / mobile preserves every docume
   assert.equal(result.expenses.filter((expense) => expense.sourceDocumentId === "sfr").length, 1);
   assert.equal(result.expenses.find((expense) => expense.sourceDocumentId === "mobile")!.mobileDataGB, 100);
   const { findAlternativeOffers } = await import("../features/recommendations/service");
-  const alternatives = findAlternativeOffers(result.expenses);
+  const alternatives = findAlternativeOffers(
+    result.expenses.map((expense) =>
+      expense.subcategory === ExpenseSubcategory.MOBILE
+        ? { ...expense, mobileAllowLowerDataOffers: true }
+        : expense
+    )
+  );
   assert.ok(alternatives.length > 0);
+  assert.ok(alternatives.some((offer) => offer.comparisonKind === "reduced_data"));
   const { generateLettersFromAnalysis, renderLetter } = await import("../features/letters/service");
   const letters = generateLettersFromAnalysis(result);
   assert.ok(letters.length > 0);
@@ -347,6 +389,7 @@ test("mixed EDF / MACIF multi-contract / SFR box / mobile preserves every docume
   finally { events.splice(events.indexOf(capture), 1); }
   assert.ok(report?.startsWith("%PDF-"));
   for (const provider of ["EDF", "MACIF", "SFR", "NRJ Mobile"]) assert.ok(report.includes(provider), `PDF missing ${provider}`);
+  assert.ok(report.includes("Autres possibilites pour reduire votre facture"));
 });
 
 test("manual selection in MACIF does not suppress mobile or box", async () => {
@@ -359,6 +402,285 @@ test("manual selection in MACIF does not suppress mobile or box", async () => {
   assert.equal(result.expenses.filter((expense) => expense.sourceDocumentId === "macif").length, 1);
   assert.ok(result.expenses.some((expense) => expense.sourceDocumentId === "mobile"));
   assert.ok(result.expenses.some((expense) => expense.sourceDocumentId === "sfr"));
+});
+
+test("complete and optional manual contracts persist server-side and generate letters", async () => {
+  const { POST: analyze } = await import("../app/api/analyse/route");
+  const { POST: letters } = await import("../app/api/courriers/route");
+  const key = { ...fakeKey(), plan: "famille" as const };
+  await repo.saveKey(key);
+
+  const firstRequestId = randomUUID();
+  const first = await analyze(manualAnalysisRequest(key.code, { requestId: firstRequestId }));
+  assert.equal(first.status, 200);
+  const firstAnalysis = ((await first.json()) as { analysis: MockAnalysis }).analysis;
+  assert.equal(firstAnalysis.documents[0].mimeType, "manual/input");
+  assert.equal(firstAnalysis.expenses[0].provider, "EDF");
+  assert.equal(firstAnalysis.totalMonthlyAmount, 120);
+  assert.equal(firstAnalysis.totalYearlyAmount, 1440);
+  assert.equal((await repo.findKeyByCode(key.code))!.usesRemaining, 9);
+
+  const replay = await analyze(manualAnalysisRequest(key.code, { requestId: firstRequestId }));
+  assert.equal(replay.status, 200);
+  assert.equal(((await replay.json()) as { cached: boolean }).cached, true);
+  assert.equal((await repo.findKeyByCode(key.code))!.usesRemaining, 9);
+
+  const secondRequestId = randomUUID();
+  const second = await analyze(manualAnalysisRequest(key.code, {
+    requestId: secondRequestId,
+    provider: "Free",
+    documentType: "internet_invoice",
+    amount: 23.35,
+    frequency: "monthly",
+    clientFirstName: undefined,
+    clientLastName: undefined,
+    clientAddress: undefined,
+    customerNumber: undefined,
+    contractNumber: undefined,
+    invoiceNumber: undefined,
+    phone: undefined,
+    email: undefined,
+    providerAddress: undefined
+  }));
+  assert.equal(second.status, 200);
+  const analysis = ((await second.json()) as { analysis: MockAnalysis }).analysis;
+  assert.equal(analysis.documents.length, 2);
+  assert.equal(analysis.expenses.length, 2);
+  assert.equal(analysis.totalMonthlyAmount, 143.35);
+  assert.equal(analysis.totalYearlyAmount, 1720.2);
+  const freeBox = analysis.expenses.find((expense) => expense.provider === "Free")!;
+  assert.equal(freeBox.category, ExpenseCategory.TELECOM);
+  assert.equal(freeBox.subcategory, ExpenseSubcategory.INTERNET);
+  assert.equal(freeBox.documentType, "internet_invoice");
+  assert.equal(freeBox.label, "Facture internet");
+  const { findAlternativeOffers } = await import("../features/recommendations/service");
+  const redBox = findAlternativeOffers([freeBox]).find((offer) => offer.provider === "RED by SFR");
+  assert.equal(redBox?.estimatedYearlySaving, 4.32);
+  const optionalProfile = analysis.detectedParties?.documents?.[`manual_${secondRequestId}`]?.customer;
+  assert.equal(optionalProfile?.fullName, "DUPONT");
+  assert.equal(optionalProfile?.address, key.profilePostalAddress);
+  assert.equal((await repo.findKeyByCode(key.code))!.usesRemaining, 8);
+
+  const letterResponse = await letters(new Request("http://local.test/api/courriers", {
+    method: "POST",
+    body: JSON.stringify({ code: key.code })
+  }));
+  assert.equal(letterResponse.status, 200);
+  const generated = (await letterResponse.json()) as { letters: unknown[] };
+  assert.ok(generated.letters.length >= 2);
+});
+
+test("manual mobile contracts require included data, accept decimals and preserve unlimited plans", async () => {
+  const { POST: analyze } = await import("../app/api/analyse/route");
+  const key = { ...fakeKey(), plan: "famille" as const };
+  await repo.saveKey(key);
+
+  const missing = await analyze(manualAnalysisRequest(key.code, {
+    provider: "Operateur mobile",
+    documentType: "mobile_invoice",
+    amount: 28,
+    mobileDataGB: undefined,
+    mobileDataUnlimited: false
+  }));
+  assert.equal(missing.status, 400);
+  assert.match((await missing.text()), /volume de donnees inclus manquant/i);
+  assert.equal((await repo.findKeyByCode(key.code))!.usesRemaining, 10);
+
+  const decimal = await analyze(manualAnalysisRequest(key.code, {
+    requestId: randomUUID(),
+    provider: "Operateur decimal",
+    documentType: "mobile_invoice",
+    amount: 28,
+    mobileDataGB: 12.5,
+    mobileDataUnlimited: false,
+    mobileAllowLowerDataOffers: false
+  }));
+  assert.equal(decimal.status, 200);
+  const decimalAnalysis = ((await decimal.json()) as { analysis: MockAnalysis }).analysis;
+  const decimalExpense = decimalAnalysis.expenses.find(
+    (expense) => expense.provider === "Operateur decimal"
+  )!;
+  assert.equal(decimalExpense.mobileDataGB, 12.5);
+  assert.equal(decimalExpense.mobileIncludedDataGB, 12.5);
+  assert.equal(decimalExpense.mobileDataUnlimited, false);
+  assert.equal(decimalExpense.mobileAllowLowerDataOffers, false);
+
+  const unlimited = await analyze(manualAnalysisRequest(key.code, {
+    requestId: randomUUID(),
+    provider: "Operateur illimite",
+    documentType: "mobile_invoice",
+    amount: 35,
+    mobileDataGB: undefined,
+    mobileDataUnlimited: true,
+    mobileAllowLowerDataOffers: false
+  }));
+  assert.equal(unlimited.status, 200);
+  const unlimitedAnalysis = ((await unlimited.json()) as { analysis: MockAnalysis }).analysis;
+  const unlimitedExpense = unlimitedAnalysis.expenses.find(
+    (expense) => expense.provider === "Operateur illimite"
+  )!;
+  assert.equal(unlimitedExpense.mobileDataUnlimited, true);
+  assert.equal(unlimitedExpense.mobileDataGB, undefined);
+  assert.equal(unlimitedExpense.mobileIncludedDataGB, undefined);
+
+  const updated = await analyze(new Request("http://local.test/api/analyse", {
+    method: "POST",
+    body: JSON.stringify({
+      code: key.code,
+      mobileContractPreferences: {
+        expenseId: decimalExpense.id,
+        mobileDataGB: 100,
+        mobileDataUnlimited: false,
+        mobileAllowLowerDataOffers: true
+      }
+    })
+  }));
+  assert.equal(updated.status, 200);
+  const updatedAnalysis = ((await updated.json()) as { analysis: MockAnalysis }).analysis;
+  const updatedExpense = updatedAnalysis.expenses.find(
+    (expense) => expense.id === decimalExpense.id
+  )!;
+  assert.equal(updatedExpense.mobileIncludedDataGB, 100);
+  assert.equal(updatedExpense.mobileAllowLowerDataOffers, true);
+  assert.equal((await repo.findKeyByCode(key.code))!.usesRemaining, 8);
+  assert.deepEqual(
+    (await repo.getAnalysisByKey(key.code))!.expenses,
+    JSON.parse(JSON.stringify(updatedAnalysis.expenses))
+  );
+});
+
+test("report labels fall back to contract classification when a stored label is missing", async () => {
+  const { getExpenseDisplayLabel } = await import("../lib/expense-summary");
+  const baseExpense = analysisWithProvider("DISPLAY", "Provider").expenses[0];
+  const cases = [
+    ["internet_invoice", ExpenseCategory.TELECOM, ExpenseSubcategory.INTERNET, "Internet / Box"],
+    ["mobile_invoice", ExpenseCategory.TELECOM, ExpenseSubcategory.MOBILE, "Mobile"],
+    ["electricity_invoice", ExpenseCategory.ENERGY, ExpenseSubcategory.ELECTRICITY, "Électricité"],
+    ["home_insurance", ExpenseCategory.INSURANCE, ExpenseSubcategory.HOME_INSURANCE, "Assurance habitation"]
+  ] as const;
+
+  for (const [documentType, category, subcategory, expectedLabel] of cases) {
+    assert.equal(getExpenseDisplayLabel({
+      ...baseExpense,
+      label: "",
+      documentType,
+      category,
+      subcategory
+    }), expectedLabel);
+  }
+});
+
+test("manual and PDF contracts remain available together in either addition order", async () => {
+  const { POST: analyze } = await import("../app/api/analyse/route");
+  const { POST: letters } = await import("../app/api/courriers/route");
+  const key = { ...fakeKey(), plan: "famille" as const };
+  await repo.saveKey(key);
+
+  assert.equal((await analyze(manualAnalysisRequest(key.code, {
+    provider: "MACIF",
+    documentType: "home_insurance",
+    amount: 30
+  }))).status, 200);
+
+  const pdfId = randomUUID();
+  const uploaded = ((await (await uploadRequest(key.code, pdfId, undefined, "edf")).json()) as {
+    document: UploadedDocument;
+  }).document;
+  aiReply = remapAiPayload({ edf: pdfId });
+  const pdfResponse = await analyze(analysisRequest(key.code, [uploaded]));
+  assert.equal(pdfResponse.status, 200);
+  const afterPdf = ((await pdfResponse.json()) as { analysis: MockAnalysis }).analysis;
+  assert.equal(afterPdf.documents.length, 2);
+  assert.ok(afterPdf.expenses.some((expense) => expense.provider === "MACIF"));
+  assert.ok(afterPdf.expenses.some((expense) => expense.provider === "EDF"));
+
+  const afterSecondManual = await analyze(manualAnalysisRequest(key.code, {
+    provider: "SFR",
+    documentType: "internet_invoice",
+    amount: 49.99
+  }));
+  assert.equal(afterSecondManual.status, 200);
+  const mixed = ((await afterSecondManual.json()) as { analysis: MockAnalysis }).analysis;
+  assert.equal(mixed.documents.length, 3);
+  for (const provider of ["MACIF", "EDF", "SFR"]) {
+    assert.ok(mixed.expenses.some((expense) => expense.provider === provider));
+  }
+  assert.equal((await repo.getAnalysisByKey(key.code))!.expenses.length, 3);
+  assert.equal((await letters(new Request("http://local.test/api/courriers", {
+    method: "POST",
+    body: JSON.stringify({ code: key.code })
+  }))).status, 200);
+});
+
+test("manual contracts keep Foyer, Famille and Discovery plan rules", async () => {
+  const { POST: analyze } = await import("../app/api/analyse/route");
+  const { POST: letters } = await import("../app/api/courriers/route");
+
+  const foyer = fakeKey();
+  await repo.saveKey(foyer);
+  assert.equal((await analyze(manualAnalysisRequest(foyer.code))).status, 200);
+  const duplicateCategory = await analyze(manualAnalysisRequest(foyer.code, {
+    provider: "ENGIE",
+    documentType: "gas_invoice"
+  }));
+  assert.equal(duplicateCategory.status, 403);
+  assert.equal((await repo.findKeyByCode(foyer.code))!.usesRemaining, 9);
+  assert.equal((await letters(new Request("http://local.test/api/courriers", {
+    method: "POST",
+    body: JSON.stringify({ code: foyer.code })
+  }))).status, 200);
+
+  const family = { ...fakeKey(), plan: "famille" as const };
+  await repo.saveKey(family);
+  assert.equal((await analyze(manualAnalysisRequest(family.code))).status, 200);
+  assert.equal((await analyze(manualAnalysisRequest(family.code, {
+    provider: "ENGIE",
+    documentType: "gas_invoice"
+  }))).status, 200);
+  assert.equal((await repo.getAnalysisByKey(family.code))!.documents.length, 2);
+
+  const discovery = {
+    ...fakeKey(),
+    plan: "decouverte" as const,
+    usesRemaining: 1,
+    allowedNames: null,
+    profilePostalAddress: null,
+    profileLockedAt: null
+  };
+  await repo.saveKey(discovery);
+  assert.equal((await analyze(manualAnalysisRequest(discovery.code))).status, 200);
+  assert.equal((await letters(new Request("http://local.test/api/courriers", {
+    method: "POST",
+    body: JSON.stringify({ code: discovery.code })
+  }))).status, 403);
+});
+
+test("manual analysis refuses expired keys and remains isolated from another key", async () => {
+  const { POST: analyze } = await import("../app/api/analyse/route");
+  const { POST: letters } = await import("../app/api/courriers/route");
+  const expired = {
+    ...fakeKey(),
+    plan: "famille" as const,
+    expiresAt: new Date(Date.now() - 1000).toISOString()
+  };
+  await repo.saveKey(expired);
+  assert.equal((await analyze(manualAnalysisRequest(expired.code))).status, 403);
+  assert.equal((await letters(new Request("http://local.test/api/courriers", {
+    method: "POST",
+    body: JSON.stringify({ code: expired.code })
+  }))).status, 403);
+
+  const owner = { ...fakeKey(), plan: "famille" as const };
+  const foreign = { ...fakeKey(), plan: "famille" as const };
+  await repo.saveKey(owner);
+  await repo.saveKey(foreign);
+  const ownerResponse = await analyze(manualAnalysisRequest(owner.code, { provider: "EDF" }));
+  const ownerAnalysis = ((await ownerResponse.json()) as { analysis: MockAnalysis }).analysis;
+  const foreignResponse = await letters(new Request("http://local.test/api/courriers", {
+    method: "POST",
+    body: JSON.stringify({ code: foreign.code, analysis: ownerAnalysis })
+  }));
+  assert.equal(foreignResponse.status, 404);
 });
 
 test("storage rejects traversal and purge removes only expired files from UPLOADS_DIR", async () => {
@@ -521,6 +843,305 @@ test("mobile-only analysis produces one mobile expense", async () => {
   assert.equal(result.expenses[0].provider, "NRJ Mobile");
   assert.equal(result.expenses[0].documentType, "mobile_invoice");
   assert.equal(result.expenses[0].mobileDataGB, 100);
+});
+
+test("mobile extraction preserves decimals, unlimited data, consumption and MOBILE classification", async () => {
+  const {
+    attachDocumentProfileToExpense,
+    buildDocumentPartyProfiles
+  } = await import("../features/analysis/document-profiles");
+
+  const extract = (text: string, documentType: UploadedDocument["documentType"] = "mobile_invoice") => {
+    const id = randomUUID();
+    const document = {
+      ...householdDocuments[3],
+      id,
+      documentType,
+      extractedText: text
+    };
+    const expense: Expense = {
+      id: `expense_${id}`,
+      sourceDocumentId: id,
+      label: "Contrat telecom",
+      provider: "NRJ Mobile",
+      category: documentType === "other" ? ExpenseCategory.OTHER : ExpenseCategory.TELECOM,
+      subcategory:
+        documentType === "other" ? ExpenseSubcategory.OTHER : ExpenseSubcategory.INTERNET,
+      isRecurring: true,
+      monthlyAmount: 28,
+      yearlyAmount: 336,
+      documentType,
+      recurrence: "monthly",
+      mobileDataGB: 999
+    };
+    return attachDocumentProfileToExpense(
+      expense,
+      buildDocumentPartyProfiles([document])
+    );
+  };
+
+  const hundred = extract("NRJ Mobile Forfait mobile 100 Go inclus");
+  assert.equal(hundred.mobileIncludedDataGB, 100);
+  assert.equal(hundred.mobileDataGB, 100);
+
+  const decimal = extract("NRJ Mobile Forfait mobile 12,5 Go inclus");
+  assert.equal(decimal.mobileIncludedDataGB, 12.5);
+  assert.equal(decimal.mobileDataGB, 12.5);
+
+  const unlimited = extract("NRJ Mobile Internet mobile illimite");
+  assert.equal(unlimited.mobileDataUnlimited, true);
+  assert.equal(unlimited.mobileIncludedDataGB, undefined);
+  assert.equal(unlimited.mobileDataGB, undefined);
+
+  const includedAndConsumed = extract(
+    "NRJ Mobile Forfait mobile 100 Go inclus. Consommation : 10 Go"
+  );
+  assert.equal(includedAndConsumed.mobileIncludedDataGB, 100);
+  assert.equal(includedAndConsumed.mobileConsumedDataGB, 10);
+
+  const nrj = extract("NRJ Mobile Web : 500 Go debit ajuste au-dela 248,99 Go inclus");
+  assert.equal(nrj.mobileIncludedDataGB, 500);
+  assert.equal(nrj.mobileConsumedDataGB, 248.99);
+
+  const consumptionOnly = extract("NRJ Mobile Forfait mobile consommation : 10 Go");
+  assert.equal(consumptionOnly.mobileConsumedDataGB, 10);
+  assert.equal(consumptionOnly.mobileIncludedDataGB, undefined);
+  assert.equal(consumptionOnly.mobileDataGB, undefined);
+
+  const mobileContainingInternet = extract(
+    "NRJ Mobile facture pour une ligne et un forfait internet mobile 80 Go inclus",
+    "other"
+  );
+  assert.equal(mobileContainingInternet.documentType, "mobile_invoice");
+  assert.equal(mobileContainingInternet.category, ExpenseCategory.TELECOM);
+  assert.equal(mobileContainingInternet.subcategory, ExpenseSubcategory.MOBILE);
+});
+
+test("mobile PDF normalization separates recurring prices, invoice totals and data usage", async () => {
+  const {
+    attachDocumentProfileToExpense,
+    buildDocumentPartyProfiles
+  } = await import("../features/analysis/document-profiles");
+
+  const normalizeMobileExpense = (
+    fileName: string,
+    extractedText: string,
+    provider: string,
+    monthlyAmount: number
+  ) => {
+    const id = randomUUID();
+    const document: UploadedDocument & { extractedText: string } = {
+      ...householdDocuments[3],
+      id,
+      fileName,
+      provider,
+      documentType: "mobile_invoice",
+      extractedText
+    };
+    const expense: Expense = {
+      id: `expense_${id}`,
+      sourceDocumentId: id,
+      label: "Forfait mobile",
+      provider,
+      category: ExpenseCategory.TELECOM,
+      subcategory: ExpenseSubcategory.MOBILE,
+      isRecurring: true,
+      monthlyAmount,
+      yearlyAmount: monthlyAmount * 12,
+      documentType: "mobile_invoice",
+      recurrence: "monthly",
+      mobileDataGB: 5,
+      mobileIncludedDataGB: 5
+    };
+
+    return attachDocumentProfileToExpense(
+      expense,
+      buildDocumentPartyProfiles([document])
+    );
+  };
+
+  const free = normalizeMobileExpense(
+    "facture-free-mobile.pdf",
+    [
+      "Free Mobile Total de la facture HT 23,35 € TVA 4,67 € Somme à payer TTC* 28,02 €",
+      "Abonnement “Forfait Free 5G+” 19,99 (16,66)",
+      "Remise abonné Freebox - Free Family -10,00 (-8,33)",
+      "Internet depuis la France métropolitaine 7,447 Go 0,00",
+      "Services fournis par des tiers Services ponctuels",
+      "Offre sans engagement"
+    ].join(" "),
+    "Free",
+    23.35
+  );
+  assert.equal(free.provider, "Free Mobile");
+  assert.equal(free.mobileInvoiceTotalTTC, 28.02);
+  assert.equal(free.mobileInvoiceTotalHT, 23.35);
+  assert.equal(free.mobileSubscriptionBeforeDiscount, 19.99);
+  assert.equal(free.mobileDiscountAmount, -10);
+  assert.equal(free.monthlyAmount, 9.99);
+  assert.equal(free.yearlyAmount, 119.88);
+  assert.equal(free.mobileConsumedDataGB, 7.447);
+  assert.equal(free.mobileIncludedDataGB, undefined);
+  assert.equal(free.mobileDataGB, undefined);
+  assert.equal(free.mobileDataUnlimited, false);
+  assert.equal(free.mobileHasOneOffCharges, true);
+  assert.equal(free.mobileCommitment, "none");
+  assert.equal(free.mobileRecurringAmountNeedsConfirmation, false);
+
+  const nrj = normalizeMobileExpense(
+    "facture-nrj-mobile.pdf",
+    [
+      "NRJ Mobile Série spéciale NRJ Mobile illimitée 24.99 20.83",
+      "Remise 7,50€ -6.25 -7.50",
+      "Montant de votre facture 14.57 17.49",
+      "Web : 500 Go débit ajusté au-delà 248.99 Go Inclus",
+      "42 Go depuis l'Europe et les DOM",
+      "Appels illimités SMS illimités"
+    ].join(" "),
+    "Bouygues Telecom",
+    17.49
+  );
+  assert.equal(nrj.provider, "NRJ Mobile");
+  assert.equal(nrj.mobileInvoiceTotalTTC, 17.49);
+  assert.equal(nrj.mobileInvoiceTotalHT, 14.57);
+  assert.equal(nrj.mobileSubscriptionBeforeDiscount, 24.99);
+  assert.equal(nrj.mobileDiscountAmount, -7.5);
+  assert.equal(nrj.monthlyAmount, 17.49);
+  assert.equal(nrj.mobileIncludedDataGB, 500);
+  assert.equal(nrj.mobileConsumedDataGB, 248.99);
+  assert.equal(nrj.mobileRoamingIncludedDataGB, 42);
+  assert.equal(nrj.mobileDataUnlimited, false);
+  assert.equal(nrj.mobileRecurringAmountNeedsConfirmation, false);
+
+  const unknown5g = normalizeMobileExpense(
+    "facture-free-mobile.pdf",
+    "Free Mobile Forfait Free 5G+ Appels illimités SMS illimités Total TTC 28,02 €",
+    "Free",
+    28.02
+  );
+  assert.equal(unknown5g.mobileIncludedDataGB, undefined);
+  assert.equal(unknown5g.mobileDataUnlimited, false);
+  assert.equal(unknown5g.monthlyAmount, 0);
+  assert.equal(unknown5g.mobileRecurringAmountNeedsConfirmation, true);
+});
+
+test("uncertain mobile recurring totals do not produce alternatives", async () => {
+  const { findAlternativeOffers } = await import("../features/recommendations/service");
+  const expense: Expense = {
+    id: `mobile_${randomUUID()}`,
+    label: "Forfait mobile",
+    provider: "Operateur mobile",
+    category: ExpenseCategory.TELECOM,
+    subcategory: ExpenseSubcategory.MOBILE,
+    isRecurring: true,
+    monthlyAmount: 0,
+    yearlyAmount: 0,
+    documentType: "mobile_invoice",
+    recurrence: "monthly",
+    mobileIncludedDataGB: 100,
+    mobileRecurringAmountNeedsConfirmation: true
+  };
+
+  assert.deepEqual(findAlternativeOffers([expense]), []);
+});
+
+test("latest alternatives request rejects stale out-of-order responses", async () => {
+  const { LatestRequestController } = await import(
+    "../features/analysis/latest-request"
+  );
+  const controller = new LatestRequestController();
+  const first = controller.start();
+  const second = controller.start();
+
+  assert.equal(first.signal.aborted, true);
+  assert.equal(controller.isCurrent(first), false);
+  assert.equal(controller.isCurrent(second), true);
+  controller.finish(second);
+  assert.equal(controller.isCurrent(second), true);
+  controller.cancel();
+  assert.equal(controller.isCurrent(second), false);
+});
+
+test("mobile comparison uses included data and separates opt-in lower-data compromises", async () => {
+  const { findAlternativeOffers, isPrimaryAlternative } = await import(
+    "../features/recommendations/service"
+  );
+  const mobileExpense = (overrides: Partial<Expense> = {}): Expense => ({
+    id: `mobile_${randomUUID()}`,
+    label: "Forfait mobile",
+    provider: "Operateur actuel",
+    category: ExpenseCategory.TELECOM,
+    subcategory: ExpenseSubcategory.MOBILE,
+    isRecurring: true,
+    monthlyAmount: 28,
+    yearlyAmount: 336,
+    documentType: "mobile_invoice",
+    recurrence: "monthly",
+    mobileDataGB: 100,
+    mobileIncludedDataGB: 100,
+    mobileAllowLowerDataOffers: false,
+    ...overrides
+  });
+
+  const current = mobileExpense({ mobileConsumedDataGB: 10 });
+  const strictOffers = findAlternativeOffers([current]);
+  assert.ok(strictOffers.length > 0);
+  assert.ok(strictOffers.every(isPrimaryAlternative));
+  assert.ok(
+    strictOffers.every(
+      (offer) => offer.mobileDataUnlimited || (offer.mobileDataLimitGB ?? 0) >= 100
+    )
+  );
+
+  const optedIn = findAlternativeOffers([
+    { ...current, mobileAllowLowerDataOffers: true }
+  ]);
+  const primary = optedIn.filter(isPrimaryAlternative);
+  const reduced = optedIn.filter((offer) => offer.comparisonKind === "reduced_data");
+  assert.deepEqual(
+    primary.map((offer) => offer.id).sort(),
+    strictOffers.map((offer) => offer.id).sort()
+  );
+  assert.ok(reduced.length > 0);
+  assert.ok(reduced.every((offer) => (offer.mobileDataLimitGB ?? 0) < 100));
+  assert.ok(reduced.every((offer) => (offer.mobileDataLimitGB ?? 0) >= 10));
+  assert.ok(reduced.every((offer) => /compromis|non equivalente/i.test(offer.reason)));
+
+  const decimalOffers = findAlternativeOffers([
+    mobileExpense({ mobileDataGB: 12.5, mobileIncludedDataGB: 12.5 })
+  ]);
+  assert.ok(decimalOffers.every((offer) => (offer.mobileDataLimitGB ?? Infinity) >= 12.5));
+
+  const unlimitedStrict = findAlternativeOffers([
+    mobileExpense({
+      mobileDataGB: undefined,
+      mobileIncludedDataGB: undefined,
+      mobileDataUnlimited: true
+    })
+  ]);
+  assert.ok(unlimitedStrict.every((offer) => offer.mobileDataUnlimited));
+
+  const unlimitedOptIn = findAlternativeOffers([
+    mobileExpense({
+      mobileDataGB: undefined,
+      mobileIncludedDataGB: undefined,
+      mobileDataUnlimited: true,
+      mobileAllowLowerDataOffers: true
+    })
+  ]);
+  assert.ok(unlimitedOptIn.length > 0);
+  assert.ok(unlimitedOptIn.every((offer) => offer.comparisonKind === "reduced_data"));
+
+  const legacyOffers = findAlternativeOffers([
+    mobileExpense({ mobileDataGB: 100, mobileIncludedDataGB: undefined })
+  ]);
+  assert.ok(legacyOffers.length > 0);
+  assert.ok(legacyOffers.every((offer) => (offer.mobileDataLimitGB ?? Infinity) >= 100));
+
+  const second = mobileExpense({ mobileDataGB: 12.5, mobileIncludedDataGB: 12.5 });
+  const multiple = findAlternativeOffers([current, second]);
+  assert.ok(multiple.some((offer) => offer.id.startsWith(`alternative_${current.id}_`)));
+  assert.ok(multiple.some((offer) => offer.id.startsWith(`alternative_${second.id}_`)));
 });
 
 test("quota remains at zero after a second sequential analysis is rejected", async () => {

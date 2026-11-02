@@ -19,8 +19,11 @@ import {
 } from "@/features/analysis";
 import { getStoredAccessKey, isDiscoveryPlan } from "@/features/billing/access-keys";
 import { generateLettersFromAnalysis } from "@/features/letters/service";
-import type { AlternativeOffer } from "@/features/recommendations/service";
-import { findAlternativeOffers } from "@/features/recommendations/service";
+import {
+  findAlternativeOffers,
+  isPrimaryAlternative,
+  type AlternativeOffer
+} from "@/features/recommendations/service";
 import {
   getSelectedAlternativeOffer,
   refreshSelectedAlternativeOffer,
@@ -38,6 +41,7 @@ import {
 } from "@/features/upload/storage";
 import {
   expenseCategoryLabels,
+  getExpenseDisplayLabel,
   getTopExpenses,
   summarizeExpensesByCategory
 } from "@/lib/expense-summary";
@@ -67,13 +71,15 @@ function getExpenseIdFromAlternativeId(offer: AlternativeOffer, analysis: MockAn
 }
 
 function applyAlternativeSavings(analysis: MockAnalysis, alternatives: AlternativeOffer[]) {
-  const bestSavingByExpense = alternatives.reduce<Record<string, number>>((savings, offer) => {
-    const expenseId = getExpenseIdFromAlternativeId(offer, analysis);
-    if (!expenseId) return savings;
+  const bestSavingByExpense = alternatives
+    .filter(isPrimaryAlternative)
+    .reduce<Record<string, number>>((savings, offer) => {
+      const expenseId = getExpenseIdFromAlternativeId(offer, analysis);
+      if (!expenseId) return savings;
 
-    savings[expenseId] = Math.max(savings[expenseId] ?? 0, offer.estimatedYearlySaving);
-    return savings;
-  }, {});
+      savings[expenseId] = Math.max(savings[expenseId] ?? 0, offer.estimatedYearlySaving);
+      return savings;
+    }, {});
 
   return {
     ...analysis,
@@ -90,7 +96,11 @@ function getBestAlternativeForExpense(
   analysis: MockAnalysis
 ) {
   return alternatives
-    .filter((offer) => getExpenseIdFromAlternativeId(offer, analysis) === expenseId)
+    .filter(
+      (offer) =>
+        isPrimaryAlternative(offer) &&
+        getExpenseIdFromAlternativeId(offer, analysis) === expenseId
+    )
     .sort((first, second) => second.estimatedYearlySaving - first.estimatedYearlySaving)[0];
 }
 
@@ -352,6 +362,9 @@ export function ReportPanel() {
       expense,
       offer: getBestAlternativeForExpense(expense.id, alternatives, analysis)
     }));
+  const reducedDataAlternatives = alternatives.filter(
+    (offer) => offer.comparisonKind === "reduced_data"
+  );
   const summaryStats = [
     { label: "Total mensuel estimé", value: formatCurrency(analysis.totalMonthlyAmount) },
     { label: "Total annuel estimé", value: formatCurrency(analysis.totalYearlyAmount) },
@@ -460,7 +473,7 @@ export function ReportPanel() {
                       hasSaving ? "text-slate-800" : "text-slate-600"
                     }`}
                   >
-                    {normalizeDisplayText(expense.label)} —{" "}
+                    {getExpenseDisplayLabel(expense)} —{" "}
                     {normalizeDisplayText(expense.provider)} (
                     {formatCurrency(expense.monthlyAmount)}/mois)
                   </p>
@@ -491,6 +504,36 @@ export function ReportPanel() {
                 + {formatCurrency(analysis.yearlyPotentialSavings)} / an
               </p>
             </div>
+          </div>
+        </Card>
+      ) : null}
+
+      {reducedDataAlternatives.length > 0 ? (
+        <Card className="border-amber-200 bg-amber-50 p-4 print:shadow-none">
+          <h2 className="text-xl font-semibold text-navy-900">
+            Autres possibilités pour réduire votre facture
+          </h2>
+          <p className="mt-2 text-sm leading-6 text-slate-600">
+            Ces forfaits mobiles réduisent le volume de données inclus. Ils ne sont pas considérés
+            comme équivalents et leurs économies ne sont pas ajoutées au total principal.
+          </p>
+          <div className="mt-4 flex flex-col gap-3">
+            {reducedDataAlternatives.map((offer) => (
+              <div
+                className="flex flex-col gap-2 rounded-xl border border-amber-200 bg-white p-4 sm:flex-row sm:items-center sm:justify-between"
+                key={offer.id}
+              >
+                <div>
+                  <p className="font-semibold text-navy-900">
+                    {normalizeDisplayText(offer.provider)} - {normalizeDisplayText(offer.name)}
+                  </p>
+                  <p className="mt-1 text-sm text-slate-600">{offer.reason}</p>
+                </div>
+                <p className="shrink-0 text-sm font-semibold text-amber-800">
+                  Compromis : {formatCurrency(offer.estimatedYearlySaving)} / an
+                </p>
+              </div>
+            ))}
           </div>
         </Card>
       ) : null}
@@ -554,7 +597,7 @@ export function ReportPanel() {
                 <div>
                   <p className="text-xs font-bold text-sage-700">#{index + 1}</p>
                   <p className="font-medium text-navy-900">
-                    {normalizeDisplayText(expense.label)}
+                    {getExpenseDisplayLabel(expense)}
                   </p>
                   <p className="text-sm text-slate-500">
                     {normalizeDisplayText(expense.provider)} - {expenseCategoryLabels[expense.category]}

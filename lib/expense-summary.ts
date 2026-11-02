@@ -1,4 +1,4 @@
-import { ExpenseCategory, type Expense } from "@/types";
+import { ExpenseCategory, ExpenseSubcategory, type Expense } from "@/types";
 
 export const expenseCategoryLabels: Record<ExpenseCategory, string> = {
   [ExpenseCategory.ENERGY]: "Énergie",
@@ -13,6 +13,45 @@ export const expenseCategoryLabels: Record<ExpenseCategory, string> = {
   [ExpenseCategory.LEISURE]: "Loisirs",
   [ExpenseCategory.OTHER]: "Autre"
 };
+
+const expenseSubcategoryLabels: Partial<Record<ExpenseSubcategory, string>> = {
+  [ExpenseSubcategory.ELECTRICITY]: "Électricité",
+  [ExpenseSubcategory.GAS]: "Gaz",
+  [ExpenseSubcategory.MOBILE]: "Mobile",
+  [ExpenseSubcategory.INTERNET]: "Internet / Box",
+  [ExpenseSubcategory.HOME_INSURANCE]: "Assurance habitation",
+  [ExpenseSubcategory.TWO_WHEELER_INSURANCE]: "Assurance deux roues",
+  [ExpenseSubcategory.MUTUAL_HEALTH]: "Assurance santé",
+  [ExpenseSubcategory.STREAMING]: "Abonnement numérique",
+  [ExpenseSubcategory.BANK_FEES]: "Frais bancaires"
+};
+
+const expenseDocumentTypeLabels: Partial<Record<NonNullable<Expense["documentType"]>, string>> = {
+  bank_statement: "Document de dépenses",
+  electricity_invoice: "Électricité",
+  gas_invoice: "Gaz",
+  internet_invoice: "Internet / Box",
+  mobile_invoice: "Mobile",
+  two_wheeler_insurance: "Assurance deux roues",
+  car_insurance: "Assurance auto",
+  home_insurance: "Assurance habitation",
+  health_insurance: "Assurance santé",
+  subscription: "Abonnement",
+  credit: "Crédit",
+  other: "Autre contrat"
+};
+
+export function getExpenseDisplayLabel(expense: Expense) {
+  const label = expense.label?.trim();
+  if (label && !/^non renseign[eé]$/i.test(label)) return label;
+  if (expense.subcategory && expenseSubcategoryLabels[expense.subcategory]) {
+    return expenseSubcategoryLabels[expense.subcategory]!;
+  }
+  if (expense.documentType && expenseDocumentTypeLabels[expense.documentType]) {
+    return expenseDocumentTypeLabels[expense.documentType]!;
+  }
+  return expenseCategoryLabels[expense.category] ?? "Contrat";
+}
 
 export type ExpenseCategorySummary = {
   category: ExpenseCategory;
