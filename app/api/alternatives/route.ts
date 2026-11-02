@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server";
-import { findAlternativeOffers } from "@/features/recommendations/service";
-import { getEmbeddedMobileCatalog } from "@/features/recommendations/mobile-catalog";
+import { buildServerComparison } from "@/lib/server/comparison";
 import {
   createAdminAccessKey,
   hasValidAccessExpiration,
@@ -11,7 +10,7 @@ import {
 import { mockAccessKeys } from "@/data/mock";
 import { allowDevOnlyMocks } from "@/lib/env";
 import { findKeyByCode, getAnalysisByKey } from "@/lib/server/db";
-import { ExpenseSubcategory, type AccessKey } from "@/types";
+import type { AccessKey } from "@/types";
 
 function getLocalAlternativesAccessKey(code: string): AccessKey | undefined {
   if (!allowDevOnlyMocks() || code.trim().toUpperCase() !== "TEST-PREMIUM") {
@@ -51,32 +50,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Aucune analyse trouvée" }, { status: 404 });
   }
 
-  const catalog = getEmbeddedMobileCatalog();
-  const alternatives = findAlternativeOffers(analysis.expenses, {
-    mobileCatalog: catalog
-  });
-  const mobileExpenses = analysis.expenses.filter(
-    (expense) => expense.subcategory === ExpenseSubcategory.MOBILE
-  );
-  const missingMobileData = mobileExpenses.some(
-    (expense) =>
-      !expense.mobileDataUnlimited &&
-      typeof expense.mobileIncludedDataGB !== "number" &&
-      typeof expense.mobileDataGB !== "number"
-  );
-  const mobileAlternatives = alternatives.filter(
-    (offer) => offer.sourceExpenseId &&
-      mobileExpenses.some((expense) => expense.id === offer.sourceExpenseId)
-  );
-  const comparisonMessage = mobileExpenses.length === 0
-    ? null
-    : catalog.status !== "fresh"
-      ? "Le catalogue mobile vérifié est indisponible ou trop ancien. Aucune économie mobile n'est annoncée."
-      : missingMobileData
-        ? "Confirmez le volume de données inclus pour obtenir une comparaison mobile fiable."
-        : mobileAlternatives.length === 0
-          ? "Aucune offre mobile vérifiée, adaptée et moins chère n'est disponible pour ce contrat."
-          : null;
+  const { alternatives, catalog, comparisonMessage } = await buildServerComparison(analysis);
 
   return NextResponse.json({
     alternatives: isDiscoveryPlan(key.plan)

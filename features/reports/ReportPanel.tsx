@@ -65,6 +65,7 @@ function normalizeDisplayText(value?: string | null, fallback = "Non renseigné"
 }
 
 function getExpenseIdFromAlternativeId(offer: AlternativeOffer, analysis: MockAnalysis) {
+  if (offer.sourceExpenseId) return offer.sourceExpenseId;
   return analysis.expenses.find((expense) =>
     offer.id.startsWith(`alternative_${expense.id}_`)
   )?.id;
@@ -147,6 +148,7 @@ export function ReportPanel() {
   const [isDownloading, setIsDownloading] = useState(false);
   const [serviceMessage, setServiceMessage] = useState<string | null>(null);
   const [sourcePurgeMessage, setSourcePurgeMessage] = useState<string | null>(null);
+  const [comparisonMessage, setComparisonMessage] = useState<string | null>(null);
   const [actionLogs, setActionLogs] = useState<AuditActionLog[]>([]);
 
   useEffect(() => {
@@ -220,14 +222,17 @@ export function ReportPanel() {
             headers: {
               "Content-Type": "application/json"
             },
-            body: JSON.stringify({ code: activeKeyCode, expenses: analysisToLoad.expenses })
+            body: JSON.stringify({ code: activeKeyCode })
           }),
           fetch("/api/courriers", {
             method: "POST",
             headers: {
               "Content-Type": "application/json"
             },
-            body: JSON.stringify({ code: activeKeyCode })
+            body: JSON.stringify({
+              code: activeKeyCode,
+              selectedOfferId: retainedOffer?.id
+            })
           })
         ]);
 
@@ -237,6 +242,7 @@ export function ReportPanel() {
 
         const alternativesPayload = (await alternativesResponse.json()) as {
           alternatives?: AlternativeOffer[];
+          comparisonMessage?: string | null;
         };
         const lettersPayload = (await lettersResponse.json()) as {
           letters?: GeneratedLetter[];
@@ -246,6 +252,7 @@ export function ReportPanel() {
         const refreshedOffer = refreshSelectedAlternativeOffer(retainedOffer, allAlternatives);
         const analysisWithSavings = applyAlternativeSavings(analysisToLoad, allAlternatives);
         setAlternatives(allAlternatives);
+        setComparisonMessage(alternativesPayload.comparisonMessage ?? null);
         setSelectedOffer(refreshedOffer);
         setAnalysis(analysisWithSavings);
         setRecommendedLetters(
@@ -258,6 +265,9 @@ export function ReportPanel() {
         const refreshedOffer = refreshSelectedAlternativeOffer(retainedOffer, allAlternatives);
         const analysisWithSavings = applyAlternativeSavings(analysisToLoad, allAlternatives);
         setAlternatives(allAlternatives);
+        setComparisonMessage(
+          "Comparaison mobile indisponible : aucune offre locale n'est utilisée en remplacement."
+        );
         setSelectedOffer(refreshedOffer);
         setAnalysis(analysisWithSavings);
         setRecommendedLetters(
@@ -281,7 +291,8 @@ export function ReportPanel() {
         alternatives,
         recommendedLetters,
         selectedOffer,
-        actionLogs
+        actionLogs,
+        comparisonMessage
       );
       setActionLogs(
         addAuditActionLog({

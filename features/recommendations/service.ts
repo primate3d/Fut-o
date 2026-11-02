@@ -11,7 +11,10 @@ import {
   type MobileProfile
 } from "@/config/marketOffers";
 import { getProviderBranding } from "@/lib/provider-branding";
-import type { MobileCatalog } from "./mobile-catalog";
+import {
+  getMobileCatalogOfferId,
+  type MobileCatalog
+} from "./mobile-catalog";
 import type {
   ConditionalPrice,
   MobileOffer,
@@ -51,6 +54,7 @@ export type AlternativeOffer = {
   priceAfterPromotion?: number;
   knownEntryFees?: number;
   entryFeesKnown?: boolean;
+  terminationFees?: number;
   commitmentMonths?: number;
   technology?: string;
   conditions?: string[];
@@ -425,15 +429,6 @@ function roundMoney(value: number) {
   return Math.round(value * 100) / 100;
 }
 
-function stableOfferToken(value: string) {
-  let hash = 2166136261;
-  for (let index = 0; index < value.length; index += 1) {
-    hash ^= value.charCodeAt(index);
-    hash = Math.imul(hash, 16777619);
-  }
-  return (hash >>> 0).toString(36);
-}
-
 function isConditionalPromotion(offer: MobileOffer) {
   return offer.promotionPrice !== null && offer.conditionalPrices.some(
     (conditional) =>
@@ -627,9 +622,7 @@ function mobileAlternativesForExpense(
 
     const estimatedYearlySaving =
       savingKind === "certified" ? netFirstYearSaving ?? 0 : 0;
-    const idToken = stableOfferToken(
-      `${offer.provider}|${offer.offerName}|${offer.sourceUrl}`
-    );
+    const idToken = offer.catalogId ?? getMobileCatalogOfferId(offer);
 
     return [{
       id: `alternative_${expense.id}_${idToken}`,
@@ -658,6 +651,9 @@ function mobileAlternativesForExpense(
         : {}),
       knownEntryFees,
       entryFeesKnown,
+      ...(typeof offer.terminationFees === "number"
+        ? { terminationFees: offer.terminationFees }
+        : {}),
       commitmentMonths: offer.commitmentMonths ?? undefined,
       technology: offer.technology ?? undefined,
       conditions: offer.conditions,

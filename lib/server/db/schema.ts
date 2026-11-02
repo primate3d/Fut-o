@@ -67,3 +67,14 @@ export const analyses = pgTable("analyses", {
   totalYearlyAmount: real("total_yearly_amount").notNull(),
   yearlyPotentialSavings: real("yearly_potential_savings").notNull(),
 });
+
+export const mobileCatalogSources = pgTable("mobile_catalog_sources", {
+  provider: text("provider").primaryKey(),
+  sourceUrl: text("source_url").notNull(),
+  offers: jsonb("offers").$type<unknown[]>().notNull(),
+  retrievedAt: text("retrieved_at").notNull(),
+  lastAttemptAt: text("last_attempt_at").notNull(),
+  lastSuccessAt: text("last_success_at"),
+  lastError: jsonb("last_error").$type<unknown[] | null>(),
+  updatedAt: text("updated_at").notNull(),
+});

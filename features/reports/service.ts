@@ -1,5 +1,5 @@
 import { jsPDF } from "jspdf";
-import type { GeneratedLetter, MockAnalysis } from "@/types";
+import { ExpenseSubcategory, type GeneratedLetter, type MockAnalysis } from "@/types";
 import {
   isPrimaryAlternative,
   type AlternativeOffer
@@ -52,6 +52,7 @@ function normalizeDisplayText(value?: string | null, fallback = "Non renseigné"
 }
 
 function getExpenseIdFromAlternativeId(offer: AlternativeOffer, analysis: MockAnalysis) {
+  if (offer.sourceExpenseId) return offer.sourceExpenseId;
   return analysis.expenses.find((expense) =>
     offer.id.startsWith(`alternative_${expense.id}_`)
   )?.id;
@@ -76,7 +77,8 @@ export async function generatePdfReport(
   alternatives: AlternativeOffer[] = [],
   _letters: GeneratedLetter[] = [],
   _selectedOffer?: SelectedAlternativeOffer | null,
-  actionLogs: AuditActionLog[] = []
+  actionLogs: AuditActionLog[] = [],
+  comparisonMessage?: string | null
 ): Promise<void> {
   const doc = new jsPDF({
     orientation: "portrait",
@@ -235,6 +237,86 @@ export async function generatePdfReport(
       });
       y += 7;
     });
+  }
+
+  const mobileExpenses = analysis.expenses.filter(
+    (expense) => expense.subcategory === ExpenseSubcategory.MOBILE
+  );
+  if (mobileExpenses.length > 0) {
+    y += 10;
+    ensurePageSpace(24);
+    doc.setTextColor(navy[0], navy[1], navy[2]);
+    doc.setFontSize(13);
+    doc.setFont("helvetica", "bold");
+    doc.text("Détail des comparaisons mobiles", 20, y);
+    y += 8;
+
+    const mobileAlternatives = alternatives.filter((offer) =>
+      offer.sourceExpenseId && mobileExpenses.some((expense) => expense.id === offer.sourceExpenseId)
+    );
+    if (mobileAlternatives.length === 0) {
+      doc.setFontSize(9);
+      doc.setFont("helvetica", "normal");
+      doc.setTextColor(100, 100, 100);
+      doc.text(
+        doc.splitTextToSize(
+          comparisonMessage ?? "Aucune offre mobile vérifiée et suffisamment récente n'est disponible.",
+          165
+        ),
+        25,
+        y
+      );
+      y += 14;
+    } else {
+      for (const offer of mobileAlternatives.slice(0, 8)) {
+        const expense = mobileExpenses.find((item) => item.id === offer.sourceExpenseId);
+        if (!expense) continue;
+        ensurePageSpace(34);
+        doc.setFontSize(9);
+        doc.setFont("helvetica", "bold");
+        doc.setTextColor(navy[0], navy[1], navy[2]);
+        const currentData = expense.mobileDataUnlimited
+          ? "illimité"
+          : typeof expense.mobileIncludedDataGB === "number"
+            ? `${expense.mobileIncludedDataGB} Go`
+            : "volume non confirmé";
+        doc.text(
+          truncateText(`${expense.provider} - ${formatCurrency(expense.monthlyAmount)}/mois - ${currentData}`, 95),
+          25,
+          y
+        );
+        y += 5;
+        doc.setFont("helvetica", "normal");
+        doc.setTextColor(80, 80, 80);
+        doc.text(
+          truncateText(`${offer.provider} - ${offer.name} - ${formatCurrency(offer.monthlyPrice)}/mois`, 105),
+          30,
+          y
+        );
+        y += 5;
+        const savingText = offer.savingKind === "certified"
+          ? `Économie nette 12 mois : ${formatCurrency(offer.estimatedYearlySaving)}`
+          : offer.savingKind === "recurring_only"
+            ? `Écart récurrent informatif : ${formatCurrency(offer.recurringYearlySaving ?? 0)}/an; frais incomplets`
+            : "Compromis ou promotion temporaire, exclu du total principal";
+        doc.text(truncateText(savingText, 110), 30, y);
+        y += 5;
+        if (typeof offer.terminationFees === "number") {
+          doc.text(`Frais de résiliation indiqués : ${formatCurrency(offer.terminationFees)}`, 30, y);
+          y += 5;
+        }
+        const verified = offer.verifiedAt
+          ? new Date(offer.verifiedAt).toLocaleDateString("fr-FR")
+          : "date inconnue";
+        doc.text(truncateText(`Vérifiée le ${verified} - Source : ${offer.url}`, 110), 30, y);
+        y += 5;
+        if (offer.conditions?.length) {
+          doc.text(truncateText(`Conditions : ${offer.conditions.join("; ")}`, 110), 30, y);
+          y += 5;
+        }
+        y += 5;
+      }
+    }
   }
 
   y += 12;

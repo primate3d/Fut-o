@@ -122,6 +122,7 @@ before(async () => {
   for (const statement of (await fs.readFile("drizzle/0001_phase1_security.sql", "utf8")).split("--> statement-breakpoint")) {
     await sql.unsafe(statement);
   }
+  await sql.unsafe(await fs.readFile("drizzle/0002_mobile_catalog.sql", "utf8"));
   repo = await import("../lib/server/db");
   free = await import("../lib/server/free-access");
 }, { timeout: 120000 });
@@ -359,7 +360,7 @@ test("mixed EDF / MACIF multi-contract / SFR box / mobile preserves every docume
   assert.equal(result.expenses.find((expense) => expense.sourceDocumentId === "mobile")!.mobileDataGB, 100);
   const { findAlternativeOffers } = await import("../features/recommendations/service");
   const { getEmbeddedMobileCatalog } = await import(
-    "../features/recommendations/mobile-catalog"
+    "../features/recommendations/embedded-mobile-catalog"
   );
   const alternatives = findAlternativeOffers(
     result.expenses.map((expense) =>
@@ -1034,7 +1035,7 @@ test("mobile PDF normalization separates recurring prices, invoice totals and da
 test("uncertain mobile recurring totals do not produce alternatives", async () => {
   const { findAlternativeOffers } = await import("../features/recommendations/service");
   const { getEmbeddedMobileCatalog } = await import(
-    "../features/recommendations/mobile-catalog"
+    "../features/recommendations/embedded-mobile-catalog"
   );
   const expense: Expense = {
     id: `mobile_${randomUUID()}`,
@@ -1078,7 +1079,7 @@ test("mobile comparison uses included data and separates opt-in lower-data compr
     "../features/recommendations/service"
   );
   const { getEmbeddedMobileCatalog } = await import(
-    "../features/recommendations/mobile-catalog"
+    "../features/recommendations/embedded-mobile-catalog"
   );
   const options = {
     mobileCatalog: getEmbeddedMobileCatalog(new Date("2026-11-02T10:00:00.000Z"))
@@ -1385,6 +1386,226 @@ test("alternatives API ignores browser expenses and uses the key-owned analysis"
   assert.ok(payload.alternatives.every(
     (offer) => offer.sourceExpenseId !== foreignAnalysis.expenses[0].id
   ));
+});
+
+test("mobile catalog persistence keeps the last valid provider data and expires it after 72 hours", async () => {
+  const { refreshMobileCatalog, loadPersistedMobileCatalog } = await import(
+    "../lib/server/mobile-catalog"
+  );
+  const verifiedAt = new Date().toISOString();
+  const validResult = {
+    provider: "NRJ Mobile" as const,
+    sourceUrl: "https://www.nrjmobile.fr/forfait-se",
+    retrievedAt: verifiedAt,
+    failures: [],
+    offers: [{
+      provider: "NRJ Mobile" as const,
+      offerName: "Forfait persistant 100 Go",
+      monthlyPrice: 10,
+      includedDataGB: 100,
+      unlimitedData: false,
+      euDataGB: 25,
+      network: "Bouygues Telecom",
+      technology: "5G",
+      commitmentMonths: 0,
+      promotionPrice: null,
+      promotionDuration: null,
+      priceAfterPromotion: null,
+      activationFees: 0,
+      simFees: 0,
+      conditionalPrices: [],
+      pricingTiers: [],
+      conditions: [],
+      evidence: ["test local"],
+      sourceUrl: "https://www.nrjmobile.fr/forfait-se",
+      retrievedAt: verifiedAt,
+      verifiedAt,
+      verificationStatus: "VERIFIED" as const
+    }]
+  };
+
+  const report = await refreshMobileCatalog(async () => [validResult], new Date(verifiedAt));
+  assert.equal(report.successfulCollections, 1);
+  const firstLoad = await loadPersistedMobileCatalog(new Date(verifiedAt));
+  const secondLoad = await loadPersistedMobileCatalog(new Date(verifiedAt));
+  assert.equal(firstLoad.source, "postgresql");
+  assert.equal(firstLoad.offers.length, 1);
+  assert.equal(firstLoad.offers[0].catalogId, secondLoad.offers[0].catalogId);
+
+  const failedAt = new Date(Date.parse(verifiedAt) + 60_000);
+  const failedReport = await refreshMobileCatalog(async () => [{
+    ...validResult,
+    retrievedAt: failedAt.toISOString(),
+    offers: [],
+    failures: [{
+      code: "EMPTY_RESPONSE",
+      message: "Réponse vide simulée",
+      sourceUrl: validResult.sourceUrl
+    }]
+  }], failedAt);
+  assert.equal(failedReport.failedCollections, 1);
+  const afterFailure = await loadPersistedMobileCatalog(failedAt);
+  assert.equal(afterFailure.offers.length, 1);
+  assert.equal(afterFailure.offers[0].offerName, "Forfait persistant 100 Go");
+  const [stored] = await sql`select offers, last_error from mobile_catalog_sources where provider='NRJ Mobile'`;
+  assert.equal(stored.offers.length, 1);
+  assert.equal(stored.last_error[0].code, "EMPTY_RESPONSE");
+
+  const cdiscountOffer = {
+    ...validResult.offers[0],
+    provider: "Cdiscount Mobile" as const,
+    offerName: "Forfait isolé 10 Go",
+    includedDataGB: 10,
+    sourceUrl: "https://www.cdiscount.com/cdiscountmobile"
+  };
+  await refreshMobileCatalog(async () => [{
+    provider: "Cdiscount Mobile" as const,
+    sourceUrl: cdiscountOffer.sourceUrl,
+    retrievedAt: verifiedAt,
+    failures: [],
+    offers: [cdiscountOffer]
+  }], new Date(verifiedAt));
+  assert.equal((await sql`select count(*)::int as count from mobile_catalog_sources`)[0].count, 2);
+  await refreshMobileCatalog(async () => [{
+    provider: "Cdiscount Mobile" as const,
+    sourceUrl: cdiscountOffer.sourceUrl,
+    retrievedAt: failedAt.toISOString(),
+    failures: [],
+    offers: [{ ...cdiscountOffer, network: null, retrievedAt: failedAt.toISOString() }]
+  }], failedAt);
+  const [cdiscountStored] = await sql`select offers from mobile_catalog_sources where provider='Cdiscount Mobile'`;
+  assert.equal(cdiscountStored.offers[0].verificationStatus, "VERIFIED");
+
+  const stale = await loadPersistedMobileCatalog(
+    new Date(Date.parse(verifiedAt) + 73 * 60 * 60 * 1000)
+  );
+  assert.equal(stale.status, "stale");
+  assert.equal(stale.offers.length, 0);
+});
+
+test("mobile catalog refresh rejects a concurrent collection without corrupting stored data", async () => {
+  const { refreshMobileCatalog } = await import("../lib/server/mobile-catalog");
+  const [stored] = await sql`select offers, source_url, retrieved_at from mobile_catalog_sources where provider='NRJ Mobile'`;
+  let release!: () => void;
+  let started!: () => void;
+  const waiting = new Promise<void>((resolve) => { release = resolve; });
+  const hasStarted = new Promise<void>((resolve) => { started = resolve; });
+  const result = {
+    provider: "NRJ Mobile" as const,
+    sourceUrl: stored.source_url as string,
+    retrievedAt: stored.retrieved_at as string,
+    offers: stored.offers,
+    failures: []
+  };
+  const first = refreshMobileCatalog(async () => {
+    started();
+    await waiting;
+    return [result];
+  });
+  await hasStarted;
+  await assert.rejects(
+    refreshMobileCatalog(async () => [result]),
+    /déjà en cours/
+  );
+  release();
+  await first;
+  assert.equal((await sql`select count(*)::int as count from mobile_catalog_sources where provider='NRJ Mobile'`)[0].count, 1);
+});
+
+test("results, report and letters use the same fresh certified mobile offer", async () => {
+  const key = { ...fakeKey(), plan: "famille" as const };
+  await repo.saveKey(key);
+  const analysis: MockAnalysis = {
+    ...emptyAnalysis(key.code),
+    expenses: [{
+      id: "mobile-coherence",
+      label: "Forfait mobile",
+      provider: "Opérateur actuel",
+      category: ExpenseCategory.TELECOM,
+      subcategory: ExpenseSubcategory.MOBILE,
+      isRecurring: true,
+      monthlyAmount: 30,
+      yearlyAmount: 360,
+      recurrence: "monthly",
+      documentType: "mobile_invoice",
+      mobileIncludedDataGB: 100,
+      mobileDataGB: 100
+    }],
+    totalMonthlyAmount: 30,
+    totalYearlyAmount: 360
+  };
+  await repo.saveAnalysis(key.code, analysis);
+
+  const { POST: alternativesPost } = await import("../app/api/alternatives/route");
+  const alternativesResponse = await alternativesPost(new Request("http://local.test/api/alternatives", {
+    method: "POST",
+    body: JSON.stringify({ code: key.code })
+  }));
+  assert.equal(alternativesResponse.status, 200);
+  const alternativesPayload = (await alternativesResponse.json()) as {
+    alternatives: Array<import("../features/recommendations/service").AlternativeOffer>;
+  };
+  const selected = alternativesPayload.alternatives.find(
+    (offer) =>
+      offer.sourceExpenseId === "mobile-coherence" &&
+      offer.provider === "NRJ Mobile" &&
+      offer.savingKind === "certified"
+  );
+  assert.ok(selected);
+
+  const { POST: lettersPost } = await import("../app/api/courriers/route");
+  const lettersResponse = await lettersPost(new Request("http://local.test/api/courriers", {
+    method: "POST",
+    body: JSON.stringify({ code: key.code, selectedOfferId: selected.id })
+  }));
+  assert.equal(lettersResponse.status, 200);
+  const lettersPayload = (await lettersResponse.json()) as {
+    selectionStatus: string;
+    letters: Array<import("../types").GeneratedLetter>;
+  };
+  assert.equal(lettersPayload.selectionStatus, "valid");
+  assert.ok(lettersPayload.letters.some((letter) =>
+    letter.offerProvider === selected.provider &&
+    letter.offerEstimatedYearlySaving === selected.estimatedYearlySaving
+  ));
+
+  const { generatePdfReport } = await import("../features/reports/service");
+  let report = "";
+  const events = jsPDF.API.events;
+  const capture = ["initialized", function (this: jsPDF) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (this.save as any) = () => { report = this.output(); return this; };
+  }] as typeof events[number];
+  events.push(capture);
+  try {
+    await generatePdfReport(analysis, alternativesPayload.alternatives, lettersPayload.letters);
+  } finally {
+    events.splice(events.indexOf(capture), 1);
+  }
+  assert.ok(report.includes(selected.provider));
+  assert.ok(report.includes("Détail des comparaisons mobiles"));
+
+  const [source] = await sql`select offers from mobile_catalog_sources where provider='NRJ Mobile'`;
+  const staleOffers = source.offers.map((offer: Record<string, unknown>) => ({
+    ...offer,
+    retrievedAt: new Date(Date.now() - 4 * 86400000).toISOString(),
+    verifiedAt: new Date(Date.now() - 4 * 86400000).toISOString()
+  }));
+  await sql`update mobile_catalog_sources set offers=${sql.json(staleOffers)} where provider='NRJ Mobile'`;
+  const staleLetters = await lettersPost(new Request("http://local.test/api/courriers", {
+    method: "POST",
+    body: JSON.stringify({ code: key.code, selectedOfferId: selected.id })
+  }));
+  const stalePayload = (await staleLetters.json()) as { selectionStatus: string; letters: Array<import("../types").GeneratedLetter> };
+  assert.equal(stalePayload.selectionStatus, "stale_or_ineligible");
+  assert.ok(stalePayload.letters.every((letter) => !letter.offerName));
+  const restoredAt = new Date().toISOString();
+  const restoredOffers = staleOffers.map((offer: Record<string, unknown>) => ({
+    ...offer,
+    retrievedAt: restoredAt,
+    verifiedAt: restoredAt
+  }));
+  await sql`update mobile_catalog_sources set offers=${sql.json(restoredOffers)}, retrieved_at=${restoredAt} where provider='NRJ Mobile'`;
 });
 
 test("missing and invalid expirations are rejected fail-closed", async () => {

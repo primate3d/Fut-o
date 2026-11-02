@@ -11,6 +11,12 @@ export type SelectedAlternativeOffer = Pick<
   | "url"
   | "monthlyPrice"
   | "estimatedYearlySaving"
+  | "savingKind"
+  | "comparisonKind"
+  | "entryFeesKnown"
+  | "knownEntryFees"
+  | "conditions"
+  | "verifiedAt"
 > & {
   sourceExpenseId?: string;
 };
@@ -30,6 +36,12 @@ export function toSelectedAlternativeOffer(offer: AlternativeOffer): SelectedAlt
     url: offer.url,
     monthlyPrice: offer.monthlyPrice,
     estimatedYearlySaving: offer.estimatedYearlySaving,
+    savingKind: offer.savingKind,
+    comparisonKind: offer.comparisonKind,
+    entryFeesKnown: offer.entryFeesKnown,
+    knownEntryFees: offer.knownEntryFees,
+    conditions: offer.conditions,
+    verifiedAt: offer.verifiedAt,
     sourceExpenseId: getSourceExpenseId(offer)
   };
 }
@@ -73,16 +85,20 @@ export function refreshSelectedAlternativeOffer(
   const currentOffer = alternatives.find((offer) => {
     const sourceExpenseId = getSourceExpenseId(offer);
     return (
-      offer.category === selectedOffer.category &&
-      offer.provider === selectedOffer.provider &&
-      (offer.name === selectedOffer.name ||
-        (selectedOffer.sourceExpenseId &&
+      offer.id === selectedOffer.id ||
+      (offer.category === selectedOffer.category &&
+        offer.provider === selectedOffer.provider &&
+        offer.name === selectedOffer.name &&
+        (!selectedOffer.sourceExpenseId ||
           sourceExpenseId === selectedOffer.sourceExpenseId))
     );
   });
 
   if (!currentOffer) {
-    return selectedOffer;
+    if (typeof window !== "undefined") {
+      window.localStorage.removeItem(SELECTED_ALTERNATIVE_OFFER_STORAGE_KEY);
+    }
+    return null;
   }
 
   const refreshedOffer = toSelectedAlternativeOffer(currentOffer);

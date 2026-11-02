@@ -5,6 +5,8 @@ import {
   isDiscoveryPlan
 } from "@/features/billing/access-keys";
 import { generateLettersFromAnalysis } from "@/features/letters/service";
+import { toSelectedAlternativeOffer } from "@/features/recommendations/selected-offer";
+import { buildServerComparison, canReferenceOfferInLetter } from "@/lib/server/comparison";
 import { findKeyByCode, getAnalysisByKey } from "@/lib/server/db";
 import { readLimitedBody } from "@/lib/server/document-validation";
 import { RequestError } from "@/lib/server/request-error";
@@ -13,6 +15,7 @@ export async function POST(request: Request) {
   try {
     const body = JSON.parse((await readLimitedBody(request, 16 * 1024)).toString("utf8")) as {
       code?: string;
+      selectedOfferId?: string;
     };
     const code = typeof body.code === "string" ? body.code.trim().toUpperCase() : "";
     if (!code) {
@@ -38,7 +41,22 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Aucune analyse trouvee" }, { status: 404 });
     }
 
-    return NextResponse.json({ letters: generateLettersFromAnalysis(analysis) });
+    const comparison = await buildServerComparison(analysis);
+    const requestedOffer = typeof body.selectedOfferId === "string"
+      ? comparison.alternatives.find((offer) => offer.id === body.selectedOfferId)
+      : undefined;
+    const selectedOffer = requestedOffer && canReferenceOfferInLetter(requestedOffer)
+      ? toSelectedAlternativeOffer(requestedOffer)
+      : null;
+
+    return NextResponse.json({
+      letters: generateLettersFromAnalysis(analysis, selectedOffer),
+      selectedOffer,
+      selectionStatus: body.selectedOfferId
+        ? selectedOffer ? "valid" : "stale_or_ineligible"
+        : "none",
+      comparisonMessage: comparison.comparisonMessage
+    });
   } catch (error) {
     if (error instanceof RequestError) {
       return NextResponse.json({ error: error.message }, { status: error.status });

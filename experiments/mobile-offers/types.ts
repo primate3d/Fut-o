@@ -26,6 +26,7 @@ export interface PricingTier {
 }
 
 export interface MobileOffer {
+  catalogId?: string;
   provider: Provider;
   offerName: string;
   monthlyPrice: number | null;
@@ -40,6 +41,7 @@ export interface MobileOffer {
   priceAfterPromotion: number | null;
   activationFees: number | null;
   simFees: number | null;
+  terminationFees?: number | null;
   conditionalPrices: ConditionalPrice[];
   pricingTiers: PricingTier[];
   conditions: string[];

@@ -232,6 +232,7 @@ export type GeneratedLetter = {
   offerMonthlyPrice?: number;
   offerEstimatedYearlySaving?: number;
   offerUrl?: string;
+  offerVerifiedAt?: string;
   category: ExpenseCategory;
   potentialSaving: number;
   monthlyAmount: number;

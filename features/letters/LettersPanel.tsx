@@ -1,6 +1,6 @@
 "use client";
 
-import { ChangeEvent, useEffect, useState } from "react";
+import { ChangeEvent, useCallback, useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import {
   Copy,
@@ -32,10 +32,8 @@ import {
 import { getStoredAccessKey, isDiscoveryPlan } from "@/features/billing/access-keys";
 import { expenseCategoryLabels } from "@/lib/expense-summary";
 import { getProviderBranding } from "@/lib/provider-branding";
-import { findAlternativeOffers } from "@/features/recommendations/service";
 import {
-  getSelectedAlternativeOffer,
-  refreshSelectedAlternativeOffer
+  getSelectedAlternativeOffer
 } from "@/features/recommendations/selected-offer";
 import {
   addAuditActionLog,
@@ -284,7 +282,9 @@ function sendEmail(subject: string, body: string) {
 export function LettersPanel() {
   const searchParams = useSearchParams();
   const followupActionId = searchParams.get("relance");
-  const isDiscoveryAccess = isDiscoveryPlan(getStoredAccessKey()?.plan);
+  const activeKey = getStoredAccessKey();
+  const activeKeyCode = activeKey?.code;
+  const isDiscoveryAccess = isDiscoveryPlan(activeKey?.plan);
   const [analysis, setAnalysis] = useState<MockAnalysis | null>(null);
   const [selectedLetterId, setSelectedLetterId] = useState<string | null>(null);
   const [personalization, setPersonalization] =
@@ -297,6 +297,41 @@ export function LettersPanel() {
   const [isFollowupDraft, setIsFollowupDraft] = useState(false);
   const [followupSourceDocumentName, setFollowupSourceDocumentName] =
     useState<string | undefined>();
+
+  const loadValidatedLetters = useCallback(async (nextAnalysis: MockAnalysis) => {
+    const selectedOfferId = getSelectedAlternativeOffer()?.id;
+    if (!activeKeyCode) {
+      setLetters(generateLettersFromAnalysis(nextAnalysis));
+      return;
+    }
+
+    try {
+      const response = await fetch("/api/courriers", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ code: activeKeyCode, selectedOfferId })
+      });
+      if (!response.ok) throw new Error("Courriers serveur indisponibles");
+      const payload = (await response.json()) as {
+        letters?: GeneratedLetter[];
+        selectionStatus?: "valid" | "stale_or_ineligible" | "none";
+        comparisonMessage?: string | null;
+      };
+      setLetters(payload.letters ?? []);
+      if (payload.selectionStatus === "stale_or_ineligible") {
+        setServiceMessage(
+          "L'offre sélectionnée n'est plus assez récente ou vérifiable. Elle a été retirée du courrier."
+        );
+      } else if (payload.comparisonMessage) {
+        setServiceMessage(payload.comparisonMessage);
+      }
+    } catch {
+      setLetters(generateLettersFromAnalysis(nextAnalysis));
+      setServiceMessage(
+        "Comparaison mobile indisponible : le courrier a été préparé sans référence à une offre mobile."
+      );
+    }
+  }, [activeKeyCode]);
 
   async function purgeSourcesAfterDownload() {
     const purged = await purgeSourceDocuments();
@@ -377,10 +412,6 @@ export function LettersPanel() {
     if (readyServerDocuments.length > 0) {
       const newAnalysis = await refreshStoredAnalysisServer(readyServerDocuments);
       if (newAnalysis) {
-        const currentSelectedOffer = refreshSelectedAlternativeOffer(
-          getSelectedAlternativeOffer(),
-          findAlternativeOffers(newAnalysis.expenses)
-        );
         storeMockAnalysis(newAnalysis);
         setAnalysis(newAnalysis);
         setPersonalization((currentValue) => ({
@@ -389,7 +420,7 @@ export function LettersPanel() {
             currentValue
           )
         }));
-        setLetters(generateLettersFromAnalysis(newAnalysis, currentSelectedOffer));
+        await loadValidatedLetters(newAnalysis);
         setServiceMessage("Analyse IA terminée.");
       } else {
         setServiceMessage("Erreur lors de la relance de l'analyse.");
@@ -427,10 +458,6 @@ export function LettersPanel() {
       hasAnalysisDataForLetters(storedAnalysis);
 
     function applyAnalysis(nextAnalysis: MockAnalysis) {
-      const currentSelectedOffer = refreshSelectedAlternativeOffer(
-        getSelectedAlternativeOffer(),
-        findAlternativeOffers(nextAnalysis.expenses)
-      );
       setAnalysis(nextAnalysis);
       setPersonalization((currentValue) => ({
         ...mergeDetectedPersonalization(
@@ -438,7 +465,7 @@ export function LettersPanel() {
           currentValue
         )
       }));
-      setLetters(generateLettersFromAnalysis(nextAnalysis, currentSelectedOffer));
+      void loadValidatedLetters(nextAnalysis);
     }
 
     if (storedAnalysis && hasUsableStoredAnalysis) {
@@ -485,7 +512,7 @@ export function LettersPanel() {
     }
 
     void loadServerState();
-  }, [followupActionId, isDiscoveryAccess]);
+  }, [activeKeyCode, followupActionId, isDiscoveryAccess, loadValidatedLetters]);
 
   useEffect(() => {
     if (!selectedLetterId && letters.length > 0) {

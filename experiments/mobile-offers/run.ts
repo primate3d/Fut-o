@@ -17,7 +17,7 @@ import type {
   Provider,
 } from "./types";
 
-const PROVIDERS: Provider[] = [
+export const PROVIDERS: Provider[] = [
   "Free Mobile",
   "RED by SFR",
   "B&You",
@@ -45,7 +45,7 @@ function summarize(result: CollectorResult): CollectionSummary {
   };
 }
 
-function buildSnapshot(results: CollectorResult[]): CollectionSnapshot {
+export function buildSnapshot(results: CollectorResult[]): CollectionSnapshot {
   const summary = Object.fromEntries(
     PROVIDERS.map((provider) => {
       const result = results.find((item) => item.provider === provider);
@@ -105,15 +105,8 @@ async function loadPrevious(filePath: string): Promise<CollectionSnapshot | null
   }
 }
 
-async function run(): Promise<void> {
-  if (!process.argv.includes("--live")) {
-    throw new Error(
-      "Collecte réseau désactivée par défaut. Utilisez --live explicitement.",
-    );
-  }
-
-  // Une page par marque, sauf Prixtel qui publie les paliers sur quatre pages.
-  const results = await Promise.all([
+export async function collectAllProviders(): Promise<CollectorResult[]> {
+  return Promise.all([
     collectFreeOffers(),
     collectRedOffers(),
     collectBouyguesOffers(),
@@ -124,6 +117,17 @@ async function run(): Promise<void> {
     collectNrjOffers(),
     collectCdiscountOffers(),
   ]);
+}
+
+async function run(): Promise<void> {
+  if (!process.argv.includes("--live")) {
+    throw new Error(
+      "Collecte réseau désactivée par défaut. Utilisez --live explicitement.",
+    );
+  }
+
+  // Une page par marque, sauf Prixtel qui publie les paliers sur quatre pages.
+  const results = await collectAllProviders();
   const snapshot = buildSnapshot(results);
   const snapshotsDir = path.resolve(
     process.cwd(),

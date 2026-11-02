@@ -423,6 +423,7 @@ function buildBodyTemplate(params: {
   offerProvider?: string;
   offerMonthlyPrice?: number;
   offerUrl?: string;
+  offerVerifiedAt?: string;
   reason: string;
   request: string;
 }) {
@@ -470,6 +471,10 @@ function buildBodyTemplate(params: {
         }.`
       : "",
     params.offerName ? "" : "",
+    params.offerVerifiedAt
+      ? `Cette offre a été vérifiée le ${new Date(params.offerVerifiedAt).toLocaleDateString("fr-FR")} sur la source officielle indiquée.`
+      : "",
+    params.offerVerifiedAt ? "" : "",
     params.request,
     "",
     params.potentialSaving > 0
@@ -799,13 +804,13 @@ function createLetter(
   selectedOffer?: SelectedAlternativeOffer | null
 ): GeneratedLetter {
   const bestOffer =
-    selectedOffer?.category === expense.category
+    selectedOffer?.sourceExpenseId === expense.id
       ? selectedOffer
       : findAlternativeOffers([expense])[0];
-  const potentialSaving =
-    bestOffer && typeof bestOffer.monthlyPrice === "number"
-      ? Math.max(0, expense.yearlyAmount - bestOffer.monthlyPrice * 12)
-      : bestOffer?.estimatedYearlySaving ?? Math.max(getPotentialSavingForExpense(analysis, expense), 0);
+  const potentialSaving = bestOffer?.estimatedYearlySaving ??
+    (expense.subcategory === ExpenseSubcategory.MOBILE
+      ? 0
+      : Math.max(getPotentialSavingForExpense(analysis, expense), 0));
   const provider = getCommercialProviderName(analysis, expense);
   const providerAddress = getDetectedProviderAddress(analysis, expense, provider);
 
@@ -822,6 +827,7 @@ function createLetter(
     offerMonthlyPrice: bestOffer?.monthlyPrice,
     offerEstimatedYearlySaving: bestOffer?.estimatedYearlySaving,
     offerUrl: bestOffer?.url,
+    offerVerifiedAt: bestOffer?.verifiedAt,
     category: expense.category,
     potentialSaving,
     monthlyAmount: expense.monthlyAmount,
@@ -838,6 +844,7 @@ function createLetter(
       offerProvider: bestOffer?.provider,
       offerMonthlyPrice: bestOffer?.monthlyPrice,
       offerUrl: bestOffer?.url,
+      offerVerifiedAt: bestOffer?.verifiedAt,
       reason: preset.reason,
       request: preset.request
     })

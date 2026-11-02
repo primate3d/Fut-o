@@ -37,6 +37,7 @@ export function validateOffer(offer: MobileOffer): MobileOffer {
     offer.priceAfterPromotion,
     offer.activationFees,
     offer.simFees,
+    offer.terminationFees ?? null,
     ...offer.conditionalPrices.flatMap((price) => [
       price.monthlyPrice,
       price.durationMonths,

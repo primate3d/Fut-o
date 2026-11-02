@@ -1,4 +1,3 @@
-import snapshot from "@/experiments/mobile-offers/snapshots/latest.json";
 import type {
   CollectionSnapshot,
   MobileOffer
@@ -15,8 +14,20 @@ export type MobileCatalog = {
   verifiedAt: string | null;
   detectedOffers: number;
   verifiedOffers: number;
-  source: "embedded_snapshot";
+  source: "embedded_snapshot" | "postgresql";
 };
+
+export function getMobileCatalogOfferId(
+  offer: Pick<MobileOffer, "provider" | "offerName" | "sourceUrl">
+) {
+  const value = `${offer.provider}|${offer.offerName}|${offer.sourceUrl}`;
+  let hash = 2166136261;
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return `mobile_${(hash >>> 0).toString(36)}`;
+}
 
 function validDate(value: string | null): number | null {
   if (!value) return null;
@@ -26,7 +37,8 @@ function validDate(value: string | null): number | null {
 
 export function adaptMobileCatalog(
   input: CollectionSnapshot,
-  now = new Date()
+  now = new Date(),
+  source: MobileCatalog["source"] = "embedded_snapshot"
 ): MobileCatalog {
   const detectedOffers = input.results.reduce(
     (total, result) => total + result.offers.length,
@@ -52,7 +64,7 @@ export function adaptMobileCatalog(
       verifiedAt,
       detectedOffers,
       verifiedOffers: 0,
-      source: "embedded_snapshot"
+      source
     };
   }
 
@@ -70,10 +82,6 @@ export function adaptMobileCatalog(
     verifiedAt,
     detectedOffers,
     verifiedOffers: verified.length,
-    source: "embedded_snapshot"
+    source
   };
-}
-
-export function getEmbeddedMobileCatalog(now = new Date()): MobileCatalog {
-  return adaptMobileCatalog(snapshot as CollectionSnapshot, now);
 }
