@@ -50,7 +50,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Aucune analyse trouvée" }, { status: 404 });
   }
 
-  const { alternatives, catalog, comparisonMessage } = await buildServerComparison(analysis);
+  const { alternatives, catalog, commercialCatalogs, comparisonMessage } = await buildServerComparison(analysis);
 
   return NextResponse.json({
     alternatives: isDiscoveryPlan(key.plan)
@@ -71,6 +71,7 @@ export async function POST(request: Request) {
       verifiedOffers: catalog.verifiedOffers,
       source: catalog.source
     },
+    commercialCatalogs,
     comparisonMessage
   });
 }

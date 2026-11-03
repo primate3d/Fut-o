@@ -38,6 +38,7 @@ export type UploadedDocument = {
   documentType: UploadedDocumentType;
   detectedCategory: ExpenseCategory;
   status: "ready" | "pending" | "error" | "uploading" | "purged";
+  statusDetail?: string;
   uploadedAt: string;
   provider?: string;
   userCorrections?: DocumentUserCorrections;
@@ -90,6 +91,7 @@ export enum ExpenseSubcategory {
   MOBILE = "MOBILE",
   INTERNET = "INTERNET",
   HOME_INSURANCE = "HOME_INSURANCE",
+  CAR_INSURANCE = "CAR_INSURANCE",
   TWO_WHEELER_INSURANCE = "TWO_WHEELER_INSURANCE",
   STREAMING = "STREAMING",
   BANK_FEES = "BANK_FEES",
@@ -100,6 +102,82 @@ export enum ExpenseSubcategory {
   SPORT = "SPORT",
   OTHER = "OTHER"
 }
+
+export type ContractDetailSource = "document" | "ai" | "manual" | "user_confirmed";
+
+type ContractDetailsBase = {
+  version: 1;
+  source: ContractDetailSource;
+  sourceDocumentId?: string;
+  fieldSources?: Record<string, ContractDetailSource>;
+};
+
+export type InternetContractDetails = ContractDetailsBase & {
+  kind: "internet";
+  offerName?: string;
+  technology?: "FIBER" | "CABLE" | "ADSL" | "VDSL" | "MIXED" | "UNKNOWN";
+  monthlyPrice?: number;
+  promotionPrice?: number;
+  promotionDurationMonths?: number;
+  priceAfterPromotion?: number;
+  commitmentMonths?: number;
+  activationFees?: number;
+  terminationFees?: number;
+  downloadMbps?: number;
+  uploadMbps?: number;
+  includedServices?: string[];
+};
+
+export type ElectricityContractDetails = ContractDetailsBase & {
+  kind: "electricity";
+  documentKind?: "INVOICE" | "PAYMENT_SCHEDULE" | "ESTIMATE" | "UNKNOWN";
+  powerKva?: number;
+  tariffOption?: "BASE" | "HPHC" | "TEMPO" | "UNKNOWN";
+  annualConsumptionKwh?: number;
+  peakConsumptionKwh?: number;
+  offPeakConsumptionKwh?: number;
+  tempoConsumptionKwh?: Partial<Record<"bluePeak" | "blueOffPeak" | "whitePeak" | "whiteOffPeak" | "redPeak" | "redOffPeak", number>>;
+  subscriptionAmount?: number;
+  basePricePerKwh?: number;
+  peakPricePerKwh?: number;
+  offPeakPricePerKwh?: number;
+  taxes?: number;
+  period?: { start: string; end: string };
+};
+
+export type GasContractDetails = ContractDetailsBase & {
+  kind: "gas";
+  documentKind?: "INVOICE" | "PAYMENT_SCHEDULE" | "ESTIMATE" | "UNKNOWN";
+  annualConsumptionKwh?: number;
+  tariffZone?: string;
+  consumptionClass?: string;
+  pricePerKwh?: number;
+  annualSubscription?: number;
+  taxes?: number;
+  period?: { start: string; end: string };
+};
+
+export type InsuranceContractDetails = ContractDetailsBase & {
+  kind: "car_insurance" | "home_insurance";
+  annualPremium?: number;
+  vehicle?: string;
+  formula?: string;
+  housingType?: string;
+  surfaceM2?: number;
+  occupancyStatus?: string;
+  contentsCapital?: number;
+  guarantees?: string[];
+  deductibles?: string[];
+  limits?: string[];
+  assistance?: string[];
+  exclusions?: string[];
+};
+
+export type ContractDetails =
+  | InternetContractDetails
+  | ElectricityContractDetails
+  | GasContractDetails
+  | InsuranceContractDetails;
 
 export type Expense = {
   id: string;
@@ -120,8 +198,13 @@ export type Expense = {
   recurrence: "monthly" | "yearly" | "one_time";
   billingAmount?: number;
   billingFrequency?: DocumentUserCorrections["frequency"];
+  contractDetails?: ContractDetails;
   mobileDataGB?: number;
   internetTvIncluded?: boolean;
+  internetAccessTechnology?: "fiber" | "adsl" | "unknown";
+  internetPromoDetected?: boolean;
+  internetCommitmentDetected?: boolean;
+  internetBundledMobile?: boolean;
   mobileIncludedDataGB?: number;
   mobileConsumedDataGB?: number;
   mobileRoamingIncludedDataGB?: number;
@@ -185,6 +268,7 @@ export type DocumentPartyProfile = {
   providerName?: string;
   subscriptionType?: string;
   invoiceAmount?: number;
+  contractDetails?: ContractDetails;
   customer?: CustomerProfile;
   provider?: ProviderProfile;
 };
@@ -225,6 +309,7 @@ export type LetterPersonalization = {
 
 export type GeneratedLetter = {
   id: string;
+  sourceExpenseId?: string;
   type: GeneratedLetterType;
   provider: string;
   providerAddress?: string;

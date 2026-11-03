@@ -87,12 +87,12 @@ async function getWorkflowOutputs(key: AccessKey, analysis: MockAnalysis) {
 }
 
 export function registerE2eWorkflows(harness: WorkflowHarness) {
-  test("workflow EDF: upload, analysis, alternatives, letter and PDF", async () => {
+  test("workflow EDF: upload, analysis, no static saving, letter and PDF", async () => {
     const { key, analysis } = await uploadAndAnalyze(harness, "edf");
     assert.equal(analysis.expenses.length, 1);
     assert.equal(analysis.expenses[0].provider, "EDF");
     const { alternatives, letters } = await getWorkflowOutputs(key, analysis);
-    assert.ok(alternatives.length > 0);
+    assert.equal(alternatives.length, 0);
     assert.ok(letters.length > 0);
     const report = await capturePdf(analysis, alternatives, letters);
     assert.ok(report.startsWith("%PDF-"));
@@ -118,13 +118,13 @@ export function registerE2eWorkflows(harness: WorkflowHarness) {
     }
   });
 
-  test("workflow SFR Box: internet expense and alternatives are preserved", async () => {
+  test("workflow SFR Box: internet expense is preserved without static alternatives", async () => {
     const { key, analysis } = await uploadAndAnalyze(harness, "sfr");
     assert.equal(analysis.expenses.length, 1);
     assert.equal(analysis.expenses[0].provider, "SFR");
     assert.equal(analysis.expenses[0].documentType, "internet_invoice");
     const { alternatives } = await getWorkflowOutputs(key, analysis);
-    assert.ok(alternatives.length > 0);
+    assert.equal(alternatives.length, 0);
   });
 
   test("workflow NRJ Mobile: one mobile expense and alternatives are preserved", async () => {

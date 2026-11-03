@@ -9,6 +9,7 @@ import {
   type UploadedDocument,
   type UploadedDocumentType
 } from "@/types";
+import { extractContractDetails, mergeContractDetails } from "./contract-details";
 
 export type ExtractedDocument = UploadedDocument & { extractedText: string };
 
@@ -1093,6 +1094,11 @@ export function extractDocumentPartyProfile(document: ExtractedDocument): Docume
   const providerAddress = extractProviderAddress(compactText);
   const inferredDocumentType =
     manualCorrections?.documentType ?? inferDocumentTypeFromContent(document, providerName);
+  const contractDetails = extractContractDetails({
+    text,
+    documentType: inferredDocumentType,
+    sourceDocumentId: document.id
+  });
   const profileInvoiceAmount = extractInvoiceAmount(text) ?? invoiceAmount;
   const energyBilling = extractEnergyBillingInfo(text, inferredDocumentType, providerName);
   const energyServiceLines = extractEnergyServiceLines(text, inferredDocumentType, providerName);
@@ -1170,6 +1176,7 @@ export function extractDocumentPartyProfile(document: ExtractedDocument): Docume
           : energyBilling?.amount ?? reverseInvoiceAmount ?? profileInvoiceAmount,
     customer: Object.values(finalCustomer).some(Boolean) ? finalCustomer : undefined,
     provider,
+    contractDetails,
     energyBilling,
     energyServiceLines: energyServiceLines.length > 0 ? energyServiceLines : undefined,
     internetBox,
@@ -1445,6 +1452,7 @@ export function inferExpenseSubcategoryFromDocumentType(documentType?: UploadedD
   if (documentType === "electricity_invoice") return ExpenseSubcategory.ELECTRICITY;
   if (documentType === "gas_invoice") return ExpenseSubcategory.GAS;
   if (documentType === "home_insurance") return ExpenseSubcategory.HOME_INSURANCE;
+  if (documentType === "car_insurance") return ExpenseSubcategory.CAR_INSURANCE;
   if (documentType === "two_wheeler_insurance") {
     return ExpenseSubcategory.TWO_WHEELER_INSURANCE;
   }
@@ -1636,6 +1644,7 @@ export function attachDocumentProfileToExpense(
 
   return {
     ...expense,
+    contractDetails: mergeContractDetails(profile.contractDetails, expense.contractDetails),
     ...(internetBox
       ? {
           internetAccessTechnology: internetBox.technology,

@@ -269,6 +269,31 @@ export function isAnalysisForDocuments(
   );
 }
 
+export function hasUsableAnalysisAmounts(analysis: MockAnalysis | null) {
+  return Boolean(
+    analysis &&
+      (analysis.totalMonthlyAmount > 0 ||
+        analysis.expenses.some((expense) => {
+          const monthlyAmount = Number(expense.monthlyAmount);
+          const yearlyAmount = Number(expense.yearlyAmount);
+          return (
+            (Number.isFinite(monthlyAmount) && monthlyAmount > 0) ||
+            (Number.isFinite(yearlyAmount) && yearlyAmount > 0)
+          );
+        }))
+  );
+}
+
+export function selectReusableAnalysis(
+  analyses: Array<MockAnalysis | null>,
+  documents: UploadedDocument[]
+) {
+  return analyses.find(
+    (analysis): analysis is MockAnalysis =>
+      isAnalysisForDocuments(analysis, documents) && hasUsableAnalysisAmounts(analysis)
+  ) ?? null;
+}
+
 export function isEnrichedAnalysisForDocuments(
   analysis: MockAnalysis | null,
   documents: UploadedDocument[]
@@ -278,7 +303,7 @@ export function isEnrichedAnalysisForDocuments(
 
 export async function refreshStoredAnalysisServer(
   documents: UploadedDocument[],
-  options?: { force?: boolean; throwOnError?: boolean }
+  options?: { force?: boolean; incremental?: boolean; throwOnError?: boolean }
 ): Promise<MockAnalysis | null> {
   const activeKey = getStoredAccessKey();
   if (!activeKey || documents.length === 0) return null;
@@ -286,7 +311,8 @@ export async function refreshStoredAnalysisServer(
 
   console.info("[FUTEO_ANALYSIS_POST]", {
     documentCount: documentsWithCorrections.length,
-    force: options?.force ?? false
+    force: options?.force ?? false,
+    incremental: options?.incremental ?? true
   });
 
   let response: Response;
@@ -299,7 +325,8 @@ export async function refreshStoredAnalysisServer(
       body: JSON.stringify({
         documents: documentsWithCorrections,
         code: activeKey.code,
-        force: options?.force ?? false
+        force: options?.force ?? false,
+        incremental: options?.incremental ?? true
       })
     });
   } catch (error) {

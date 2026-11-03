@@ -54,9 +54,25 @@ export async function getStoredUploadedDocumentsServerStrict(): Promise<Uploaded
 export async function getStoredUploadedDocumentsServer(): Promise<UploadedDocument[]> {
   const localDocuments = getStoredUploadedDocuments();
   try {
-    return await getStoredUploadedDocumentsServerStrict();
+    const serverDocuments = await getStoredUploadedDocumentsServerStrict();
+    const serverDocumentIds = new Set(serverDocuments.map((document) => document.id));
+    const localDocumentsToReview = localDocuments.filter(
+      (document) => document.status === "error" && !serverDocumentIds.has(document.id)
+    );
+    return [...serverDocuments, ...localDocumentsToReview];
   } catch {
     return localDocuments;
+  }
+}
+
+async function readServerError(response: Response, fallback: string) {
+  try {
+    const payload = (await response.json()) as { error?: unknown };
+    return typeof payload.error === "string" && payload.error.trim()
+      ? payload.error.trim()
+      : fallback;
+  } catch {
+    return fallback;
   }
 }
 
@@ -83,7 +99,8 @@ export async function storeUploadedDocumentServer(
     });
 
     if (!response.ok) {
-      throw new Error("L'enregistrement serveur du document a échoué.");
+      const reason = await readServerError(response, "Erreur serveur non précisée.");
+      throw new Error(`L'enregistrement serveur du document a échoué : ${reason}`);
     }
 
     const data = (await response.json()) as { document?: UploadedDocument };

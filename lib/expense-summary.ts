@@ -20,6 +20,7 @@ const expenseSubcategoryLabels: Partial<Record<ExpenseSubcategory, string>> = {
   [ExpenseSubcategory.MOBILE]: "Mobile",
   [ExpenseSubcategory.INTERNET]: "Internet / Box",
   [ExpenseSubcategory.HOME_INSURANCE]: "Assurance habitation",
+  [ExpenseSubcategory.CAR_INSURANCE]: "Assurance automobile",
   [ExpenseSubcategory.TWO_WHEELER_INSURANCE]: "Assurance deux roues",
   [ExpenseSubcategory.MUTUAL_HEALTH]: "Assurance santé",
   [ExpenseSubcategory.STREAMING]: "Abonnement numérique",

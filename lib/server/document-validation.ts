@@ -64,7 +64,13 @@ export async function validateUpload(file: File, rawMetadata: unknown): Promise<
     : extension === ".jpg" || extension === ".jpeg" ? buffer[0] === 255 && buffer[1] === 216 && buffer[2] === 255
     : extension === ".csv" && !buffer.includes(0) && !buffer.toString("utf8").includes("\ufffd");
   const declaredMime = file.type.toLowerCase();
-  if (!mimeType || !validSignature || (declaredMime && declaredMime !== "application/octet-stream" && declaredMime !== mimeType && !(extension === ".csv" && declaredMime === "application/vnd.ms-excel"))) {
+  const acceptedDeclaredMimes = new Set([
+    mimeType,
+    "application/octet-stream",
+    ...(extension === ".csv" ? ["application/vnd.ms-excel"] : []),
+    ...(extension === ".jpg" || extension === ".jpeg" ? ["image/jpg", "image/pjpeg"] : [])
+  ]);
+  if (!mimeType || !validSignature || (declaredMime && !acceptedDeclaredMimes.has(declaredMime))) {
     throw new RequestError("Type ou contenu de fichier non autorise", 415);
   }
   return {

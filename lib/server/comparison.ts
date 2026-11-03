@@ -6,6 +6,7 @@ import {
 } from "@/features/recommendations/service";
 import type { MobileCatalog } from "@/features/recommendations/mobile-catalog";
 import { loadPersistedMobileCatalog } from "./mobile-catalog";
+import { buildEnabledCommercialComparisons } from "./multisector-comparison";
 
 export function getMobileComparisonMessage(
   analysis: MockAnalysis,
@@ -55,10 +56,25 @@ export function getMobileComparisonMessage(
 
 export async function buildServerComparison(analysis: MockAnalysis, now = new Date()) {
   const catalog = await loadPersistedMobileCatalog(now);
-  const alternatives = findAlternativeOffers(analysis.expenses, { mobileCatalog: catalog });
-  const comparisonMessage = getMobileComparisonMessage(analysis, catalog, alternatives);
+  // Legacy templates are not verified commercial catalogs. Keep this path
+  // exclusively for the validated PostgreSQL-backed mobile catalog.
+  const mobileExpenses = analysis.expenses.filter(
+    (expense) => expense.subcategory === ExpenseSubcategory.MOBILE
+  );
+  const existingAlternatives = findAlternativeOffers(mobileExpenses, {
+    mobileCatalog: catalog
+  });
+  const commercial = await buildEnabledCommercialComparisons(analysis, now);
+  const alternatives = [
+    ...existingAlternatives.filter((offer) => !offer.sourceExpenseId || !commercial.replacedExpenseIds.has(offer.sourceExpenseId)),
+    ...commercial.alternatives,
+  ];
+  const comparisonMessage = [
+    getMobileComparisonMessage(analysis, catalog, alternatives),
+    ...commercial.messages,
+  ].filter(Boolean).join(" ") || null;
 
-  return { alternatives, catalog, comparisonMessage };
+  return { alternatives, catalog, commercialCatalogs: commercial.catalogs, comparisonMessage };
 }
 
 export function canReferenceOfferInLetter(offer: AlternativeOffer) {

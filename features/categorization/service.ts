@@ -30,9 +30,15 @@ export const categoryRules: CategoryRule[] = [
   },
   {
     category: ExpenseCategory.INSURANCE,
+    subcategory: ExpenseSubcategory.CAR_INSURANCE,
+    keywords: ["assurance auto", "assurance automobile", "vehicule assure"],
+    documentTypes: ["car_insurance"]
+  },
+  {
+    category: ExpenseCategory.INSURANCE,
     subcategory: ExpenseSubcategory.HOME_INSURANCE,
-    keywords: ["assurance", "mutuelle habitat", "maif", "macif", "axa", "allianz"],
-    documentTypes: ["home_insurance", "car_insurance", "health_insurance"]
+    keywords: ["assurance habitation", "habitation", "mutuelle habitat"],
+    documentTypes: ["home_insurance"]
   },
   {
     category: ExpenseCategory.SUBSCRIPTIONS,
@@ -58,7 +64,8 @@ export const categoryRules: CategoryRule[] = [
   {
     category: ExpenseCategory.HEALTH,
     subcategory: ExpenseSubcategory.MUTUAL_HEALTH,
-    keywords: ["sante", "mutuelle", "pharmacie", "docteur"]
+    keywords: ["sante", "mutuelle", "pharmacie", "docteur"],
+    documentTypes: ["health_insurance"]
   },
   {
     category: ExpenseCategory.EDUCATION,

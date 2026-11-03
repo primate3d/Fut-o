@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import { CheckCircle2, FileSearch, Loader2 } from "lucide-react";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
@@ -17,10 +18,10 @@ import type { MockAnalysis, UploadedDocument } from "@/types";
 import {
   AnalysisServerError,
   MOCK_ANALYSIS_STORAGE_KEY,
+  getStoredAnalysisServer,
   getStoredMockAnalysis,
-  hasDocumentProfiles,
-  isAnalysisForDocuments,
   refreshStoredAnalysisServer,
+  selectReusableAnalysis,
   storeMockAnalysis
 } from "./storage";
 
@@ -41,21 +42,6 @@ function formatPreciseCurrency(value: number) {
   }).format(value);
 }
 
-function hasUsableAmounts(analysis: MockAnalysis | null) {
-  return Boolean(
-    analysis &&
-      (analysis.totalMonthlyAmount > 0 ||
-        analysis.expenses.some((expense) => {
-          const monthlyAmount = Number(expense.monthlyAmount);
-          const yearlyAmount = Number(expense.yearlyAmount);
-          return (
-            (Number.isFinite(monthlyAmount) && monthlyAmount > 0) ||
-            (Number.isFinite(yearlyAmount) && yearlyAmount > 0)
-          );
-        }))
-  );
-}
-
 function isLikelyMultiContractInsuranceDocument(document: UploadedDocument) {
   const fileName = document.fileName.toLowerCase();
   return (
@@ -68,25 +54,13 @@ function isLikelyMultiContractInsuranceDocument(document: UploadedDocument) {
   );
 }
 
-function hasUserCorrections(document: UploadedDocument) {
-  const corrections = document.userCorrections;
-  if (!corrections) return false;
-
-  return Boolean(
-    corrections.provider?.trim() ||
-      corrections.documentType ||
-      corrections.amount ||
-      corrections.frequency ||
-      corrections.isMultiContract ||
-      corrections.notes?.trim()
-  );
-}
-
 export function AnalysisRunner() {
+  const router = useRouter();
   const [documents, setDocuments] = useState<UploadedDocument[]>([]);
   const [analysis, setAnalysis] = useState<MockAnalysis | null>(null);
   const [currentStep, setCurrentStep] = useState(0);
   const [isComplete, setIsComplete] = useState(false);
+  const [hasFailed, setHasFailed] = useState(false);
   const [serviceMessage, setServiceMessage] = useState<string | null>(null);
 
   useEffect(() => {
@@ -102,6 +76,11 @@ export function AnalysisRunner() {
       );
       const usableDocumentsWithCorrections = applyDocumentCorrections(usableDocuments);
       const storedAnalysis = getStoredMockAnalysis();
+      const serverAnalysis = await getStoredAnalysisServer();
+      const reusableAnalysis = selectReusableAnalysis(
+        [storedAnalysis, serverAnalysis],
+        storedDocuments
+      );
 
       setDocuments(storedDocuments);
 
@@ -111,41 +90,41 @@ export function AnalysisRunner() {
 
       setCurrentStep(0);
       setIsComplete(false);
+      setHasFailed(false);
 
       timers = analysisSteps.map((_, index) =>
         window.setTimeout(async () => {
         setCurrentStep(index + 1);
 
         if (index === analysisSteps.length - 1) {
-          const hasCurrentAnalysis = isAnalysisForDocuments(storedAnalysis, storedDocuments);
-          const hasEnrichedCurrentAnalysis =
-            hasCurrentAnalysis &&
-            hasUsableAmounts(storedAnalysis) &&
-            hasDocumentProfiles(storedAnalysis);
-          const hasCorrectedDocuments = usableDocumentsWithCorrections.some(hasUserCorrections);
           const hasMultiContractInsurance = usableDocumentsWithCorrections.some(
             isLikelyMultiContractInsuranceDocument
           );
           let refreshedAnalysis: MockAnalysis | null = null;
+          let failureMessage = "Erreur serveur non précisée.";
 
-          if (hasEnrichedCurrentAnalysis && !hasCorrectedDocuments) {
-            setAnalysis(storedAnalysis);
+          if (reusableAnalysis) {
+            storeMockAnalysis(reusableAnalysis);
+            setAnalysis(reusableAnalysis);
             setIsComplete(true);
+            router.replace("/resultats");
             return;
           }
 
           try {
             refreshedAnalysis = await refreshStoredAnalysisServer(usableDocumentsWithCorrections, {
-              force: true,
+              incremental: true,
               throwOnError: true
             });
           } catch (error) {
             if (error instanceof AnalysisServerError) {
+              failureMessage = error.details.message;
               console.warn("[FUTEO_ANALYSIS_BLOCKED]", {
                 documentCount: error.details.documentCount,
                 status: error.details.status
               });
             } else {
+              failureMessage = error instanceof Error ? error.message : failureMessage;
               console.warn("[FUTEO_ANALYSIS_BLOCKED]");
             }
           }
@@ -154,13 +133,13 @@ export function AnalysisRunner() {
             window.localStorage.removeItem(MOCK_ANALYSIS_STORAGE_KEY);
             setAnalysis(null);
             setServiceMessage(
-              hasCorrectedDocuments
-                ? "Analyse serveur nécessaire pour appliquer vos corrections."
-                : hasMultiContractInsurance
-                  ? "Analyse serveur nécessaire pour ce document multi-contrats."
-                  : "L'analyse complète n'a pas abouti. Aucun résultat incomplet n'a été conservé."
+              hasMultiContractInsurance
+                ? `L'analyse du document multi-contrats n'a pas abouti : ${failureMessage}`
+                : `L'analyse serveur n'a pas abouti : ${failureMessage} Corrigez le problème puis relancez l'analyse.`
             );
-            setIsComplete(true);
+            setCurrentStep(analysisSteps.length - 1);
+            setHasFailed(true);
+            setIsComplete(false);
             return;
           }
 
@@ -171,6 +150,7 @@ export function AnalysisRunner() {
 
           setAnalysis(currentAnalysis);
           setIsComplete(true);
+          router.replace("/resultats");
         }
         }, (index + 1) * 500)
       );
@@ -179,7 +159,7 @@ export function AnalysisRunner() {
     void load();
 
     return () => timers.forEach((timer) => window.clearTimeout(timer));
-  }, []);
+  }, [router]);
 
   const categorySummaries = useMemo(
     () => (analysis ? summarizeExpensesByCategory(analysis.expenses) : []),
@@ -233,7 +213,7 @@ export function AnalysisRunner() {
             </p>
           </div>
           <Badge tone={isComplete ? "green" : "amber"}>
-            {isComplete ? "Terminée" : "En cours"}
+            {hasFailed ? "À reprendre" : isComplete ? "Terminée" : "En cours"}
           </Badge>
         </div>
         <div className="mt-6 h-3 overflow-hidden rounded-full bg-navy-50">
@@ -245,7 +225,7 @@ export function AnalysisRunner() {
         <div className="mt-6 grid gap-3 md:grid-cols-5">
           {analysisSteps.map((step, index) => {
             const isDone = currentStep > index;
-            const isActive = currentStep === index;
+            const isActive = !hasFailed && currentStep === index;
 
             return (
               <div
@@ -269,7 +249,7 @@ export function AnalysisRunner() {
       </Card>
 
       {serviceMessage ? (
-        <div className="rounded-xl border border-sage-200 bg-sage-50 px-4 py-3 text-sm leading-6 text-sage-900">
+        <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm leading-6 text-amber-900">
           {serviceMessage}
         </div>
       ) : null}

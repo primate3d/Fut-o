@@ -24,12 +24,14 @@ import { readAccessKeyHeader } from "@/lib/access-key-transport";
 import {
   applyMobileContractPreferences,
   buildManualAnalysis,
+  filterAnalysisToDocuments,
   isManualDocument,
   mergeAnalyses,
   preserveManualEntries,
   type ManualContractInput,
   type MobileContractPreferencesInput
 } from "@/lib/server/manual-analysis";
+import { applyContractConfirmation, type ContractConfirmationInput } from "@/lib/server/contract-confirmation";
 
 type StoredUploadedDocument = UploadedDocument & {
   physicalFileName?: string;
@@ -39,6 +41,14 @@ type StoredUploadedDocument = UploadedDocument & {
 type ExtractedUploadedDocument = StoredUploadedDocument & {
   extractedText: string;
 };
+
+function getAnalysisDocumentSignature(document: UploadedDocument) {
+  return JSON.stringify({
+    documentType: document.documentType,
+    provider: document.provider?.trim() || null,
+    userCorrections: document.userCorrections ?? {}
+  });
+}
 
 function isAnalysisForDocuments(analysis: MockAnalysis, documents: UploadedDocument[]) {
   const currentDocumentIds = documents
@@ -163,11 +173,14 @@ export async function POST(request: Request) {
       documents?: UploadedDocument[];
       code?: string;
       force?: boolean;
+      incremental?: boolean;
       manualContract?: ManualContractInput;
       mobileContractPreferences?: MobileContractPreferencesInput;
+      contractConfirmation?: ContractConfirmationInput;
     };
     const code = typeof body.code === "string" ? body.code.trim().toUpperCase() : "";
     const force = body.force === true;
+    const incremental = body.incremental === true;
 
     if (isBlockedProductionAdminCode(code)) {
       return NextResponse.json({ error: "Cle invalide ou non autorisee" }, { status: 403 });
@@ -180,7 +193,8 @@ export async function POST(request: Request) {
     const requestedActions = [
       body.manualContract !== undefined,
       body.documents !== undefined,
-      body.mobileContractPreferences !== undefined
+      body.mobileContractPreferences !== undefined,
+      body.contractConfirmation !== undefined
     ].filter(Boolean).length;
     if (requestedActions > 1) {
       return NextResponse.json(
@@ -228,6 +242,15 @@ export async function POST(request: Request) {
       return NextResponse.json({ analysis: updatedAnalysis, cached: false });
     }
 
+    if (body.contractConfirmation !== undefined) {
+      if (!existingAnalysis) {
+        return NextResponse.json({ error: "Aucune analyse trouvee" }, { status: 404 });
+      }
+      const updatedAnalysis = applyContractConfirmation(existingAnalysis, body.contractConfirmation);
+      await saveAnalysis(code, updatedAnalysis, tx);
+      return NextResponse.json({ analysis: updatedAnalysis, cached: false });
+    }
+
     if (body.manualContract !== undefined) {
       const manualAnalysis = buildManualAnalysis(body.manualContract, key);
       const manualDocument = manualAnalysis.documents[0];
@@ -268,10 +291,6 @@ export async function POST(request: Request) {
       return NextResponse.json({ analysis: mergedAnalysis, cached: false });
     }
 
-    if (key.usesRemaining <= 0) {
-      return NextResponse.json({ error: "Quota épuisé" }, { status: 403 });
-    }
-
     const documents = selectOwnedDocuments(body.documents, await getDocumentsByKey(code, tx));
     if (documents) {
       const documentsForPlanValidation = [
@@ -296,27 +315,48 @@ export async function POST(request: Request) {
       }
     }
 
-    // 2. Vérification du cache
+    const currentAnalysis = existingAnalysis
+      ? filterAnalysisToDocuments(existingAnalysis, documents)
+      : null;
+    const analyzedDocuments = new Map(
+      currentAnalysis?.documents
+        .filter((document) => !isManualDocument(document))
+        .map((document) => [document.id, document]) ?? []
+    );
+    const documentsToAnalyze = incremental && !force
+      ? documents.filter((document) => {
+          const analyzedDocument = analyzedDocuments.get(document.id);
+          return !analyzedDocument ||
+            getAnalysisDocumentSignature(analyzedDocument) !==
+              getAnalysisDocumentSignature(document);
+        })
+      : documents;
+
+    // A technical retry must reuse the aggregate without consuming another credit.
     if (
-      !force &&
-      !requiresHouseholdProfile(key.plan) &&
-      existingAnalysis &&
-      documents &&
-      isNonEmptyAnalysis(existingAnalysis) &&
-      isAnalysisForDocuments(existingAnalysis, documents)
+      currentAnalysis &&
+      isNonEmptyAnalysis(currentAnalysis) &&
+      (documentsToAnalyze.length === 0 || (!force && isAnalysisForDocuments(currentAnalysis, documents)))
     ) {
-      return NextResponse.json({ analysis: existingAnalysis, cached: true });
+      if (currentAnalysis !== existingAnalysis) {
+        await saveAnalysis(code, currentAnalysis, tx);
+      }
+      return NextResponse.json({ analysis: currentAnalysis, cached: true });
+    }
+
+    if (key.usesRemaining <= 0) {
+      return NextResponse.json({ error: "Quota épuisé" }, { status: 403 });
     }
 
     // 3. Extraction de texte (OCR) et appel à l'IA
-    if (!documents || documents.length === 0) {
+    if (documentsToAnalyze.length === 0) {
       return NextResponse.json({ error: "Aucun document à analyser" }, { status: 400 });
     }
 
     const documentsWithContent: ExtractedUploadedDocument[] = [];
     const extractionDiagnostics: ExtractionDiagnostic[] = [];
 
-    for (const doc of documents) {
+    for (const doc of documentsToAnalyze) {
       const physicalFileName = getPhysicalFileName(code, doc);
       const buffer = await storage.get(physicalFileName);
       if (!buffer) throw new RequestError("Fichier source indisponible", 422);
@@ -406,63 +446,83 @@ export async function POST(request: Request) {
       }
     });
 
-    const { result: analysis, latencyMs } = await withLatency(async () => {
-      return analyzeDocumentsWithAI(documentsWithContent, code);
-    });
+    let generatedAnalysis: MockAnalysis | null = null;
+    let latencyMs = 0;
+    for (const document of documentsWithContent) {
+      const timedAnalysis = await withLatency(async () => {
+        return analyzeDocumentsWithAI([document], code);
+      });
+      const documentAnalysis = timedAnalysis.result;
+      latencyMs += timedAnalysis.latencyMs;
 
-    logger.info("Diagnostic analyse après IA", {
-      service: "Analysis",
-      action: "analysis_after_ai",
-      keyCode: code,
-      metadata: {
-        expensesCount: analysis.expenses.length,
-        documents: Object.values(analysis.detectedParties?.documents ?? {}).map((document) => ({
-          documentId: document.documentId,
-          providerName: document.providerName,
-          invoiceAmount: document.invoiceAmount,
-          documentType: document.documentType
-        }))
-      }
-    });
-
-    if (!isNonEmptyAnalysis(analysis)) {
-      logger.error("Analyse vide non sauvegardée", {
+      logger.info("Diagnostic analyse après IA", {
         service: "Analysis",
-        action: "empty_analysis_blocked",
+        action: "analysis_after_ai",
         keyCode: code,
         metadata: {
-          expensesLength: analysis.expenses.length,
-          totalMonthlyAmount: analysis.totalMonthlyAmount,
-          documentTextLengths: analysis.documents.map((doc) => {
-            const extractedText = "extractedText" in doc ? doc.extractedText : undefined;
-            return typeof extractedText === "string" ? extractedText.length : 0;
-          })
+          expensesCount: documentAnalysis.expenses.length,
+          documents: Object.values(documentAnalysis.detectedParties?.documents ?? {}).map((profile) => ({
+            documentId: profile.documentId,
+            providerName: profile.providerName,
+            invoiceAmount: profile.invoiceAmount,
+            documentType: profile.documentType
+          }))
         }
       });
-      return NextResponse.json(
-        { error: "Analyse vide: sauvegarde refusée" },
-        { status: 422 }
-      );
-    }
 
-    if (requiresHouseholdProfile(key.plan)) {
-      const compliance = validateAnalysisAgainstHouseholdProfile(key, analysis);
-      if (!compliance.matches) {
+      if (!isNonEmptyAnalysis(documentAnalysis)) {
+        logger.error("Analyse vide non sauvegardée", {
+          service: "Analysis",
+          action: "empty_analysis_blocked",
+          keyCode: code,
+          metadata: {
+            documentId: document.id,
+            expensesLength: documentAnalysis.expenses.length,
+            totalMonthlyAmount: documentAnalysis.totalMonthlyAmount,
+            textLength: document.extractedText.length
+          }
+        });
         return NextResponse.json(
-          {
-            error: "Document non conforme au foyer configure.",
-            code: "HOUSEHOLD_NAME_MISMATCH",
-            extractedName: compliance.extractedName,
-            profileName: compliance.profileName
-          },
-          { status: 403 }
+          { error: "Analyse vide: sauvegarde refusée" },
+          { status: 422 }
         );
       }
-      applyProfileAddressFallback(key, analysis);
+
+      if (requiresHouseholdProfile(key.plan)) {
+        const compliance = validateAnalysisAgainstHouseholdProfile(key, documentAnalysis);
+        if (!compliance.matches) {
+          return NextResponse.json(
+            {
+              error: "Document non conforme au foyer configure.",
+              code: "HOUSEHOLD_NAME_MISMATCH",
+              extractedName: compliance.extractedName,
+              profileName: compliance.profileName
+            },
+            { status: 403 }
+          );
+        }
+        applyProfileAddressFallback(key, documentAnalysis);
+      }
+
+      generatedAnalysis = mergeAnalyses(generatedAnalysis, documentAnalysis);
     }
 
-    // 4. Persistance serveur
-    const analysisToSave = preserveManualEntries(analysis, existingAnalysis);
+    if (!generatedAnalysis) {
+      return NextResponse.json({ error: "Aucune analyse produite" }, { status: 422 });
+    }
+
+    // 4. Persistance serveur: incremental imports keep previously validated contracts.
+    const analysisBase = incremental && currentAnalysis
+      ? filterAnalysisToDocuments(
+          currentAnalysis,
+          documents.filter((document) =>
+            !documentsToAnalyze.some((candidate) => candidate.id === document.id)
+          )
+        )
+      : currentAnalysis;
+    const analysisToSave = incremental
+      ? mergeAnalyses(analysisBase, generatedAnalysis)
+      : preserveManualEntries(generatedAnalysis, existingAnalysis);
     await saveAnalysis(code, analysisToSave, tx);
 
     // 5. Décrémenter le quota
@@ -475,10 +535,14 @@ export async function POST(request: Request) {
       action: "ai_success",
       keyCode: code,
       latencyMs,
-      metadata: { docCount: documents.length, usesRemaining }
+      metadata: { docCount: documentsToAnalyze.length, usesRemaining }
     });
 
-    return NextResponse.json({ analysis: analysisToSave, cached: false });
+    return NextResponse.json({
+      analysis: analysisToSave,
+      cached: false,
+      analyzedDocumentCount: documentsToAnalyze.length
+    });
     });
   } catch (error) {
     if (error instanceof RequestError) return NextResponse.json({ error: error.message }, { status: error.status });

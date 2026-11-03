@@ -11,34 +11,30 @@ import {
   addAnalysisToReportPortfolio,
   getStoredAnalysisServer,
   getStoredMockAnalysis,
-  getStoredReportPortfolioAnalysis,
   hasDocumentProfiles,
-  isAnalysisForDocuments,
-  refreshStoredAnalysisServer,
   storeMockAnalysis
 } from "@/features/analysis";
 import { getStoredAccessKey, isDiscoveryPlan } from "@/features/billing/access-keys";
 import { generateLettersFromAnalysis } from "@/features/letters/service";
 import {
-  findAlternativeOffers,
   isPrimaryAlternative,
   type AlternativeOffer
 } from "@/features/recommendations/service";
 import {
   getSelectedAlternativeOffer,
   refreshSelectedAlternativeOffer,
+  storeSelectedAlternativeOffer,
   type SelectedAlternativeOffer
 } from "@/features/recommendations/selected-offer";
 import {
   addAuditActionLog,
+  confirmLetterSent,
   getAuditActionLogs,
-  type AuditActionLog
+  getStoredLetterRecords,
+  type AuditActionLog,
+  type StoredLetterRecord
 } from "@/features/privacy/action-log";
 import { purgeSourceDocuments } from "@/features/privacy/lifecycle";
-import {
-  getStoredUploadedDocuments,
-  getStoredUploadedDocumentsServer
-} from "@/features/upload/storage";
 import {
   expenseCategoryLabels,
   getExpenseDisplayLabel,
@@ -150,6 +146,7 @@ export function ReportPanel() {
   const [sourcePurgeMessage, setSourcePurgeMessage] = useState<string | null>(null);
   const [comparisonMessage, setComparisonMessage] = useState<string | null>(null);
   const [actionLogs, setActionLogs] = useState<AuditActionLog[]>([]);
+  const [letterRecords, setLetterRecords] = useState<StoredLetterRecord[]>([]);
 
   useEffect(() => {
     if (isDiscoveryAccess) return;
@@ -159,62 +156,7 @@ export function ReportPanel() {
     const retainedOffer = getSelectedAlternativeOffer();
     setSelectedOffer(retainedOffer);
 
-    const activeAnalysis = getStoredMockAnalysis();
-    if (activeAnalysis) {
-      addAnalysisToReportPortfolio(activeAnalysis);
-    }
-    const portfolioAnalysis = getStoredReportPortfolioAnalysis();
-    const storedAnalysis = portfolioAnalysis ?? activeAnalysis;
-    const documents = getStoredUploadedDocuments();
-    const hasManualAnalysis = isManualAnalysis(storedAnalysis);
-    const hasCurrentAnalysis =
-      Boolean(portfolioAnalysis) ||
-      (isAnalysisForDocuments(storedAnalysis, documents) &&
-        hasDocumentProfiles(storedAnalysis));
-
-    setAnalysis(hasCurrentAnalysis || hasManualAnalysis ? storedAnalysis : null);
-
-    if ((!storedAnalysis || !hasCurrentAnalysis) && !hasManualAnalysis) {
-      async function loadServerState() {
-        const serverDocuments = await getStoredUploadedDocumentsServer();
-        const readyServerDocuments = serverDocuments.filter(
-          (document) => document.status === "ready"
-        );
-        const serverAnalysis =
-          (await getStoredAnalysisServer()) ??
-          (readyServerDocuments.length > 0
-            ? await refreshStoredAnalysisServer(readyServerDocuments)
-            : null);
-
-        if (
-          isAnalysisForDocuments(serverAnalysis, serverDocuments) &&
-          serverAnalysis &&
-          !isManualAnalysis(getStoredMockAnalysis())
-        ) {
-          const allAlternatives = findAlternativeOffers(serverAnalysis.expenses);
-          const refreshedOffer = refreshSelectedAlternativeOffer(retainedOffer, allAlternatives);
-          const analysisWithSavings = applyAlternativeSavings(serverAnalysis, allAlternatives);
-          storeMockAnalysis(serverAnalysis);
-          setAnalysis(analysisWithSavings);
-          setAlternatives(allAlternatives);
-          setSelectedOffer(refreshedOffer);
-          setRecommendedLetters(
-            generateLettersFromAnalysis(serverAnalysis, refreshedOffer).slice(0, 5)
-          );
-        }
-      }
-
-      void loadServerState();
-      return;
-    }
-
-    if (!storedAnalysis) {
-      return;
-    }
-
-    const analysisToLoad = storedAnalysis;
-
-    async function loadConnectedData() {
+    async function loadConnectedData(analysisToLoad: MockAnalysis) {
       try {
         const [alternativesResponse, lettersResponse] = await Promise.all([
           fetch("/api/alternatives", {
@@ -255,32 +197,64 @@ export function ReportPanel() {
         setComparisonMessage(alternativesPayload.comparisonMessage ?? null);
         setSelectedOffer(refreshedOffer);
         setAnalysis(analysisWithSavings);
-        setRecommendedLetters(
-          refreshedOffer
-            ? generateLettersFromAnalysis(analysisWithSavings, refreshedOffer).slice(0, 5)
-            : (lettersPayload.letters ?? []).slice(0, 5)
-        );
+        setRecommendedLetters((lettersPayload.letters ?? []).slice(0, 5));
+        setServiceMessage(null);
       } catch {
-        const allAlternatives = findAlternativeOffers(analysisToLoad.expenses);
-        const refreshedOffer = refreshSelectedAlternativeOffer(retainedOffer, allAlternatives);
-        const analysisWithSavings = applyAlternativeSavings(analysisToLoad, allAlternatives);
-        setAlternatives(allAlternatives);
+        const analysisWithoutVerifiedSavings = applyAlternativeSavings(analysisToLoad, []);
+        setAlternatives([]);
         setComparisonMessage(
-          "Comparaison mobile indisponible : aucune offre locale n'est utilisée en remplacement."
+          "Comparaison indisponible : aucune économie non vérifiée n'est utilisée en remplacement."
         );
-        setSelectedOffer(refreshedOffer);
-        setAnalysis(analysisWithSavings);
+        setSelectedOffer(null);
+        setAnalysis(analysisWithoutVerifiedSavings);
         setRecommendedLetters(
-          generateLettersFromAnalysis(analysisWithSavings, refreshedOffer).slice(0, 5)
+          generateLettersFromAnalysis(analysisWithoutVerifiedSavings, null).slice(0, 5)
         );
         setServiceMessage(
-          "Rapport préparé localement. Les services externes de comparaison, d'email et de stockage seront connectés ensuite."
+          "Le rapport reste disponible, mais aucune offre ni économie locale n'est présentée sans validation du service de comparaison."
         );
       }
     }
 
-    void loadConnectedData();
+    const activeAnalysis = getStoredMockAnalysis();
+    if (activeAnalysis) {
+      addAnalysisToReportPortfolio(activeAnalysis);
+    }
+    const storedAnalysis = activeAnalysis;
+    const hasManualAnalysis = isManualAnalysis(storedAnalysis);
+    const hasCurrentAnalysis = Boolean(storedAnalysis && hasDocumentProfiles(storedAnalysis));
+
+    setAnalysis(
+      hasCurrentAnalysis || hasManualAnalysis
+        ? applyAlternativeSavings(storedAnalysis!, [])
+        : null
+    );
+
+    if ((!storedAnalysis || !hasCurrentAnalysis) && !hasManualAnalysis) {
+      async function loadServerState() {
+        const serverAnalysis = await getStoredAnalysisServer();
+
+        if (serverAnalysis) {
+          storeMockAnalysis(serverAnalysis);
+          setAnalysis(applyAlternativeSavings(serverAnalysis, []));
+          await loadConnectedData(serverAnalysis);
+        }
+      }
+
+      void loadServerState();
+      return;
+    }
+
+    if (!storedAnalysis) {
+      return;
+    }
+
+    void loadConnectedData(storedAnalysis);
   }, [activeKeyCode, isDiscoveryAccess]);
+
+  useEffect(() => {
+    setLetterRecords(analysis ? getStoredLetterRecords(analysis.id) : []);
+  }, [analysis]);
 
   async function handleDownload() {
     if (!analysis) return;
@@ -319,9 +293,29 @@ export function ReportPanel() {
     }
   }
 
-  function handlePrepareFollowup(action: AuditActionLog) {
-    if (!action.letterSnapshot) return;
-    router.push(`/courriers?relance=${encodeURIComponent(action.id)}`);
+  function handleViewStoredLetter(record: StoredLetterRecord) {
+    router.push(`/courriers?courrier=${encodeURIComponent(record.id)}&returnTo=rapport`);
+  }
+
+  function handlePrepareStoredFollowup(record: StoredLetterRecord) {
+    router.push(`/courriers?relanceRecord=${encodeURIComponent(record.id)}&returnTo=rapport`);
+  }
+
+  function handleConfirmLetterSent(record: StoredLetterRecord) {
+    if (!window.confirm("Confirmez-vous avoir envoyé ce courrier ?")) return;
+    const updated = confirmLetterSent(record.id);
+    if (!updated || !analysis) return;
+    setLetterRecords(getStoredLetterRecords(analysis.id));
+  }
+
+  function handleChooseLetter(
+    expenseId: string,
+    offer: AlternativeOffer | undefined
+  ) {
+    if (offer) {
+      storeSelectedAlternativeOffer(offer);
+    }
+    router.push(`/courriers?expenseId=${encodeURIComponent(expenseId)}&returnTo=rapport`);
   }
 
   const categorySummaries = useMemo(
@@ -371,7 +365,10 @@ export function ReportPanel() {
   const contractComparisons = analysis.expenses
     .map((expense) => ({
       expense,
-      offer: getBestAlternativeForExpense(expense.id, alternatives, analysis)
+      offer: getBestAlternativeForExpense(expense.id, alternatives, analysis),
+      recommendation: analysis.recommendations.find(
+        (recommendation) => recommendation.category === expense.category
+      )
     }));
   const reducedDataAlternatives = alternatives.filter(
     (offer) => offer.comparisonKind === "reduced_data"
@@ -471,39 +468,108 @@ export function ReportPanel() {
             offre plus compétitive n&apos;a été identifiée.
           </p>
           <div className="mt-4 flex flex-col gap-3">
-            {contractComparisons.map(({ expense, offer }) => {
+            {contractComparisons.map(({ expense, offer, recommendation }) => {
               const hasSaving = Boolean(offer && offer.estimatedYearlySaving > 0);
+              const expenseRecords = letterRecords
+                .filter((record) => record.expenseId === expense.id)
+                .sort(
+                  (first, second) =>
+                    Date.parse(second.updatedAt) - Date.parse(first.updatedAt)
+                );
+              const initialLetter = expenseRecords.find(
+                (record) => !record.parentRecordId
+              );
+              const followupLetter = initialLetter
+                ? expenseRecords.find(
+                    (record) => record.parentRecordId === initialLetter.id
+                  )
+                : undefined;
 
               return (
                 <div
                   className="flex w-full flex-col gap-3 rounded-xl border border-slate-100 bg-white p-4 lg:flex-row lg:items-center lg:justify-between"
                   key={expense.id}
                 >
-                  <p
-                    className={`min-w-0 flex-1 text-sm font-semibold md:text-base ${
-                      hasSaving ? "text-slate-800" : "text-slate-600"
-                    }`}
-                  >
-                    {getExpenseDisplayLabel(expense)} —{" "}
-                    {normalizeDisplayText(expense.provider)} (
-                    {formatCurrency(expense.monthlyAmount)}/mois)
-                  </p>
-                  <p
-                    className="min-w-0 flex-1 text-xs text-slate-500 md:text-sm"
-                  >
-                    {hasSaving && offer
-                      ? `Alternative : ${normalizeDisplayText(offer.provider)} - ${normalizeDisplayText(offer.name)}`
-                      : "Déjà optimisé : aucune offre plus compétitive"}
-                  </p>
-                  <p
-                    className={`shrink-0 whitespace-nowrap text-sm font-semibold md:text-base ${
-                      hasSaving ? "text-emerald-600" : "text-slate-400"
-                    }`}
-                  >
-                    {hasSaving
-                      ? `+ ${formatCurrency(offer?.estimatedYearlySaving ?? 0)} / an`
-                      : formatCurrency(0)}
-                  </p>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-xs font-semibold uppercase tracking-wide text-sage-700">
+                      {expenseCategoryLabels[expense.category]}
+                    </p>
+                    <p className={`mt-1 text-sm font-semibold md:text-base ${hasSaving ? "text-slate-800" : "text-slate-600"}`}>
+                      {getExpenseDisplayLabel(expense)} — {normalizeDisplayText(expense.provider)}
+                    </p>
+                    <p className="mt-1 text-xs text-slate-500 md:text-sm">
+                      {formatCurrency(expense.monthlyAmount)} / mois · {formatCurrency(expense.yearlyAmount)} / an
+                    </p>
+                    <p className="mt-2 text-xs leading-5 text-slate-500 md:text-sm">
+                      {hasSaving && offer
+                        ? `Alternative vérifiée : ${normalizeDisplayText(offer.provider)} - ${normalizeDisplayText(offer.name)}`
+                        : recommendation?.description ?? "Aucune alternative vérifiée plus avantageuse actuellement."}
+                    </p>
+                  </div>
+                  <div className="flex shrink-0 flex-col items-start gap-2 lg:items-end print:hidden">
+                    <p className={`whitespace-nowrap text-sm font-semibold md:text-base ${hasSaving ? "text-emerald-600" : "text-slate-400"}`}>
+                      {hasSaving
+                        ? `+ ${formatCurrency(offer?.estimatedYearlySaving ?? 0)} / an`
+                        : "Aucune économie certifiée"}
+                    </p>
+                    {initialLetter ? (
+                      <div className="flex max-w-sm flex-col items-start gap-2 rounded-lg border border-sage-200 bg-sage-50/60 p-3 lg:items-end">
+                        <p className="text-sm font-semibold text-sage-900">
+                          {followupLetter
+                            ? `Relance préparée le ${formatActionDate(followupLetter.createdAt)}`
+                            : `Courrier préparé le ${formatActionDate(initialLetter.createdAt)}`}
+                        </p>
+                        {initialLetter.sentAt ? (
+                          <p className="text-xs text-slate-600">
+                            Envoi confirmé le {formatActionDate(initialLetter.sentAt)}
+                          </p>
+                        ) : null}
+                        <div className="flex flex-wrap gap-2 lg:justify-end">
+                          <Button
+                            onClick={() => handleViewStoredLetter(initialLetter)}
+                            type="button"
+                            variant="secondary"
+                          >
+                            Voir le courrier initial
+                          </Button>
+                          {followupLetter ? (
+                            <Button
+                              onClick={() => handleViewStoredLetter(followupLetter)}
+                              type="button"
+                              variant="secondary"
+                            >
+                              Voir la relance
+                            </Button>
+                          ) : (
+                            <Button
+                              onClick={() => handlePrepareStoredFollowup(initialLetter)}
+                              type="button"
+                              variant="secondary"
+                            >
+                              Préparer une relance
+                            </Button>
+                          )}
+                          {!initialLetter.sentAt ? (
+                            <Button
+                              onClick={() => handleConfirmLetterSent(initialLetter)}
+                              type="button"
+                              variant="ghost"
+                            >
+                              Confirmer l&apos;envoi
+                            </Button>
+                          ) : null}
+                        </div>
+                      </div>
+                    ) : (
+                      <Button
+                        onClick={() => handleChooseLetter(expense.id, offer)}
+                        type="button"
+                        variant="secondary"
+                      >
+                        Choisir un courrier
+                      </Button>
+                    )}
+                  </div>
                 </div>
               );
             })}
@@ -628,10 +694,40 @@ export function ReportPanel() {
           Historique de vos démarches
         </h2>
         <p className="mt-2 text-sm leading-6 text-slate-600">
-          Les actions réalisées pendant cette session apparaissent ici pour garder
-          une trace claire des courriers et rapports générés.
+          Les courriers enregistrés restent accessibles après actualisation. Les
+          téléchargements et préparations d&apos;email sont indiqués séparément et ne
+          constituent jamais une preuve d&apos;envoi.
         </p>
         <div className="mt-4 space-y-3">
+          {letterRecords.map((record) => (
+            <div
+              className="flex flex-col gap-3 rounded-lg border border-sage-200 bg-sage-50/40 p-4 sm:flex-row sm:items-center sm:justify-between"
+              key={record.id}
+            >
+              <div>
+                <p className="font-semibold text-navy-900">
+                  {record.status === "followup_prepared"
+                    ? "Relance préparée"
+                    : record.status === "sent"
+                      ? "Courrier préparé - envoi confirmé"
+                      : "Courrier préparé"}
+                </p>
+                <p className="mt-1 text-sm text-slate-500">
+                  {formatActionDate(record.createdAt)} - {normalizeDisplayText(record.snapshot.letter.provider)}
+                  {record.sentAt
+                    ? ` - envoyé le ${formatActionDate(record.sentAt)}`
+                    : ""}
+                </p>
+              </div>
+              <Button
+                onClick={() => handleViewStoredLetter(record)}
+                type="button"
+                variant="secondary"
+              >
+                Voir le document
+              </Button>
+            </div>
+          ))}
           {actionLogs.length > 0 ? (
             actionLogs.map((action) => (
               <div
@@ -646,22 +742,13 @@ export function ReportPanel() {
                     {action.documentName ? ` - ${action.documentName}` : ""}
                   </p>
                 </div>
-                {action.letterSnapshot ? (
-                  <Button
-                    onClick={() => handlePrepareFollowup(action)}
-                    type="button"
-                    variant="secondary"
-                  >
-                    Préparer une relance
-                  </Button>
-                ) : null}
               </div>
             ))
-          ) : (
+          ) : letterRecords.length === 0 ? (
             <p className="text-sm text-slate-600">
-              Aucun téléchargement enregistré pendant cette session.
+              Aucun courrier ni téléchargement enregistré pour cet audit.
             </p>
-          )}
+          ) : null}
         </div>
       </Card>
     </section>

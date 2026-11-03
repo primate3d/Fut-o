@@ -5,6 +5,7 @@ export type LetterActionSnapshot = {
   letter: GeneratedLetter;
   personalization: LetterPersonalization;
   documentName?: string;
+  renderedContent?: string;
 };
 
 export type AuditActionLog = {
@@ -17,19 +18,49 @@ export type AuditActionLog = {
   letterSnapshot?: LetterActionSnapshot;
 };
 
+export type LetterTrackingStatus = "prepared" | "sent" | "followup_prepared";
+
+export type StoredLetterRecord = {
+  id: string;
+  auditId: string;
+  expenseId: string;
+  letterType: GeneratedLetter["type"];
+  status: LetterTrackingStatus;
+  createdAt: string;
+  updatedAt: string;
+  sentAt?: string;
+  parentRecordId?: string;
+  snapshot: LetterActionSnapshot;
+};
+
+export const LETTER_TRACKING_STORAGE_PREFIX = "futeo.letterTracking";
+
 function getActionLogStorageKey() {
   const activeKey = getStoredAccessKey();
   return activeKey ? `futeo.auditActions.${activeKey.code}` : "futeo.auditActions.anonymous";
 }
 
+function getLetterTrackingStorageKey() {
+  const activeKey = getStoredAccessKey();
+  return activeKey
+    ? `${LETTER_TRACKING_STORAGE_PREFIX}.${activeKey.code}`
+    : `${LETTER_TRACKING_STORAGE_PREFIX}.anonymous`;
+}
+
 export function getAuditActionLogs(): AuditActionLog[] {
   if (typeof window === "undefined") return [];
 
-  const storedValue = window.sessionStorage.getItem(getActionLogStorageKey());
+  const storageKey = getActionLogStorageKey();
+  const storedValue =
+    window.localStorage.getItem(storageKey) ??
+    window.sessionStorage.getItem(storageKey);
   if (!storedValue) return [];
 
   try {
     const parsedValue = JSON.parse(storedValue) as AuditActionLog[];
+    if (!window.localStorage.getItem(storageKey)) {
+      window.localStorage.setItem(storageKey, storedValue);
+    }
     return Array.isArray(parsedValue) ? parsedValue : [];
   } catch {
     return [];
@@ -47,9 +78,114 @@ export function addAuditActionLog(
     ...action
   };
   const nextActions = [...getAuditActionLogs(), nextAction];
-  window.sessionStorage.setItem(getActionLogStorageKey(), JSON.stringify(nextActions));
+  window.localStorage.setItem(getActionLogStorageKey(), JSON.stringify(nextActions));
 
   return nextActions;
+}
+
+export function getStoredLetterRecords(auditId?: string): StoredLetterRecord[] {
+  if (typeof window === "undefined") return [];
+
+  const storedValue = window.localStorage.getItem(getLetterTrackingStorageKey());
+  if (!storedValue) return [];
+
+  try {
+    const records = JSON.parse(storedValue) as StoredLetterRecord[];
+    if (!Array.isArray(records)) return [];
+    return auditId ? records.filter((record) => record.auditId === auditId) : records;
+  } catch {
+    return [];
+  }
+}
+
+function storeLetterRecords(records: StoredLetterRecord[]) {
+  window.localStorage.setItem(getLetterTrackingStorageKey(), JSON.stringify(records));
+  return records;
+}
+
+export function getStoredLetterRecord(recordId: string) {
+  return getStoredLetterRecords().find((record) => record.id === recordId) ?? null;
+}
+
+export function savePreparedLetter(
+  auditId: string,
+  snapshot: LetterActionSnapshot
+) {
+  if (typeof window === "undefined" || !snapshot.letter.sourceExpenseId) return null;
+
+  const now = new Date().toISOString();
+  const records = getStoredLetterRecords();
+  const recordId = `${auditId}:${snapshot.letter.id}`;
+  const existing = records.find((record) => record.id === recordId);
+  const record: StoredLetterRecord = {
+    id: recordId,
+    auditId,
+    expenseId: snapshot.letter.sourceExpenseId,
+    letterType: snapshot.letter.type,
+    status: existing?.status === "sent" ? "sent" : "prepared",
+    createdAt: existing?.createdAt ?? now,
+    updatedAt: now,
+    sentAt: existing?.sentAt,
+    snapshot
+  };
+  storeLetterRecords([
+    ...records.filter((candidate) => candidate.id !== recordId),
+    record
+  ]);
+  return record;
+}
+
+export function confirmLetterSent(
+  recordId: string,
+  sentAt = new Date().toISOString()
+): StoredLetterRecord | null {
+  if (typeof window === "undefined") return null;
+
+  let updatedRecord: StoredLetterRecord | null = null;
+  const records = getStoredLetterRecords().map((record) => {
+    if (record.id !== recordId || record.parentRecordId) return record;
+    updatedRecord = {
+      ...record,
+      status: "sent",
+      sentAt,
+      updatedAt: sentAt
+    };
+    return updatedRecord;
+  });
+  if (!updatedRecord) return null;
+  storeLetterRecords(records);
+  return updatedRecord;
+}
+
+export function saveFollowupLetter(
+  sourceRecordId: string,
+  snapshot: LetterActionSnapshot
+) {
+  if (typeof window === "undefined") return null;
+
+  const records = getStoredLetterRecords();
+  const sourceRecord = records.find((record) => record.id === sourceRecordId);
+  if (!sourceRecord || sourceRecord.parentRecordId) return null;
+
+  const now = new Date().toISOString();
+  const recordId = `${sourceRecord.id}:followup`;
+  const existing = records.find((record) => record.id === recordId);
+  const record: StoredLetterRecord = {
+    id: recordId,
+    auditId: sourceRecord.auditId,
+    expenseId: sourceRecord.expenseId,
+    letterType: "provider_followup",
+    status: "followup_prepared",
+    createdAt: existing?.createdAt ?? now,
+    updatedAt: now,
+    parentRecordId: sourceRecord.id,
+    snapshot
+  };
+  storeLetterRecords([
+    ...records.filter((candidate) => candidate.id !== recordId),
+    record
+  ]);
+  return record;
 }
 
 export function queueLetterFollowup(action: AuditActionLog) {

@@ -21,6 +21,7 @@ import type {
   Recommendation
 } from "@/types";
 import { ExpenseCategory } from "@/types";
+import { normalizeAiContractDetails } from "@/features/analysis/contract-details";
 
 let _openai: OpenAI | null = null;
 
@@ -191,6 +192,12 @@ Sortie JSON OBLIGATOIRE :
     "subcategory": "MOBILE",
     "monthlyAmount": 25,
     "customerNumber": "987654",
+    "contractDetails": {
+      "version": 1,
+      "kind": "internet|electricity|gas|car_insurance|home_insurance",
+      "source": "ai",
+      "sourceDocumentId": "abc-123"
+    },
     "mobileDataGB": 100,
     "mobileIncludedDataGB": 100,
     "mobileConsumedDataGB": 12.5,
@@ -273,7 +280,26 @@ REGLES MULTI-LIGNES / MULTI-CONTRATS - EXEMPLES CONCRETS OBLIGATOIRES :
     - l'enveloppe incluse dans expense.mobileIncludedDataGB et, pour compatibilite, expense.mobileDataGB
     - la consommation observee dans expense.mobileConsumedDataGB uniquement si elle est explicitement indiquee
     - un forfait internet mobile illimite avec expense.mobileDataUnlimited = true, sans valeur numerique artificielle
-    N'arrondis pas les valeurs decimales et n'invente jamais une consommation absente.`
+    N'arrondis pas les valeurs decimales et n'invente jamais une consommation absente.
+
+14. Pour Internet, electricite, gaz, assurance auto et habitation, ajoute contractDetails
+    avec uniquement les champs explicitement presents dans le document. Utilise le kind exact
+    correspondant au document, source="ai" et le sourceDocumentId exact. N'invente jamais une
+    puissance, une consommation, une zone, une garantie, une franchise, un debit ou des frais.
+    Champs autorises par kind :
+    - internet : offerName, technology, monthlyPrice, promotionPrice, promotionDurationMonths,
+      priceAfterPromotion, commitmentMonths, activationFees, terminationFees, downloadMbps,
+      uploadMbps, includedServices.
+    - electricity : documentKind, powerKva, tariffOption, annualConsumptionKwh,
+      peakConsumptionKwh, offPeakConsumptionKwh, tempoConsumptionKwh (bluePeak,
+      blueOffPeak, whitePeak, whiteOffPeak, redPeak, redOffPeak), subscriptionAmount,
+      basePricePerKwh, peakPricePerKwh, offPeakPricePerKwh, taxes, period (start/end ISO).
+    - gas : documentKind, annualConsumptionKwh, tariffZone, consumptionClass, pricePerKwh,
+      annualSubscription, taxes, period (start/end ISO).
+    - car_insurance : annualPremium, vehicle, formula, guarantees, deductibles, limits,
+      assistance, exclusions.
+    - home_insurance : annualPremium, formula, housingType, surfaceM2, occupancyStatus,
+      contentsCapital, guarantees, deductibles, limits, assistance, exclusions.`
         },
         {
           role: "user",
@@ -423,20 +449,26 @@ REGLES MULTI-LIGNES / MULTI-CONTRATS - EXEMPLES CONCRETS OBLIGATOIRES :
       return candidates.find((expenses) => expenses.length > 0) ?? [];
     });
 
-    const normalizedExpenses: Expense[] = selectedExpenses.map(
-      (expense, index) =>
-        attachDocumentProfileToExpense(
-          {
-            id: `exp_${keyCode}_${index}`,
-            ...expense,
-            yearlyAmount: expense.yearlyAmount ?? expense.monthlyAmount * 12,
-            recurrence:
-              expense.recurrence ??
-              (expense.category === ExpenseCategory.INSURANCE ? "yearly" : "monthly")
-          },
-          documentProfiles
-        )
-    );
+    const analysisScopeId = documents.map((document) => document.id).join("_");
+    const normalizedExpenses: Expense[] = selectedExpenses.map((expense, index) => {
+      const sourceDocumentId = expense.sourceDocumentId ?? documents[0]?.id;
+      const profile = sourceDocumentId ? documentProfiles[sourceDocumentId] : undefined;
+      const contractDetails = sourceDocumentId
+        ? normalizeAiContractDetails(expense.contractDetails, profile?.documentType, sourceDocumentId)
+        : undefined;
+      return attachDocumentProfileToExpense(
+        {
+          id: `exp_${keyCode}_${sourceDocumentId ?? analysisScopeId}_${index}`,
+          ...expense,
+          contractDetails,
+          yearlyAmount: expense.yearlyAmount ?? expense.monthlyAmount * 12,
+          recurrence:
+            expense.recurrence ??
+            (expense.category === ExpenseCategory.INSURANCE ? "yearly" : "monthly")
+        },
+        documentProfiles
+      );
+    });
     const seenInternetInvoiceDocuments = new Set<string>();
     const expenses = normalizedExpenses.filter((expense) => {
       const sourceDocumentId = expense.sourceDocumentId;
@@ -457,14 +489,14 @@ REGLES MULTI-LIGNES / MULTI-CONTRATS - EXEMPLES CONCRETS OBLIGATOIRES :
 
     const recommendations: Recommendation[] = (rawResult.recommendations ?? []).map(
       (recommendation, index) => ({
-        id: `rec_${keyCode}_${index}`,
+        id: `rec_${keyCode}_${analysisScopeId}_${index}`,
         ...recommendation
       })
     );
 
     const anomalies: AnalysisAnomaly[] = (rawResult.anomalies ?? []).map(
       (anomaly, index) => ({
-        id: `anom_${keyCode}_${index}`,
+        id: `anom_${keyCode}_${analysisScopeId}_${index}`,
         ...anomaly
       })
     );
@@ -474,7 +506,7 @@ REGLES MULTI-LIGNES / MULTI-CONTRATS - EXEMPLES CONCRETS OBLIGATOIRES :
         if (!energyBilling?.confirmationPrompt) return [];
 
         return [{
-          id: `anom_${keyCode}_energy_frequency_${index}`,
+          id: `anom_${keyCode}_${profile.documentId}_energy_frequency_${index}`,
           title: "Frequence energie a confirmer",
           description: energyBilling.confirmationPrompt,
           severity: "medium" as const,
@@ -513,7 +545,7 @@ REGLES MULTI-LIGNES / MULTI-CONTRATS - EXEMPLES CONCRETS OBLIGATOIRES :
         }
 
         return checks.map((check, checkIndex) => ({
-          id: `anom_${keyCode}_internet_${profileIndex}_${checkIndex}`,
+          id: `anom_${keyCode}_${profile.documentId}_internet_${profileIndex}_${checkIndex}`,
           ...check,
           severity: "medium" as const,
           category: ExpenseCategory.TELECOM

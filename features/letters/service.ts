@@ -1,4 +1,3 @@
-import { findAlternativeOffers } from "@/features/recommendations/service";
 import type { SelectedAlternativeOffer } from "@/features/recommendations/selected-offer";
 import { ExpenseCategory, ExpenseSubcategory } from "@/types";
 import type {
@@ -297,17 +296,66 @@ function getDetectedProviderAddress(
   );
 }
 
-function getPotentialSavingForExpense(analysis: MockAnalysis, expense: Expense) {
-  return analysis.recommendations
-    .filter((recommendation) => recommendation.category === expense.category)
-    .reduce((total, recommendation) => total + recommendation.potentialSaving, 0);
-}
-
 function normalizeContextValue(value?: string) {
   return (value ?? "")
     .toLowerCase()
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "");
+}
+
+function getContractSummary(expense: Expense) {
+  const details = expense.contractDetails;
+  const characteristics: string[] = [];
+
+  if (details?.kind === "internet") {
+    if (details.technology && details.technology !== "UNKNOWN") {
+      characteristics.push(`technologie ${details.technology}`);
+    }
+    if (typeof details.downloadMbps === "number") {
+      characteristics.push(`débit descendant ${details.downloadMbps} Mbit/s`);
+    }
+    if (typeof details.commitmentMonths === "number") {
+      characteristics.push(
+        details.commitmentMonths > 0
+          ? `engagement ${details.commitmentMonths} mois`
+          : "sans engagement"
+      );
+    }
+  } else if (details?.kind === "electricity") {
+    if (typeof details.powerKva === "number") {
+      characteristics.push(`puissance ${details.powerKva} kVA`);
+    }
+    if (details.tariffOption && details.tariffOption !== "UNKNOWN") {
+      characteristics.push(`option ${details.tariffOption}`);
+    }
+    if (typeof details.annualConsumptionKwh === "number") {
+      characteristics.push(`consommation annuelle ${details.annualConsumptionKwh} kWh`);
+    }
+  } else if (details?.kind === "gas") {
+    if (typeof details.annualConsumptionKwh === "number") {
+      characteristics.push(`consommation annuelle ${details.annualConsumptionKwh} kWh`);
+    }
+    if (details.tariffZone) characteristics.push(`zone tarifaire ${details.tariffZone}`);
+  } else if (details?.kind === "car_insurance" || details?.kind === "home_insurance") {
+    if (details.formula) characteristics.push(`formule ${details.formula}`);
+    if (details.guarantees?.length) {
+      characteristics.push(`garanties ${details.guarantees.join(", ")}`);
+    }
+  }
+
+  if (expense.subcategory === ExpenseSubcategory.MOBILE) {
+    if (expense.mobileDataUnlimited) {
+      characteristics.push("données mobiles illimitées");
+    } else if (typeof expense.mobileIncludedDataGB === "number") {
+      characteristics.push(`${expense.mobileIncludedDataGB} Go inclus`);
+    } else if (typeof expense.mobileDataGB === "number") {
+      characteristics.push(`${expense.mobileDataGB} Go inclus`);
+    }
+  }
+
+  return characteristics.length > 0
+    ? `${expense.label} (${characteristics.join(", ")})`
+    : expense.label;
 }
 
 function getLetterContextCategory(expense: Expense): LetterContextCategory | null {
@@ -415,6 +463,7 @@ const defaultLetterTypes = [
 
 function buildBodyTemplate(params: {
   provider: string;
+  contractSummary: string;
   monthlyAmount: number;
   yearlyAmount: number;
   potentialSaving: number;
@@ -456,6 +505,7 @@ function buildBodyTemplate(params: {
     `Je suis client(e) chez vous sous la référence {{customerNumber}}. Je vous écris au sujet de mon contrat, facturé ${formatCurrency(
       params.monthlyAmount
     )} par mois, soit environ ${formatCurrency(params.yearlyAmount)} par an.`,
+    `Contrat concerné : ${params.contractSummary}.`,
     "",
     params.reason,
     "",
@@ -806,11 +856,8 @@ function createLetter(
   const bestOffer =
     selectedOffer?.sourceExpenseId === expense.id
       ? selectedOffer
-      : findAlternativeOffers([expense])[0];
-  const potentialSaving = bestOffer?.estimatedYearlySaving ??
-    (expense.subcategory === ExpenseSubcategory.MOBILE
-      ? 0
-      : Math.max(getPotentialSavingForExpense(analysis, expense), 0));
+      : undefined;
+  const potentialSaving = bestOffer?.estimatedYearlySaving ?? 0;
   const provider = getCommercialProviderName(analysis, expense);
   const providerAddress = getDetectedProviderAddress(analysis, expense, provider);
 
@@ -818,6 +865,7 @@ function createLetter(
 
   return {
     id: `letter_${type}_${expense.id}`,
+    sourceExpenseId: expense.id,
     type,
     provider,
     providerAddress,
@@ -836,6 +884,7 @@ function createLetter(
     title: preset.title,
     bodyTemplate: buildBodyTemplate({
       provider,
+      contractSummary: getContractSummary(expense),
       monthlyAmount: expense.monthlyAmount,
       yearlyAmount: expense.yearlyAmount,
       potentialSaving,

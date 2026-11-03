@@ -1,6 +1,6 @@
 "use client";
 
-import { ChangeEvent, useCallback, useEffect, useState } from "react";
+import { ChangeEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import {
   Copy,
@@ -19,16 +19,9 @@ import { ProviderLogo } from "@/components/ui/ProviderLogo";
 import {
   getStoredAnalysisServer,
   getStoredMockAnalysis,
-  isAnalysisForDocuments,
-  refreshStoredAnalysisServer,
   storeMockAnalysis,
-  deleteStoredAnalysisServer,
   hasDocumentProfiles
 } from "@/features/analysis";
-import {
-  getStoredUploadedDocuments,
-  getStoredUploadedDocumentsServer
-} from "@/features/upload/storage";
 import { getStoredAccessKey, isDiscoveryPlan } from "@/features/billing/access-keys";
 import { expenseCategoryLabels } from "@/lib/expense-summary";
 import { getProviderBranding } from "@/lib/provider-branding";
@@ -38,6 +31,9 @@ import {
 import {
   addAuditActionLog,
   getAuditActionLogs,
+  getStoredLetterRecord,
+  saveFollowupLetter,
+  savePreparedLetter,
   type LetterActionSnapshot
 } from "@/features/privacy/action-log";
 import { purgeSourceDocuments } from "@/features/privacy/lifecycle";
@@ -160,7 +156,13 @@ function getMergedCustomerFromAnalysis(analysis: MockAnalysis | null) {
 function getPersonalizationFromAnalysis(
   analysis: MockAnalysis
 ): Partial<LetterPersonalization> {
-  const customer = sanitizeDetectedCustomerIdentity(getMergedCustomerFromAnalysis(analysis));
+  return getPersonalizationFromCustomer(getMergedCustomerFromAnalysis(analysis));
+}
+
+function getPersonalizationFromCustomer(
+  detectedCustomer: CustomerProfile | undefined
+): Partial<LetterPersonalization> {
+  const customer = sanitizeDetectedCustomerIdentity(detectedCustomer);
   if (!customer) return {};
 
   const nameParts = splitFullName(customer.fullName);
@@ -282,19 +284,24 @@ function sendEmail(subject: string, body: string) {
 export function LettersPanel() {
   const searchParams = useSearchParams();
   const followupActionId = searchParams.get("relance");
+  const followupRecordId = searchParams.get("relanceRecord");
+  const savedRecordId = searchParams.get("courrier");
+  const selectedExpenseId = searchParams.get("expenseId");
   const activeKey = getStoredAccessKey();
   const activeKeyCode = activeKey?.code;
   const isDiscoveryAccess = isDiscoveryPlan(activeKey?.plan);
   const [analysis, setAnalysis] = useState<MockAnalysis | null>(null);
+  const [letterAuditId, setLetterAuditId] = useState<string | null>(null);
   const [selectedLetterId, setSelectedLetterId] = useState<string | null>(null);
   const [personalization, setPersonalization] =
     useState<LetterPersonalization>(initialPersonalization);
+  const [letterDraft, setLetterDraft] = useState("");
   const [copyMessage, setCopyMessage] = useState<string | null>(null);
   const [letters, setLetters] = useState<GeneratedLetter[]>([]);
   const [serviceMessage, setServiceMessage] = useState<string | null>(null);
   const [sourcePurgeMessage, setSourcePurgeMessage] = useState<string | null>(null);
-  const [isReloading, setIsReloading] = useState(false);
   const [isFollowupDraft, setIsFollowupDraft] = useState(false);
+  const [sourceLetterRecordId, setSourceLetterRecordId] = useState<string | null>(null);
   const [followupSourceDocumentName, setFollowupSourceDocumentName] =
     useState<string | undefined>();
 
@@ -346,13 +353,17 @@ export function LettersPanel() {
     }
   }
 
-  function getLetterActionSnapshot(letter: GeneratedLetter): LetterActionSnapshot {
+  function getLetterActionSnapshot(
+    letter: GeneratedLetter,
+    renderedContent?: string
+  ): LetterActionSnapshot {
     return {
       letter,
       personalization,
       documentName:
         analysis?.documents.map((document) => document.fileName).join(", ") ??
-        followupSourceDocumentName
+        followupSourceDocumentName,
+      renderedContent
     };
   }
 
@@ -364,12 +375,12 @@ export function LettersPanel() {
     );
     addAuditActionLog({
       type: "letter_downloaded",
-      label: `Courrier généré : ${letter.title}`,
+      label: `Courrier téléchargé : ${letter.title}`,
       documentName:
         analysis?.documents.map((document) => document.fileName).join(", ") ??
         followupSourceDocumentName,
       provider: letter.provider,
-      letterSnapshot: getLetterActionSnapshot(letter)
+      letterSnapshot: getLetterActionSnapshot(letter, content)
     });
     await purgeSourcesAfterDownload();
   }
@@ -381,18 +392,18 @@ export function LettersPanel() {
     );
     addAuditActionLog({
       type: "letter_downloaded",
-      label: `Courrier généré : ${letter.title}`,
+      label: `Courrier téléchargé : ${letter.title}`,
       documentName:
         analysis?.documents.map((document) => document.fileName).join(", ") ??
         followupSourceDocumentName,
       provider: letter.provider,
-      letterSnapshot: getLetterActionSnapshot(letter)
+      letterSnapshot: getLetterActionSnapshot(letter, content)
     });
     await purgeSourcesAfterDownload();
   }
 
   function prepareLetterEmail(letter: GeneratedLetter, content: string) {
-    const letterSnapshot = getLetterActionSnapshot(letter);
+    const letterSnapshot = getLetterActionSnapshot(letter, content);
     addAuditActionLog({
       type: "letter_email_prepared",
       label: `Courrier préparé pour envoi par email : ${letter.title}`,
@@ -403,34 +414,71 @@ export function LettersPanel() {
     sendEmail(letter.subject, content);
   }
 
-  async function handleForceAnalysis() {
-    setIsReloading(true);
-    setServiceMessage("Relance de l'analyse IA en cours...");
-    await deleteStoredAnalysisServer();
-    const serverDocuments = await getStoredUploadedDocumentsServer();
-    const readyServerDocuments = serverDocuments.filter(doc => doc.status === "ready");
-    if (readyServerDocuments.length > 0) {
-      const newAnalysis = await refreshStoredAnalysisServer(readyServerDocuments);
-      if (newAnalysis) {
-        storeMockAnalysis(newAnalysis);
-        setAnalysis(newAnalysis);
-        setPersonalization((currentValue) => ({
-          ...mergeDetectedPersonalization(
-            getPersonalizationFromAnalysis(newAnalysis),
-            currentValue
-          )
-        }));
-        await loadValidatedLetters(newAnalysis);
-        setServiceMessage("Analyse IA terminée.");
-      } else {
-        setServiceMessage("Erreur lors de la relance de l'analyse.");
-      }
+  function persistSelectedLetter() {
+    if (!selectedLetter || !letterAuditId) {
+      setServiceMessage("Le courrier ne peut pas être enregistré sans audit actif.");
+      return;
     }
-    setIsReloading(false);
+
+    const snapshot = getLetterActionSnapshot(selectedLetter, renderedLetter);
+    const record = isFollowupDraft && sourceLetterRecordId
+      ? saveFollowupLetter(sourceLetterRecordId, snapshot)
+      : savePreparedLetter(letterAuditId, snapshot);
+    setServiceMessage(
+      record
+        ? isFollowupDraft
+          ? "Relance enregistrée. Le courrier initial reste conservé dans le rapport."
+          : "Courrier enregistré comme préparé. Aucun envoi n'a été effectué."
+        : "L'enregistrement du courrier a échoué."
+    );
   }
 
   useEffect(() => {
     if (isDiscoveryAccess) return;
+
+    const savedRecord = savedRecordId ? getStoredLetterRecord(savedRecordId) : null;
+    if (savedRecord) {
+      const savedLetter = savedRecord.snapshot.renderedContent
+        ? {
+            ...savedRecord.snapshot.letter,
+            bodyTemplate: savedRecord.snapshot.renderedContent
+          }
+        : savedRecord.snapshot.letter;
+      setLetters([savedLetter]);
+      setSelectedLetterId(savedLetter.id);
+      setPersonalization(savedRecord.snapshot.personalization);
+      setFollowupSourceDocumentName(savedRecord.snapshot.documentName);
+      setLetterAuditId(savedRecord.auditId);
+      setIsFollowupDraft(savedRecord.status === "followup_prepared");
+      setSourceLetterRecordId(savedRecord.parentRecordId ?? null);
+      setServiceMessage(
+        savedRecord.status === "followup_prepared"
+          ? "Relance enregistrée. Vous pouvez la relire et la modifier avant tout envoi."
+          : "Courrier enregistré. Vous pouvez le relire et le modifier avant tout envoi."
+      );
+      return;
+    }
+
+    const sourceRecord = followupRecordId
+      ? getStoredLetterRecord(followupRecordId)
+      : null;
+    if (sourceRecord && !sourceRecord.parentRecordId) {
+      const followupLetter = createFollowupLetterFromSnapshot(
+        sourceRecord.snapshot.letter,
+        sourceRecord.sentAt ?? sourceRecord.createdAt
+      );
+      setLetters([followupLetter]);
+      setSelectedLetterId(followupLetter.id);
+      setPersonalization(sourceRecord.snapshot.personalization);
+      setFollowupSourceDocumentName(sourceRecord.snapshot.documentName);
+      setLetterAuditId(sourceRecord.auditId);
+      setIsFollowupDraft(true);
+      setSourceLetterRecordId(sourceRecord.id);
+      setServiceMessage(
+        "Relance préparée à partir du courrier initial. Vérifiez et enregistrez son contenu avant tout envoi."
+      );
+      return;
+    }
 
     const queuedFollowup = followupActionId
       ? getAuditActionLogs().find((action) => action.id === followupActionId)
@@ -444,6 +492,7 @@ export function LettersPanel() {
       setSelectedLetterId(followupLetter.id);
       setPersonalization(queuedFollowup.letterSnapshot.personalization);
       setFollowupSourceDocumentName(queuedFollowup.letterSnapshot.documentName);
+      setLetterAuditId(getStoredMockAnalysis()?.id ?? null);
       setIsFollowupDraft(true);
       setServiceMessage(
         "Relance préparée à partir du courrier précédemment généré. Vérifiez le contenu avant envoi."
@@ -452,13 +501,11 @@ export function LettersPanel() {
     }
 
     const storedAnalysis = getStoredMockAnalysis();
-    const documents = getStoredUploadedDocuments();
-    const hasUsableStoredAnalysis =
-      isAnalysisForDocuments(storedAnalysis, documents) &&
-      hasAnalysisDataForLetters(storedAnalysis);
+    const hasUsableStoredAnalysis = hasAnalysisDataForLetters(storedAnalysis);
 
     function applyAnalysis(nextAnalysis: MockAnalysis) {
       setAnalysis(nextAnalysis);
+      setLetterAuditId(nextAnalysis.id);
       setPersonalization((currentValue) => ({
         ...mergeDetectedPersonalization(
           getPersonalizationFromAnalysis(nextAnalysis),
@@ -473,27 +520,10 @@ export function LettersPanel() {
     }
 
     async function loadServerState() {
-      const serverDocuments = await getStoredUploadedDocumentsServer();
-      const readyServerDocuments = serverDocuments.filter(
-        (document) => document.status === "ready"
-      );
-      let serverAnalysis = await getStoredAnalysisServer();
-      const hasUsableServerAnalysis =
-        isAnalysisForDocuments(serverAnalysis, serverDocuments) &&
-        hasAnalysisDataForLetters(serverAnalysis);
+      const serverAnalysis = await getStoredAnalysisServer();
+      const hasUsableServerAnalysis = hasAnalysisDataForLetters(serverAnalysis);
 
-      if (!hasUsableServerAnalysis && readyServerDocuments.length > 0) {
-        setServiceMessage(
-          "Chargement des courriers depuis l'analyse."
-        );
-        serverAnalysis = await refreshStoredAnalysisServer(readyServerDocuments);
-      }
-
-      if (
-        serverAnalysis &&
-        isAnalysisForDocuments(serverAnalysis, serverDocuments) &&
-        hasAnalysisDataForLetters(serverAnalysis)
-      ) {
+      if (serverAnalysis && hasUsableServerAnalysis) {
         storeMockAnalysis(serverAnalysis);
         applyAnalysis(serverAnalysis);
         setServiceMessage(null);
@@ -504,27 +534,55 @@ export function LettersPanel() {
         setAnalysis(null);
         setLetters([]);
         setServiceMessage(
-          readyServerDocuments.length > 0
-            ? "Chargement des courriers depuis l'analyse."
-            : "Importez un document puis lancez l'analyse pour preparer les courriers."
+          "Importez un document puis lancez l'analyse pour preparer les courriers."
         );
       }
     }
 
     void loadServerState();
-  }, [activeKeyCode, followupActionId, isDiscoveryAccess, loadValidatedLetters]);
+  }, [
+    activeKeyCode,
+    followupActionId,
+    followupRecordId,
+    isDiscoveryAccess,
+    loadValidatedLetters,
+    savedRecordId
+  ]);
+
+  const visibleLetters = useMemo(() => {
+    if (!selectedExpenseId) return letters;
+    const matchingLetters = letters.filter(
+      (letter) => letter.sourceExpenseId === selectedExpenseId
+    );
+    return matchingLetters.length > 0 ? matchingLetters : letters;
+  }, [letters, selectedExpenseId]);
 
   useEffect(() => {
-    if (!selectedLetterId && letters.length > 0) {
-      setSelectedLetterId(letters[0].id);
+    if (visibleLetters.length === 0) return;
+    const selectedIsVisible = visibleLetters.some((letter) => letter.id === selectedLetterId);
+    if (!selectedIsVisible) {
+      const targetLetter = visibleLetters[0];
+      setSelectedLetterId(targetLetter.id);
+      if (selectedExpenseId) {
+        setPersonalization({
+          ...initialPersonalization,
+          ...(analysis ? getPersonalizationFromAnalysis(analysis) : {}),
+          ...getPersonalizationFromCustomer(targetLetter.customerProfile)
+        });
+      }
     }
-  }, [letters, selectedLetterId]);
+  }, [analysis, selectedExpenseId, selectedLetterId, visibleLetters]);
 
-  const selectedLetter = letters.find((letter) => letter.id === selectedLetterId) ?? null;
-  const renderedLetter = selectedLetter
+  const selectedLetter = visibleLetters.find((letter) => letter.id === selectedLetterId) ?? null;
+  const generatedLetterContent = selectedLetter
     ? renderLetter(selectedLetter, personalization)
     : "";
+  useEffect(() => {
+    setLetterDraft(generatedLetterContent);
+  }, [generatedLetterContent]);
+  const renderedLetter = letterDraft;
   const detectedCustomer =
+    selectedLetter?.customerProfile ??
     analysis?.detectedParties?.customer ??
     Object.values(analysis?.detectedParties?.documents ?? {}).find(
       (documentProfile) => documentProfile.customer
@@ -542,8 +600,7 @@ export function LettersPanel() {
     }));
   }
 
-  async function copyLetter(letter: GeneratedLetter) {
-    const content = renderLetter(letter, personalization);
+  async function copyLetter(letter: GeneratedLetter, content = renderLetter(letter, personalization)) {
     await navigator.clipboard?.writeText(content);
     setCopyMessage("Démarche copiée dans le presse-papiers.");
     window.setTimeout(() => setCopyMessage(null), 1800);
@@ -566,7 +623,7 @@ export function LettersPanel() {
     );
   }
 
-  if ((!analysis && !isFollowupDraft) || letters.length === 0) {
+  if ((!analysis && !isFollowupDraft && !savedRecordId) || letters.length === 0) {
     return (
       <section className="space-y-4">
         {serviceMessage ? (
@@ -575,9 +632,9 @@ export function LettersPanel() {
           </div>
         ) : null}
         <EmptyState
-          actionHref="/analyse"
-          actionLabel="Lancer l'analyse"
-          description="Lancez l'analyse pour generer les courriers a partir de vos documents."
+          actionHref="/importer"
+          actionLabel="Importer un document"
+          description="Importez un document puis lancez son analyse pour preparer les courriers."
           icon={<FileSearch size={24} />}
           title="Vos courriers seront prepares ici"
         />
@@ -613,6 +670,12 @@ export function LettersPanel() {
         </div>
       ) : null}
 
+      {selectedExpenseId ? (
+        <div className="rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm leading-6 text-blue-900">
+          Les démarches affichées concernent le contrat choisi dans le rapport. Les champs manquants restent modifiables avant tout envoi.
+        </div>
+      ) : null}
+
       {sourcePurgeMessage ? (
         <div className="rounded-xl border border-sage-200 bg-sage-50 px-4 py-3 text-sm font-medium leading-6 text-sage-900">
           {sourcePurgeMessage}
@@ -628,26 +691,18 @@ export function LettersPanel() {
               personnalisation ci-dessous avant l'envoi.
             </p>
           ) : (
-            <>
-              <p>
-                Aucune coordonnée client n'a été détectée dans l'analyse actuelle. Relancez
-                l'analyse depuis la page Importer avec la facture d'origine pour préremplir
-                le nom, l'adresse, l'email et le numéro client quand ils sont lisibles.
-              </p>
-              <Button onClick={handleForceAnalysis} disabled={isReloading} type="button" variant="secondary" className="whitespace-nowrap shrink-0">
-                {isReloading ? "Analyse..." : "Relancer l'analyse (IA)"}
-              </Button>
-            </>
+            <p>
+              Aucune coordonnée client n'a été détectée dans l'analyse actuelle. Complétez
+              les champs utiles ci-dessous avant l'envoi. Aucune nouvelle analyse n'est
+              nécessaire pour préparer le courrier.
+            </p>
           )}
         </div>
       ) : !isFollowupDraft && analysis && !hasDocumentProfiles(analysis) ? (
-        <div className="rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm leading-6 text-blue-900 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div className="rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm leading-6 text-blue-900">
           <p>
-            Les courriers actuels sont générés à partir d'une analyse rapide. Pour une personnalisation plus fine (coordonnées, détails des contrats), vous pouvez relancer une analyse IA complète.
+            Les courriers actuels sont générés à partir des informations disponibles. Vérifiez et complétez les champs manquants avant l'envoi.
           </p>
-          <Button onClick={handleForceAnalysis} disabled={isReloading} type="button" variant="secondary" className="whitespace-nowrap shrink-0">
-            {isReloading ? "Analyse..." : "Relancer l'analyse (IA)"}
-          </Button>
         </div>
       ) : null}
 
@@ -669,7 +724,7 @@ export function LettersPanel() {
 
       <div className="grid gap-6 xl:grid-cols-[minmax(320px,430px)_minmax(0,1fr)]">
         <div className="space-y-4 xl:sticky xl:top-24 xl:self-start">
-          {letters.map((letter) => (
+          {visibleLetters.map((letter) => (
             <Card
               className={
                 selectedLetterId === letter.id
@@ -796,8 +851,13 @@ export function LettersPanel() {
                   </h2>
                 </div>
                 <div className="flex flex-wrap gap-2">
+                  <Button onClick={persistSelectedLetter} type="button">
+                    {isFollowupDraft
+                      ? "Enregistrer la relance"
+                      : "Enregistrer comme préparé"}
+                  </Button>
                   <Button
-                    onClick={() => copyLetter(selectedLetter)}
+                    onClick={() => copyLetter(selectedLetter, renderedLetter)}
                     type="button"
                     variant="secondary"
                   >
@@ -837,9 +897,14 @@ export function LettersPanel() {
               {copyMessage ? (
                 <p className="mt-4 text-sm font-medium text-sage-700">{copyMessage}</p>
               ) : null}
-              <pre className="mt-6 max-h-[58vh] overflow-auto whitespace-pre-wrap rounded-xl border border-navy-100 bg-white px-5 py-6 font-sans text-sm leading-7 text-navy-900 shadow-sm sm:px-8">
-                {renderedLetter}
-              </pre>
+              <label className="mt-6 block text-sm font-semibold text-navy-900">
+                Contenu modifiable avant téléchargement
+                <textarea
+                  className="mt-2 min-h-[34rem] w-full whitespace-pre-wrap rounded-xl border border-navy-100 bg-white px-5 py-6 font-sans text-sm font-normal leading-7 text-navy-900 shadow-sm outline-none focus:border-sage-500 focus:ring-2 focus:ring-sage-500/20 sm:px-8"
+                  onChange={(event) => setLetterDraft(event.target.value)}
+                  value={renderedLetter}
+                />
+              </label>
             </Card>
           ) : null}
 

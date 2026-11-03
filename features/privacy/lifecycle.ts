@@ -7,6 +7,7 @@ import {
   storeUploadedDocuments
 } from "@/features/upload/storage";
 import { SELECTED_ALTERNATIVE_OFFER_STORAGE_KEY } from "@/features/recommendations/selected-offer";
+import { LETTER_TRACKING_STORAGE_PREFIX } from "./action-log";
 
 function removeAuditLocalStorageResidues(activeKeyCode?: string) {
   const prefixesToRemove = ["futeo_savings_"];
@@ -18,7 +19,13 @@ function removeAuditLocalStorageResidues(activeKeyCode?: string) {
     "futeo.uploadedDocumentsOwner",
     activeKeyCode
       ? `${REPORT_PORTFOLIO_STORAGE_KEY}.${activeKeyCode}`
-      : `${REPORT_PORTFOLIO_STORAGE_KEY}.anonymous`
+      : `${REPORT_PORTFOLIO_STORAGE_KEY}.anonymous`,
+    activeKeyCode
+      ? `${LETTER_TRACKING_STORAGE_PREFIX}.${activeKeyCode}`
+      : `${LETTER_TRACKING_STORAGE_PREFIX}.anonymous`,
+    activeKeyCode
+      ? `futeo.auditActions.${activeKeyCode}`
+      : "futeo.auditActions.anonymous"
   ];
 
   exactKeysToRemove.forEach((key) => window.localStorage.removeItem(key));

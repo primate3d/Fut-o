@@ -3,6 +3,7 @@ import { RequestError } from "@/lib/server/request-error";
 import {
   ExpenseSubcategory,
   type AccessKey,
+  type ContractDetails,
   type CustomerProfile,
   type DocumentUserCorrections,
   type Expense,
@@ -92,7 +93,31 @@ function getManualSubcategory(documentType: UploadedDocumentType) {
     return ExpenseSubcategory.TWO_WHEELER_INSURANCE;
   }
   if (documentType === "home_insurance") return ExpenseSubcategory.HOME_INSURANCE;
+  if (documentType === "car_insurance") return ExpenseSubcategory.CAR_INSURANCE;
   return ExpenseSubcategory.OTHER;
+}
+
+function getManualContractDetails(
+  documentType: UploadedDocumentType,
+  documentId: string,
+  monthlyAmount: number,
+  yearlyAmount: number,
+  internetTvIncluded: boolean,
+): ContractDetails | undefined {
+  const base = { version: 1 as const, source: "manual" as const, sourceDocumentId: documentId };
+  if (documentType === "internet_invoice") {
+    return {
+      ...base,
+      kind: "internet",
+      monthlyPrice: monthlyAmount,
+      includedServices: internetTvIncluded ? ["TV"] : undefined,
+    };
+  }
+  if (documentType === "electricity_invoice") return { ...base, kind: "electricity" };
+  if (documentType === "gas_invoice") return { ...base, kind: "gas" };
+  if (documentType === "car_insurance") return { ...base, kind: "car_insurance", annualPremium: yearlyAmount };
+  if (documentType === "home_insurance") return { ...base, kind: "home_insurance", annualPremium: yearlyAmount };
+  return undefined;
 }
 
 function getManualAmounts(
@@ -136,6 +161,68 @@ function mergeCustomer(
 
 function deduplicateById<T extends { id: string }>(current: T[], addition: T[]) {
   return Array.from(new Map([...current, ...addition].map((item) => [item.id, item])).values());
+}
+
+function normalizeContractIdentity(value?: string) {
+  return value?.trim().toLowerCase().replace(/\s+/g, " ") || undefined;
+}
+
+function getEnergyPeriodKey(expense: Expense) {
+  const details = expense.contractDetails;
+  if (!details || (details.kind !== "electricity" && details.kind !== "gas")) {
+    return undefined;
+  }
+  return details.period ? `${details.period.start}:${details.period.end}` : undefined;
+}
+
+function getRecurringContractKey(expense: Expense) {
+  if (!expense.isRecurring) return undefined;
+  const provider = normalizeContractIdentity(expense.provider);
+  const category = expense.subcategory ?? expense.category;
+  const contractNumber = normalizeContractIdentity(expense.contractNumber);
+  if (provider && contractNumber) {
+    return `${provider}:${category}:contract:${contractNumber}`;
+  }
+
+  const period = getEnergyPeriodKey(expense);
+  return provider && period ? `${provider}:${category}:period:${period}` : undefined;
+}
+
+function getEnergyDocumentKind(expense: Expense) {
+  const details = expense.contractDetails;
+  return details && (details.kind === "electricity" || details.kind === "gas")
+    ? details.documentKind
+    : undefined;
+}
+
+export function deduplicateRecurringContractExpenses(expenses: Expense[]) {
+  const result: Expense[] = [];
+  const indexByContract = new Map<string, number>();
+
+  for (const expense of expenses) {
+    const contractKey = getRecurringContractKey(expense);
+    if (!contractKey) {
+      result.push(expense);
+      continue;
+    }
+
+    const previousIndex = indexByContract.get(contractKey);
+    if (previousIndex === undefined) {
+      indexByContract.set(contractKey, result.length);
+      result.push(expense);
+      continue;
+    }
+
+    const previous = result[previousIndex];
+    const previousKind = getEnergyDocumentKind(previous);
+    const nextKind = getEnergyDocumentKind(expense);
+    if (previousKind === "INVOICE" && nextKind === "PAYMENT_SCHEDULE") {
+      continue;
+    }
+    result[previousIndex] = expense;
+  }
+
+  return result;
 }
 
 export function isManualDocument(document: UploadedDocument) {
@@ -303,6 +390,13 @@ export function buildManualAnalysis(input: ManualContractInput, key: AccessKey):
       recurrence: getManualRecurrence(frequency),
       billingAmount: amount,
       billingFrequency: frequency,
+      contractDetails: getManualContractDetails(
+        documentType,
+        documentId,
+        monthlyAmount,
+        yearlyAmount,
+        input.internetTvIncluded === true
+      ),
       ...(documentType === "mobile_invoice"
         ? {
             mobileDataGB,
@@ -400,7 +494,9 @@ export function applyMobileContractPreferences(
 export function mergeAnalyses(current: MockAnalysis | null, addition: MockAnalysis) {
   if (!current) return addition;
   const documents = deduplicateById(current.documents, addition.documents);
-  const expenses = deduplicateById(current.expenses, addition.expenses);
+  const expenses = deduplicateRecurringContractExpenses(
+    deduplicateById(current.expenses, addition.expenses)
+  );
   const recommendations = deduplicateById(current.recommendations, addition.recommendations);
   const anomalies = deduplicateById(current.anomalies, addition.anomalies);
 
@@ -425,6 +521,51 @@ export function mergeAnalyses(current: MockAnalysis | null, addition: MockAnalys
     totalMonthlyAmount: expenses.reduce((total, expense) => total + expense.monthlyAmount, 0),
     totalYearlyAmount: expenses.reduce((total, expense) => total + expense.yearlyAmount, 0),
     yearlyPotentialSavings: current.yearlyPotentialSavings + addition.yearlyPotentialSavings
+  } satisfies MockAnalysis;
+}
+
+export function filterAnalysisToDocuments(
+  analysis: MockAnalysis,
+  documents: UploadedDocument[]
+) {
+  const allowedDocumentIds = new Set(documents.map((document) => document.id));
+  for (const document of analysis.documents) {
+    if (isManualDocument(document)) allowedDocumentIds.add(document.id);
+  }
+
+  const filteredDocuments = analysis.documents.filter((document) =>
+    allowedDocumentIds.has(document.id)
+  );
+  if (filteredDocuments.length === analysis.documents.length) return analysis;
+
+  const expenses = analysis.expenses.filter(
+    (expense) => !expense.sourceDocumentId || allowedDocumentIds.has(expense.sourceDocumentId)
+  );
+  const remainingCategories = new Set(expenses.map((expense) => expense.category));
+
+  return {
+    ...analysis,
+    documents: filteredDocuments,
+    detectedParties: analysis.detectedParties
+      ? {
+          ...analysis.detectedParties,
+          documents: Object.fromEntries(
+            Object.entries(analysis.detectedParties.documents ?? {}).filter(([documentId]) =>
+              allowedDocumentIds.has(documentId)
+            )
+          )
+        }
+      : undefined,
+    expenses,
+    recommendations: analysis.recommendations.filter((recommendation) =>
+      remainingCategories.has(recommendation.category)
+    ),
+    anomalies: analysis.anomalies.filter((anomaly) =>
+      remainingCategories.has(anomaly.category)
+    ),
+    totalMonthlyAmount: expenses.reduce((total, expense) => total + expense.monthlyAmount, 0),
+    totalYearlyAmount: expenses.reduce((total, expense) => total + expense.yearlyAmount, 0),
+    yearlyPotentialSavings: 0
   } satisfies MockAnalysis;
 }
 

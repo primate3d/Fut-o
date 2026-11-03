@@ -58,6 +58,7 @@ import {
   isAnalysisForDocuments,
   storeMockAnalysis
 } from "./storage";
+import { ContractDetailsConfirmationPanel } from "./ContractDetailsConfirmationPanel";
 
 function formatCurrency(value: number) {
   return new Intl.NumberFormat("fr-FR", {
@@ -1465,6 +1466,16 @@ export function ResultsPanel() {
         </div>
       </Card>
 
+      <ContractDetailsConfirmationPanel
+        analysis={analysis}
+        onSaved={(updatedAnalysis) => {
+          setAnalysis(updatedAnalysis);
+          storeMockAnalysis(updatedAnalysis);
+          addAnalysisToReportPortfolio(updatedAnalysis);
+          void loadAlternatives(updatedAnalysis);
+        }}
+      />
+
       <Card>
         <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <div>
@@ -1633,7 +1644,8 @@ export function ResultsPanel() {
             })
           ) : (
             <p className="text-sm text-slate-600">
-              Aucune alternative détaillée disponible pour l'instant.
+              {comparisonMessage ??
+                "Aucune offre vérifiée plus avantageuse n'a été identifiée avec les informations actuellement disponibles. Votre contrat reste affiché et vous pouvez compléter les informations demandées avant de relancer la comparaison."}
             </p>
           )}
         </div>

@@ -5,7 +5,9 @@
   "scripts": {
     "test:phase1": "tsx --test tests/phase1.test.ts",
     "test:mobile-catalog": "tsx --test tests/mobile-catalog.test.ts",
+    "test:commercial-catalog": "tsx --test tests/commercial-catalog.test.ts",
     "mobile:refresh": "tsx scripts/refresh-mobile-catalog.ts",
+    "commercial:refresh": "tsx scripts/refresh-commercial-catalog.ts",
     "dev": "next dev",
     "build": "next build",
     "start": "next start",

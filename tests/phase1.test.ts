@@ -21,6 +21,7 @@ import {
   ExpenseCategory,
   ExpenseSubcategory,
   type Expense,
+  type GeneratedLetter,
   type MockAnalysis,
   type UploadedDocument
 } from "../types";
@@ -138,6 +139,9 @@ before(async () => {
     await sql.unsafe(statement);
   }
   await sql.unsafe(await fs.readFile("drizzle/0002_mobile_catalog.sql", "utf8"));
+  for (const statement of (await fs.readFile("drizzle/0003_commercial_catalog.sql", "utf8")).split("--> statement-breakpoint")) {
+    await sql.unsafe(statement);
+  }
   repo = await import("../lib/server/db");
   free = await import("../lib/server/free-access");
 }, { timeout: 120000 });
@@ -240,6 +244,13 @@ async function replaceDocumentsRequest(
 
 function analysisRequest(code: string, documents: unknown[]) {
   return new Request("http://local.test/api/analyse", { method: "POST", body: JSON.stringify({ code, documents, force: true }) });
+}
+
+function incrementalAnalysisRequest(code: string, documents: unknown[]) {
+  return new Request("http://local.test/api/analyse", {
+    method: "POST",
+    body: JSON.stringify({ code, documents, incremental: true })
+  });
 }
 
 function manualAnalysisRequest(
@@ -690,6 +701,300 @@ test("analysis rejects foreign documents, forged paths and duplicate IDs before 
   assert.equal((await repo.findKeyByCode(key.code))!.usesRemaining, 10);
 });
 
+test("import analysis selection keeps review documents but sends only ready documents", async () => {
+  const { getAnalysisStartMessage, partitionDocumentsForAnalysis } = await import(
+    "../features/upload/analysis-selection"
+  );
+  const ready = { ...householdDocuments[0], id: randomUUID(), status: "ready" as const };
+  const review = {
+    ...householdDocuments[1],
+    id: randomUUID(),
+    status: "error" as const,
+    statusDetail: "Type ou contenu de fichier non autorise"
+  };
+  const selection = partitionDocumentsForAnalysis([ready, review]);
+
+  assert.deepEqual(selection.usableDocuments.map((document) => document.id), [ready.id]);
+  assert.deepEqual(selection.skippedDocuments.map((document) => document.id), [review.id]);
+  assert.match(getAnalysisStartMessage(1, 1), /1 document\(s\) à revoir/);
+  assert.match(getAnalysisStartMessage(0, 2), /Aucun document utilisable/);
+});
+
+test("analysis completion reuses the saved result even when documents have corrections", async () => {
+  const { selectReusableAnalysis } = await import("../features/analysis/storage");
+  const document = {
+    ...householdDocuments[0],
+    id: randomUUID(),
+    userCorrections: { provider: "EDF", documentType: "electricity_invoice" as const }
+  };
+  const saved = emptyAnalysis("REUSABLE");
+  saved.documents = [document];
+  saved.expenses = [{
+    id: "expense-reusable",
+    label: "Electricité",
+    provider: "EDF",
+    category: ExpenseCategory.ENERGY,
+    subcategory: ExpenseSubcategory.ELECTRICITY,
+    monthlyAmount: 100,
+    yearlyAmount: 1200,
+    isRecurring: true,
+    recurrence: "monthly",
+    sourceDocumentId: document.id,
+    documentType: "electricity_invoice"
+  }];
+  saved.totalMonthlyAmount = 100;
+  saved.totalYearlyAmount = 1200;
+
+  assert.equal(selectReusableAnalysis([saved], [document]), saved);
+  assert.equal(
+    selectReusableAnalysis([saved], [{ ...document, id: randomUUID() }]),
+    null
+  );
+
+  const source = await fs.readFile("features/analysis/AnalysisRunner.tsx", "utf8");
+  assert.match(source, /router\.replace\("\/resultats"\)/);
+  assert.doesNotMatch(source, /hasEnrichedCurrentAnalysis\s*&&\s*!hasCorrectedDocuments/);
+  assert.match(source, /setHasFailed\(true\)[\s\S]{0,120}setIsComplete\(false\)/);
+});
+
+test("a mixed ready and review import analyzes only the usable server document", async () => {
+  const { POST } = await import("../app/api/analyse/route");
+  const { partitionDocumentsForAnalysis } = await import(
+    "../features/upload/analysis-selection"
+  );
+  const key = fakeKey();
+  await repo.saveKey(key);
+  const readyId = randomUUID();
+  const ready = (await (await uploadRequest(key.code, readyId)).json()).document as UploadedDocument;
+  const review = {
+    ...householdDocuments[0],
+    id: randomUUID(),
+    status: "error" as const,
+    statusDetail: "OCR à revoir"
+  };
+  aiReply = remapAiPayload({ mobile: readyId });
+
+  const { usableDocuments, skippedDocuments } = partitionDocumentsForAnalysis([ready, review]);
+  const response = await POST(analysisRequest(key.code, usableDocuments));
+
+  assert.equal(response.status, 200);
+  assert.equal(skippedDocuments.length, 1);
+  assert.equal(((await response.json()) as { analysis: MockAnalysis }).analysis.documents.length, 1);
+  assert.equal((await repo.findKeyByCode(key.code))?.usesRemaining, 9);
+});
+
+test("adding a document analyzes only the new source and preserves the existing contract", async () => {
+  const { POST } = await import("../app/api/analyse/route");
+  const key = fakeKey();
+  await repo.saveKey(key);
+
+  const firstId = randomUUID();
+  const firstDocument = (await (await uploadRequest(
+    key.code,
+    firstId,
+    undefined,
+    "edf"
+  )).json()).document as UploadedDocument;
+  aiReply = remapAiPayload({ edf: firstId });
+  const callsBeforeFirstAnalysis = aiRequests;
+  const firstResponse = await POST(incrementalAnalysisRequest(key.code, [firstDocument]));
+  assert.equal(firstResponse.status, 200);
+  const firstPayload = await firstResponse.json() as {
+    analysis: MockAnalysis;
+    analyzedDocumentCount: number;
+  };
+  assert.equal(firstPayload.analyzedDocumentCount, 1);
+  assert.equal(aiRequests, callsBeforeFirstAnalysis + 1);
+  assert.equal((await repo.findKeyByCode(key.code))?.usesRemaining, 9);
+  const preservedExpense = firstPayload.analysis.expenses.find(
+    (expense) => expense.sourceDocumentId === firstId
+  );
+  assert.ok(preservedExpense);
+
+  const secondId = randomUUID();
+  const secondDocument = (await (await uploadRequest(
+    key.code,
+    secondId,
+    undefined,
+    "sfr"
+  )).json()).document as UploadedDocument;
+  aiReply = remapAiPayload({ sfr: secondId });
+  const callsBeforeSecondAnalysis = aiRequests;
+  const secondResponse = await POST(
+    incrementalAnalysisRequest(key.code, [firstDocument, secondDocument])
+  );
+  assert.equal(secondResponse.status, 200);
+  const secondPayload = await secondResponse.json() as {
+    analysis: MockAnalysis;
+    analyzedDocumentCount: number;
+  };
+  assert.equal(secondPayload.analyzedDocumentCount, 1);
+  assert.equal(aiRequests, callsBeforeSecondAnalysis + 1);
+  assert.equal((await repo.findKeyByCode(key.code))?.usesRemaining, 8);
+  assert.deepEqual(
+    secondPayload.analysis.documents.map((document) => document.id).sort(),
+    [firstId, secondId].sort()
+  );
+  assert.equal(
+    secondPayload.analysis.expenses.find((expense) => expense.sourceDocumentId === firstId)?.id,
+    preservedExpense.id
+  );
+
+  const callsBeforeRetry = aiRequests;
+  const retryResponse = await POST(
+    incrementalAnalysisRequest(key.code, [firstDocument, secondDocument])
+  );
+  assert.equal(retryResponse.status, 200);
+  assert.equal((await retryResponse.json() as { cached: boolean }).cached, true);
+  assert.equal(aiRequests, callsBeforeRetry);
+  assert.equal((await repo.findKeyByCode(key.code))?.usesRemaining, 8);
+});
+
+test("contract deduplication uses a strong identity and prefers an invoice over a schedule", async () => {
+  const { mergeAnalyses } = await import("../lib/server/manual-analysis");
+  const scheduleDocument = { ...householdDocuments[0], id: "energy-schedule" };
+  const invoiceDocument = { ...householdDocuments[0], id: "energy-invoice" };
+  const baseExpense: Expense = {
+    id: "schedule-expense",
+    label: "Contrat EDF",
+    provider: "EDF",
+    category: ExpenseCategory.ENERGY,
+    subcategory: ExpenseSubcategory.ELECTRICITY,
+    isRecurring: true,
+    monthlyAmount: 100,
+    yearlyAmount: 1200,
+    recurrence: "monthly",
+    documentType: "electricity_invoice",
+    sourceDocumentId: scheduleDocument.id,
+    contractNumber: "CONTRACT-001",
+    contractDetails: {
+      version: 1,
+      source: "document",
+      sourceDocumentId: scheduleDocument.id,
+      kind: "electricity",
+      documentKind: "PAYMENT_SCHEDULE"
+    }
+  };
+  const scheduleAnalysis: MockAnalysis = {
+    ...emptyAnalysis("dedup-schedule"),
+    documents: [scheduleDocument],
+    expenses: [baseExpense],
+    totalMonthlyAmount: 100,
+    totalYearlyAmount: 1200
+  };
+  const invoiceExpense: Expense = {
+    ...baseExpense,
+    id: "invoice-expense",
+    sourceDocumentId: invoiceDocument.id,
+    monthlyAmount: 95,
+    yearlyAmount: 1140,
+    contractDetails: {
+      version: 1,
+      source: "document",
+      sourceDocumentId: invoiceDocument.id,
+      kind: "electricity",
+      documentKind: "INVOICE"
+    }
+  };
+  const invoiceAnalysis: MockAnalysis = {
+    ...emptyAnalysis("dedup-invoice"),
+    documents: [invoiceDocument],
+    expenses: [invoiceExpense],
+    totalMonthlyAmount: 95,
+    totalYearlyAmount: 1140
+  };
+
+  const merged = mergeAnalyses(scheduleAnalysis, invoiceAnalysis);
+  assert.equal(merged.expenses.length, 1);
+  assert.equal(merged.expenses[0].id, invoiceExpense.id);
+  assert.equal(merged.totalYearlyAmount, 1140);
+
+  const distinctContract = {
+    ...invoiceExpense,
+    id: "second-contract",
+    contractNumber: "CONTRACT-002"
+  };
+  const withDistinctContract = mergeAnalyses(merged, {
+    ...emptyAnalysis("dedup-distinct"),
+    documents: [{ ...invoiceDocument, id: "second-contract-document" }],
+    expenses: [distinctContract],
+    totalMonthlyAmount: distinctContract.monthlyAmount,
+    totalYearlyAmount: distinctContract.yearlyAmount
+  });
+  assert.equal(withDistinctContract.expenses.length, 2);
+});
+
+test("server document loading preserves local documents that still need review", async () => {
+  const originalWindow = globalThis.window;
+  const originalFetch = globalThis.fetch;
+  const localReady = { ...householdDocuments[0], id: randomUUID(), status: "ready" as const };
+  const localReview = {
+    ...householdDocuments[1],
+    id: randomUUID(),
+    status: "error" as const,
+    statusDetail: "Fichier trop volumineux"
+  };
+  const values = new Map<string, string>();
+  Object.defineProperty(globalThis, "window", {
+    configurable: true,
+    value: {
+      localStorage: {
+        getItem: (key: string) => values.get(key) ?? null,
+        setItem: (key: string, value: string) => values.set(key, value),
+        removeItem: (key: string) => values.delete(key)
+      },
+      setTimeout,
+      clearTimeout
+    }
+  });
+
+  try {
+    const { storeAccessKey } = await import("../features/billing/access-keys");
+    storeAccessKey(fakeKey());
+    values.set("futeo.uploadedDocuments", JSON.stringify([localReady, localReview]));
+    globalThis.fetch = async () => Response.json({ documents: [localReady] });
+    const { getStoredUploadedDocumentsServer } = await import("../features/upload/storage");
+    const loaded = await getStoredUploadedDocumentsServer();
+    assert.deepEqual(loaded.map((document) => document.id), [localReady.id, localReview.id]);
+    assert.equal(loaded[1].statusDetail, "Fichier trop volumineux");
+  } finally {
+    globalThis.fetch = originalFetch;
+    Object.defineProperty(globalThis, "window", {
+      configurable: true,
+      value: originalWindow
+    });
+  }
+});
+
+test("JPEG uploads accept common MIME aliases only with a valid JPEG signature", async () => {
+  const { validateUpload } = await import("../lib/server/document-validation");
+  const metadata = {
+    id: randomUUID(),
+    documentType: "electricity_invoice" as const,
+    provider: "EDF"
+  };
+  const jpegBytes = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46, 0x49, 0x46]);
+
+  for (const mimeType of ["image/jpeg", "image/jpg", "image/pjpeg"]) {
+    const result = await validateUpload(
+      new File([jpegBytes], "facture edf.jpeg", { type: mimeType }),
+      metadata
+    );
+    assert.equal(result.document.status, "ready");
+    assert.equal(result.document.mimeType, "image/jpeg");
+  }
+
+  await assert.rejects(
+    validateUpload(
+      new File([new Uint8Array([0x00, 0x01, 0x02])], "facture edf.jpeg", {
+        type: "image/jpeg"
+      }),
+      metadata
+    ),
+    /Type ou contenu de fichier non autorise/
+  );
+});
+
 test("one credit: concurrent analysis is rejected before AI and only one result is committed", async () => {
   const { POST } = await import("../app/api/analyse/route");
   const key = { ...fakeKey(), usesRemaining: 1 }; await repo.saveKey(key);
@@ -760,6 +1065,19 @@ test("mixed EDF / MACIF multi-contract / SFR box / mobile preserves every docume
   const { generateLettersFromAnalysis, renderLetter } = await import("../features/letters/service");
   const letters = generateLettersFromAnalysis(result);
   assert.ok(letters.length > 0);
+  assert.ok(letters.every((letter) => letter.potentialSaving === 0));
+  assert.ok(letters.every((letter) => !letter.offerName));
+  assert.ok(
+    letters.every((letter) =>
+      result.expenses.some((expense) => expense.id === letter.sourceExpenseId)
+    )
+  );
+  const mobileLetter = letters.find(
+    (letter) => letter.sourceExpenseId === result.expenses.find(
+      (expense) => expense.sourceDocumentId === "mobile"
+    )?.id
+  );
+  assert.match(mobileLetter?.bodyTemplate ?? "", /100 Go inclus/);
   const text = renderLetter(letters[0], { firstName: "Jean", lastName: "DUPONT", address: "1 rue Exemple", customerNumber: "12345678", email: "test@example.invalid" });
   assert.ok(text.includes("DUPONT"));
   const { summarizeExpensesByCategory } = await import("../lib/expense-summary");
@@ -780,6 +1098,152 @@ test("mixed EDF / MACIF multi-contract / SFR box / mobile preserves every docume
   assert.ok(report?.startsWith("%PDF-"));
   for (const provider of ["EDF", "MACIF", "SFR", "NRJ Mobile"]) assert.ok(report.includes(provider), `PDF missing ${provider}`);
   assert.ok(report.includes("Autres possibilites pour reduire votre facture"));
+});
+
+test("the report targets existing letters without triggering a second analysis", async () => {
+  const reportSource = await fs.readFile("features/reports/ReportPanel.tsx", "utf8");
+  const lettersSource = await fs.readFile("features/letters/LettersPanel.tsx", "utf8");
+
+  assert.match(
+    reportSource,
+    /\/courriers\?expenseId=\$\{encodeURIComponent\(expenseId\)\}&returnTo=rapport/
+  );
+  assert.match(reportSource, /Choisir un courrier/);
+  assert.doesNotMatch(reportSource, /refreshStoredAnalysisServer/);
+  assert.doesNotMatch(reportSource, /findAlternativeOffers/);
+  assert.match(lettersSource, /letter\.sourceExpenseId === selectedExpenseId/);
+  assert.match(lettersSource, /visibleLetters\.map/);
+  assert.match(lettersSource, /Contenu modifiable avant téléchargement/);
+  assert.match(lettersSource, /savePreparedLetter\(letterAuditId, snapshot\)/);
+  assert.match(lettersSource, /saveFollowupLetter\(sourceLetterRecordId, snapshot\)/);
+  assert.match(reportSource, /Courrier préparé le/);
+  assert.match(reportSource, /Relance préparée le/);
+  assert.match(reportSource, /Confirmer l&apos;envoi/);
+  assert.doesNotMatch(lettersSource, /handleForceAnalysis|deleteStoredAnalysisServer/);
+  const letterServiceSource = await fs.readFile("features/letters/service.ts", "utf8");
+  assert.doesNotMatch(letterServiceSource, /findAlternativeOffers/);
+});
+
+test("letter tracking persists prepared, sent and follow-up states without duplicates", async () => {
+  const originalWindow = globalThis.window;
+  const firstKey = fakeKey("FF-11111111-22222222-33333333");
+  const secondKey = fakeKey("FF-AAAAAAAA-BBBBBBBB-CCCCCCCC");
+  const values = new Map<string, string>([
+    ["futeo.activeAccessKey", JSON.stringify(firstKey)]
+  ]);
+  const sessionValues = new Map<string, string>();
+  const storage = (entries: Map<string, string>) => ({
+    getItem: (key: string) => entries.get(key) ?? null,
+    setItem: (key: string, value: string) => entries.set(key, value),
+    removeItem: (key: string) => entries.delete(key),
+    clear: () => entries.clear(),
+    key: (index: number) => [...entries.keys()][index] ?? null,
+    get length() { return entries.size; }
+  });
+  Object.defineProperty(globalThis, "window", {
+    configurable: true,
+    value: {
+      localStorage: storage(values),
+      sessionStorage: storage(sessionValues)
+    }
+  });
+
+  const initialLetter: GeneratedLetter = {
+    id: "letter-expense-energy-negotiation",
+    sourceExpenseId: "expense-energy",
+    type: "price_negotiation",
+    provider: "EDF",
+    category: ExpenseCategory.ENERGY,
+    potentialSaving: 0,
+    monthlyAmount: 100,
+    yearlyAmount: 1200,
+    subject: "Demande de révision",
+    title: "Négociation du contrat",
+    bodyTemplate: "Bonjour"
+  };
+  const personalization = {
+    firstName: "Jean",
+    lastName: "DUPONT",
+    address: "1 rue Exemple",
+    customerNumber: "12345678",
+    email: "test@example.invalid"
+  };
+
+  try {
+    const {
+      addAuditActionLog,
+      confirmLetterSent,
+      getStoredLetterRecord,
+      getStoredLetterRecords,
+      saveFollowupLetter,
+      savePreparedLetter
+    } = await import("../features/privacy/action-log");
+    const initialSnapshot = {
+      letter: initialLetter,
+      personalization,
+      documentName: "facture.pdf",
+      renderedContent: "Courrier personnalisé"
+    };
+
+    const prepared = savePreparedLetter("audit-one", initialSnapshot);
+    assert.ok(prepared);
+    assert.equal(savePreparedLetter("audit-one", initialSnapshot)?.id, prepared.id);
+    assert.equal(getStoredLetterRecords("audit-one").length, 1);
+    assert.equal(getStoredLetterRecord(prepared.id)?.status, "prepared");
+
+    addAuditActionLog({
+      type: "letter_downloaded",
+      label: "Courrier téléchargé",
+      provider: "EDF",
+      letterSnapshot: initialSnapshot
+    });
+    assert.equal(getStoredLetterRecord(prepared.id)?.status, "prepared");
+
+    const sentAt = "2026-11-03T10:00:00.000Z";
+    assert.equal(confirmLetterSent(prepared.id, sentAt)?.status, "sent");
+    assert.equal(getStoredLetterRecord(prepared.id)?.sentAt, sentAt);
+
+    const followupLetter: GeneratedLetter = {
+      ...initialLetter,
+      id: "followup-expense-energy",
+      type: "provider_followup",
+      title: "Relance du fournisseur"
+    };
+    const followupSnapshot = {
+      ...initialSnapshot,
+      letter: followupLetter,
+      renderedContent: "Relance personnalisée"
+    };
+    const followup = saveFollowupLetter(prepared.id, followupSnapshot);
+    assert.ok(followup);
+    assert.equal(saveFollowupLetter(prepared.id, followupSnapshot)?.id, followup.id);
+    assert.equal(getStoredLetterRecords("audit-one").length, 2);
+    assert.equal(getStoredLetterRecord(prepared.id)?.status, "sent");
+    assert.equal(getStoredLetterRecord(followup.id)?.parentRecordId, prepared.id);
+
+    const secondContract = savePreparedLetter("audit-one", {
+      ...initialSnapshot,
+      letter: {
+        ...initialLetter,
+        id: "letter-expense-internet-cancellation",
+        sourceExpenseId: "expense-internet",
+        provider: "SFR",
+        type: "subscription_cancellation"
+      }
+    });
+    assert.ok(secondContract);
+    assert.equal(getStoredLetterRecords("audit-one").length, 3);
+
+    values.set("futeo.activeAccessKey", JSON.stringify(secondKey));
+    assert.deepEqual(getStoredLetterRecords("audit-one"), []);
+    values.set("futeo.activeAccessKey", JSON.stringify(firstKey));
+    assert.equal(getStoredLetterRecords("audit-one").length, 3);
+  } finally {
+    Object.defineProperty(globalThis, "window", {
+      configurable: true,
+      value: originalWindow
+    });
+  }
 });
 
 test("OpenAI SDK keeps the existing mocked chat completions contract", async () => {
@@ -1773,7 +2237,7 @@ test("letters API enforces key, expiration, plan and server-owned analysis", asy
   assert.doesNotMatch(payload, /SFR/);
 });
 
-test("alternatives API ignores browser expenses and uses the key-owned analysis", async () => {
+test("alternatives API ignores browser expenses and does not expose static non-mobile offers", async () => {
   const owner = fakeKey();
   const foreign = fakeKey();
   await repo.saveKey(owner);
@@ -1797,7 +2261,7 @@ test("alternatives API ignores browser expenses and uses the key-owned analysis"
   const payload = (await response.json()) as {
     alternatives: Array<{ sourceExpenseId?: string }>;
   };
-  assert.ok(payload.alternatives.length > 0);
+  assert.equal(payload.alternatives.length, 0);
   assert.ok(payload.alternatives.every(
     (offer) => offer.sourceExpenseId === ownerAnalysis.expenses[0].id
   ));
@@ -1928,6 +2392,124 @@ test("mobile catalog refresh rejects a concurrent collection without corrupting 
   release();
   await first;
   assert.equal((await sql`select count(*)::int as count from mobile_catalog_sources where provider='NRJ Mobile'`)[0].count, 1);
+});
+
+test("commercial catalog persists verified Internet offers and keeps the last valid collection", async () => {
+  const { refreshCommercialCatalog, loadCommercialCatalog } = await import(
+    "../lib/server/commercial-catalog"
+  );
+  const { parseInternetOffers } = await import(
+    "../experiments/commercial-catalog/internet/collector"
+  );
+  const { INTERNET_SOURCES } = await import(
+    "../experiments/commercial-catalog/source-registry"
+  );
+  const source = INTERNET_SOURCES[0];
+  const collectedAt = new Date("2026-11-03T10:00:00.000Z");
+  const html = await fs.readFile(
+    "experiments/commercial-catalog/fixtures/internet-boxes.html",
+    "utf8"
+  );
+  const parsed = parseInternetOffers(html, source, collectedAt.toISOString());
+  const result = {
+    source,
+    retrievedAt: collectedAt.toISOString(),
+    offers: parsed.offers,
+    failures: parsed.failures,
+    discoveredSources: [],
+    cache: { etag: "catalog-v1", lastModified: null, contentHash: "hash-v1" },
+    notModified: false
+  };
+
+  const report = await refreshCommercialCatalog(
+    "internet",
+    [source],
+    async () => result,
+    collectedAt
+  );
+  assert.equal(report.successfulCollections, 1);
+  assert.equal(report.verifiedOffers, 1);
+  const firstLoad = await loadCommercialCatalog("internet", collectedAt);
+  const secondLoad = await loadCommercialCatalog("internet", collectedAt);
+  assert.equal(firstLoad.status, "fresh");
+  assert.equal(firstLoad.offers.length, 1);
+  assert.equal(firstLoad.offers[0]?.catalogId, secondLoad.offers[0]?.catalogId);
+
+  const failedAt = new Date(collectedAt.getTime() + 60_000);
+  const failed = await refreshCommercialCatalog(
+    "internet",
+    [source],
+    async () => ({
+      ...result,
+      retrievedAt: failedAt.toISOString(),
+      offers: [],
+      failures: [{
+        code: "STRUCTURE_CHANGED",
+        message: "Structure invalide simulee",
+        sourceUrl: source.sourceUrl
+      }],
+      cache: { etag: "broken-v2", lastModified: null, contentHash: "broken-hash" }
+    }),
+    failedAt
+  );
+  assert.equal(failed.failedCollections, 1);
+  const afterFailure = await loadCommercialCatalog("internet", failedAt);
+  assert.equal(afterFailure.offers.length, 1);
+  assert.equal(afterFailure.offers[0]?.offerName, "Box Fibre Essentiel");
+  const [stored] = await sql`select offers, etag, content_hash, last_error from commercial_catalog_sources where id=${source.id}`;
+  assert.equal(stored.offers.length, 2);
+  assert.equal(stored.etag, "catalog-v1");
+  assert.equal(stored.content_hash, "hash-v1");
+  assert.equal(stored.last_error[0].code, "STRUCTURE_CHANGED");
+
+  const stale = await loadCommercialCatalog(
+    "internet",
+    new Date(collectedAt.getTime() + 73 * 60 * 60 * 1000)
+  );
+  assert.equal(stale.status, "stale");
+  assert.equal(stale.offers.length, 0);
+});
+
+test("commercial catalog rejects concurrent refreshes for the same sector", async () => {
+  const { refreshCommercialCatalog } = await import("../lib/server/commercial-catalog");
+  const { INTERNET_SOURCES } = await import(
+    "../experiments/commercial-catalog/source-registry"
+  );
+  const source = INTERNET_SOURCES[0];
+  const [stored] = await sql`select offers, retrieved_at, etag, content_hash from commercial_catalog_sources where id=${source.id}`;
+  let release!: () => void;
+  let started!: () => void;
+  const waiting = new Promise<void>((resolve) => { release = resolve; });
+  const hasStarted = new Promise<void>((resolve) => { started = resolve; });
+  const result = {
+    source,
+    retrievedAt: stored.retrieved_at as string,
+    offers: stored.offers,
+    failures: [],
+    discoveredSources: [],
+    cache: {
+      etag: stored.etag as string,
+      lastModified: null,
+      contentHash: stored.content_hash as string
+    },
+    notModified: false
+  };
+  const first = refreshCommercialCatalog("internet", [source], async () => {
+    started();
+    await waiting;
+    return result;
+  });
+  await hasStarted;
+  await assert.rejects(
+    refreshCommercialCatalog("internet", [source], async () => result),
+    /deja en cours/
+  );
+  release();
+  await first;
+  assert.equal(
+    (await sql`select count(*)::int as count from commercial_catalog_sources where id=${source.id}`)[0].count,
+    1
+  );
 });
 
 test("results, report and letters use the same fresh certified mobile offer", async () => {

@@ -78,3 +78,27 @@ export const mobileCatalogSources = pgTable("mobile_catalog_sources", {
   lastError: jsonb("last_error").$type<unknown[] | null>(),
   updatedAt: text("updated_at").notNull(),
 });
+
+export const commercialCatalogSources = pgTable("commercial_catalog_sources", {
+  id: text("id").primaryKey(),
+  sector: text("sector").notNull(),
+  provider: text("provider").notNull(),
+  sourceUrl: text("source_url").notNull(),
+  officialHost: text("official_host").notNull(),
+  sourceStatus: text("source_status").notNull(),
+  parser: text("parser").notNull(),
+  offers: jsonb("offers").$type<unknown[]>().notNull(),
+  etag: text("etag"),
+  lastModified: text("last_modified"),
+  contentHash: text("content_hash"),
+  retrievedAt: text("retrieved_at"),
+  lastAttemptAt: text("last_attempt_at"),
+  lastSuccessAt: text("last_success_at"),
+  lastError: jsonb("last_error").$type<unknown[] | null>(),
+  discoveredAt: text("discovered_at").notNull(),
+  approvedAt: text("approved_at"),
+  updatedAt: text("updated_at").notNull(),
+}, (table) => [
+  uniqueIndex("commercial_catalog_sector_url_unique").on(table.sector, table.sourceUrl),
+  index("commercial_catalog_sector_status_idx").on(table.sector, table.sourceStatus),
+]);

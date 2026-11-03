@@ -48,6 +48,10 @@ import {
   storeDocumentCorrections,
   storeUploadedDocuments
 } from "./storage";
+import {
+  getAnalysisStartMessage,
+  partitionDocumentsForAnalysis
+} from "./analysis-selection";
 
 const acceptedExtensions = ".pdf,.jpg,.jpeg,.png,.csv";
 
@@ -105,8 +109,22 @@ function hasAcceptedFileType(file: File) {
   );
 }
 
+function getLocalFileValidationError(file: File) {
+  if (file.size <= 0) {
+    return "Le fichier est vide.";
+  }
+  if (file.size > MAX_UPLOAD_SIZE_BYTES) {
+    return "Le fichier dépasse la taille maximale de 10 Mo.";
+  }
+  if (!hasAcceptedFileType(file)) {
+    return "Le format de ce fichier n'est pas pris en charge.";
+  }
+  return undefined;
+}
+
 function createDocumentFromFile(file: File): UploadedDocument {
   const documentType = detectDocumentType(file.name);
+  const validationError = getLocalFileValidationError(file);
 
   return {
     id: crypto.randomUUID(),
@@ -116,10 +134,8 @@ function createDocumentFromFile(file: File): UploadedDocument {
     documentType,
     detectedCategory: getCategoryForDocumentType(documentType),
     provider: inferProviderFromFileName(file.name),
-    status:
-      file.size <= MAX_UPLOAD_SIZE_BYTES && hasAcceptedFileType(file)
-        ? "ready"
-        : "error",
+    status: validationError ? "error" : "ready",
+    statusDetail: validationError,
     uploadedAt: new Date().toISOString()
   };
 }
@@ -146,6 +162,7 @@ export function ImportDocumentsPanel() {
   const [isUploading, setIsUploading] = useState(false);
   const [hasLoadedDocuments, setHasLoadedDocuments] = useState(false);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
+  const [analysisStatusMessage, setAnalysisStatusMessage] = useState<string | null>(null);
   const [complianceError, setComplianceError] = useState<{
     extractedName: string;
     profileName: string;
@@ -264,6 +281,7 @@ export function ImportDocumentsPanel() {
           setDocumentCorrections({});
           clearStoredDocumentCorrections();
           clearStoredAnalysis();
+          window.localStorage.removeItem(SELECTED_ALTERNATIVE_OFFER_STORAGE_KEY);
           setHasExistingAudit(false);
           setPendingFiles(null);
           setStatusMessage(
@@ -325,7 +343,16 @@ export function ImportDocumentsPanel() {
       let failedCount = 0;
 
       for (let index = 0; index < filesArray.length; index += 1) {
-        const { uploadingDocument } = preparedDocuments[index];
+        const { localDocument, uploadingDocument } = preparedDocuments[index];
+        if (localDocument.status === "error") {
+          failedCount += 1;
+          setDocuments((current) =>
+            current.map((document) =>
+              document.id === uploadingDocument.id ? localDocument : document
+            )
+          );
+          continue;
+        }
         try {
           const serverDocument = await storeUploadedDocumentServer(
             uploadingDocument,
@@ -337,12 +364,16 @@ export function ImportDocumentsPanel() {
               document.id === uploadingDocument.id ? serverDocument : document
             )
           );
-        } catch {
+        } catch (error) {
           failedCount += 1;
+          const statusDetail =
+            error instanceof Error
+              ? error.message
+              : "L'enregistrement serveur du document a échoué.";
           setDocuments((current) =>
             current.map((document) =>
               document.id === uploadingDocument.id
-                ? { ...document, status: "error" }
+                ? { ...document, status: "error", statusDetail }
                 : document
             )
           );
@@ -350,9 +381,6 @@ export function ImportDocumentsPanel() {
       }
 
       setPendingFiles(null);
-      if (uploadedCount > 0) {
-        clearStoredAnalysis();
-      }
       setStatusMessage(
         failedCount > 0
           ? `${uploadedCount} document(s) ajouté(s), ${failedCount} échec(s) d'enregistrement serveur.`
@@ -443,36 +471,45 @@ export function ImportDocumentsPanel() {
   }
 
   async function launchAnalysis() {
-    const usableDocuments = documents.filter((document) => document.status === "ready");
+    const { usableDocuments, skippedDocuments } = partitionDocumentsForAnalysis(documents);
 
     if (usableDocuments.length === 0 || isAnalyzing) {
-      setStatusMessage("Ajoutez au moins un fichier utilisable avant de lancer l'analyse.");
+      setAnalysisStatusMessage(getAnalysisStartMessage(0, skippedDocuments.length));
       return;
     }
 
     const activeKey = getStoredAccessKey();
+    if (!activeKey) {
+      setAnalysisStatusMessage(
+        "Votre clé d'accès n'est plus disponible dans ce navigateur. Réactivez-la puis relancez l'analyse."
+      );
+      return;
+    }
     const usableDocumentsWithCorrections = applyDocumentCorrections(usableDocuments);
 
     if (activeKey?.plan === "decouverte" && usableDocumentsWithCorrections.length > 1) {
-      setStatusMessage("L'accès Découverte est limité à 1 document maximum. Passez à la Formule Famille pour analyser plusieurs documents.");
+      setAnalysisStatusMessage("L'accès Découverte est limité à 1 document maximum. Passez à la Formule Famille pour analyser plusieurs documents.");
       return;
     }
 
     if (isAuditFoyerPlan(activeKey?.plan)) {
       const validation = validateAuditFoyerDocuments(activeKey?.plan, usableDocumentsWithCorrections);
       if (!validation.isValid) {
-        setStatusMessage(validation.message || "Limite dépassée pour ce plan.");
+        setAnalysisStatusMessage(validation.message || "Limite dépassée pour ce plan.");
         return;
       }
     }
 
     setIsAnalyzing(true);
     setComplianceError(null);
+    setAnalysisStatusMessage(
+      getAnalysisStartMessage(usableDocuments.length, skippedDocuments.length)
+    );
 
     try {
       console.info("[FUTEO_ANALYSIS_POST]", {
         documentCount: usableDocumentsWithCorrections.length,
-        force: true
+        incremental: true
       });
       const response = await fetch("/api/analyse", {
         method: "POST",
@@ -482,10 +519,10 @@ export function ImportDocumentsPanel() {
         body: JSON.stringify({
           documents: usableDocumentsWithCorrections,
           code: activeKey?.code,
-          force: true
+          incremental: true
         })
       });
-      const payload = (await response.json()) as {
+      const payload = (await response.json().catch(() => ({}))) as {
         analysis?: MockAnalysis;
         error?: string;
         details?: string;
@@ -495,12 +532,13 @@ export function ImportDocumentsPanel() {
       };
 
       if (!response.ok && payload.code === "HOUSEHOLD_NAME_MISMATCH") {
-        clearStoredAnalysis();
         setComplianceError({
           extractedName: payload.extractedName ?? "Nom non detecte",
           profileName: payload.profileName ?? "votre foyer"
         });
-        setStatusMessage(null);
+        setAnalysisStatusMessage(
+          payload.error || "Le document ne correspond pas au profil du foyer."
+        );
         return;
       }
 
@@ -524,12 +562,12 @@ export function ImportDocumentsPanel() {
       window.localStorage.removeItem(SELECTED_ALTERNATIVE_OFFER_STORAGE_KEY);
       storeMockAnalysis(payload.analysis);
       router.push("/analyse");
-    } catch {
-      clearStoredAnalysis();
-      setStatusMessage(
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Erreur inconnue.";
+      setAnalysisStatusMessage(
         usableDocuments.some(isLikelyMultiContractInsuranceDocument)
-          ? "Analyse serveur nécessaire pour ce document multi-contrats."
-          : "L'analyse complète n'a pas abouti. Aucun courrier incomplet n'a été généré. Relancez l'analyse."
+          ? `Analyse serveur nécessaire pour ce document multi-contrats. ${message}`
+          : `L'analyse n'a pas abouti : ${message} Vous pouvez corriger le problème puis relancer sans réimporter les documents.`
       );
       console.warn("[FUTEO_ANALYSIS_BLOCKED]");
     } finally {
@@ -714,6 +752,11 @@ export function ImportDocumentsPanel() {
             <p className="mt-1 text-sm text-slate-500">
               {documents.length} document(s) ajouté(s), dont {usableDocumentCount} utilisable(s).
             </p>
+            {usableDocumentCount < documents.length ? (
+              <p className="mt-1 text-xs leading-5 text-amber-700">
+                Seuls les documents prêts seront analysés. Les documents à revoir restent affichés avec la raison de leur rejet.
+              </p>
+            ) : null}
           </div>
           <Button
             disabled={usableDocumentCount === 0 || isAnalyzing || isUploading}
@@ -730,6 +773,16 @@ export function ImportDocumentsPanel() {
             )}
           </Button>
         </div>
+
+        {analysisStatusMessage || usableDocumentCount === 0 ? (
+          <div
+            aria-live="polite"
+            className="mt-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm leading-6 text-amber-900"
+            role="status"
+          >
+            {analysisStatusMessage ?? getAnalysisStartMessage(0, documents.length)}
+          </div>
+        ) : null}
 
         <div className="mt-6 overflow-x-auto">
           {documents.length === 0 ? (
@@ -809,6 +862,11 @@ export function ImportDocumentsPanel() {
                           "À revoir"
                         )}
                       </Badge>
+                      {document.status === "error" && document.statusDetail ? (
+                        <p className="mt-1 max-w-xs text-xs leading-5 text-red-700">
+                          {document.statusDetail}
+                        </p>
+                      ) : null}
                     </td>
                     <td className="py-4 text-right">
                       <button
