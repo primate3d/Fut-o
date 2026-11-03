@@ -199,6 +199,7 @@ type ManualEntryForm = {
   mobileDataGB: string;
   mobileDataUnlimited: boolean;
   mobileAllowLowerDataOffers: boolean;
+  mobileMinimumDataGB: string;
   internetTvIncluded: boolean;
   clientFirstName: string;
   clientLastName: string;
@@ -215,7 +216,23 @@ type MobileDataConfirmation = {
   mobileDataGB: string;
   mobileDataUnlimited: boolean;
   mobileAllowLowerDataOffers: boolean;
+  mobileMinimumDataGB: string;
 };
+
+function getMobileDataConfirmation(expense: Expense): MobileDataConfirmation {
+  const includedDataGB = typeof expense.mobileIncludedDataGB === "number"
+    ? expense.mobileIncludedDataGB
+    : expense.mobileDataGB;
+  return {
+    mobileDataGB: typeof includedDataGB === "number" ? String(includedDataGB) : "",
+    mobileDataUnlimited: expense.mobileDataUnlimited === true,
+    mobileAllowLowerDataOffers: expense.mobileAllowLowerDataOffers === true,
+    mobileMinimumDataGB:
+      typeof expense.mobileMinimumDataGB === "number"
+        ? String(expense.mobileMinimumDataGB)
+        : ""
+  };
+}
 
 const manualInputClass =
   "mt-2 w-full rounded-lg border border-navy-100 bg-white px-3 py-2 text-sm font-medium text-navy-900 outline-none transition focus:border-sage-400 focus:ring-2 focus:ring-sage-200";
@@ -250,6 +267,7 @@ export function ResultsPanel() {
     mobileDataGB: "",
     mobileDataUnlimited: false,
     mobileAllowLowerDataOffers: false,
+    mobileMinimumDataGB: "",
     internetTvIncluded: false,
     clientFirstName: "",
     clientLastName: "",
@@ -305,6 +323,9 @@ export function ResultsPanel() {
     }
 
     const parsedMobileDataGB = Number(manualForm.mobileDataGB.replace(",", "."));
+    const parsedMobileMinimumDataGB = Number(
+      manualForm.mobileMinimumDataGB.replace(",", ".")
+    );
     if (
       manualForm.documentType === "mobile_invoice" &&
       !manualForm.mobileDataUnlimited &&
@@ -313,6 +334,16 @@ export function ResultsPanel() {
         parsedMobileDataGB < 0)
     ) {
       setManualFormMessage("Renseignez le volume de donnees inclus ou choisissez Illimite.");
+      return;
+    }
+    if (
+      manualForm.documentType === "mobile_invoice" &&
+      manualForm.mobileAllowLowerDataOffers &&
+      (!manualForm.mobileMinimumDataGB.trim() ||
+        !Number.isFinite(parsedMobileMinimumDataGB) ||
+        parsedMobileMinimumDataGB <= 0)
+    ) {
+      setManualFormMessage("Renseignez le volume minimum de donnees que vous acceptez.");
       return;
     }
 
@@ -339,7 +370,12 @@ export function ResultsPanel() {
               !manualForm.mobileDataUnlimited &&
               manualForm.mobileDataGB.trim()
               ? parsedMobileDataGB
-              : undefined
+              : undefined,
+            mobileMinimumDataGB:
+              manualForm.documentType === "mobile_invoice" &&
+              manualForm.mobileAllowLowerDataOffers
+                ? parsedMobileMinimumDataGB
+                : undefined
           }
         })
       });
@@ -369,35 +405,39 @@ export function ResultsPanel() {
   }
 
   function updateMobileDataConfirmation(
-    expenseId: string,
+    expense: Expense,
     update: Partial<MobileDataConfirmation>
   ) {
     setMobileDataConfirmations((current) => ({
       ...current,
-      [expenseId]: Object.assign(
-        {
-          mobileDataGB: "",
-          mobileDataUnlimited: false,
-          mobileAllowLowerDataOffers: false
-        },
-        current[expenseId],
+      [expense.id]: Object.assign(
+        getMobileDataConfirmation(expense),
+        current[expense.id],
         update
       )
     }));
   }
 
   async function handleMobileDataConfirmation(expense: Expense) {
-    const confirmation = mobileDataConfirmations[expense.id] ?? {
-      mobileDataGB: "",
-      mobileDataUnlimited: false,
-      mobileAllowLowerDataOffers: false
-    };
+    const confirmation = mobileDataConfirmations[expense.id] ?? getMobileDataConfirmation(expense);
     const mobileDataGB = Number(confirmation.mobileDataGB.replace(",", "."));
+    const mobileMinimumDataGB = Number(
+      confirmation.mobileMinimumDataGB.replace(",", ".")
+    );
     if (
       !confirmation.mobileDataUnlimited &&
       (!confirmation.mobileDataGB.trim() || !Number.isFinite(mobileDataGB) || mobileDataGB < 0)
     ) {
       setServiceMessage("Confirmez le volume inclus ou choisissez le forfait illimite.");
+      return;
+    }
+    if (
+      confirmation.mobileAllowLowerDataOffers &&
+      (!confirmation.mobileMinimumDataGB.trim() ||
+        !Number.isFinite(mobileMinimumDataGB) ||
+        mobileMinimumDataGB <= 0)
+    ) {
+      setServiceMessage("Confirmez le volume minimum de donnees que vous acceptez.");
       return;
     }
 
@@ -419,7 +459,10 @@ export function ResultsPanel() {
             expenseId: expense.id,
             mobileDataGB: confirmation.mobileDataUnlimited ? undefined : mobileDataGB,
             mobileDataUnlimited: confirmation.mobileDataUnlimited,
-            mobileAllowLowerDataOffers: confirmation.mobileAllowLowerDataOffers
+            mobileAllowLowerDataOffers: confirmation.mobileAllowLowerDataOffers,
+            mobileMinimumDataGB: confirmation.mobileAllowLowerDataOffers
+              ? mobileMinimumDataGB
+              : undefined
           }
         })
       });
@@ -627,10 +670,17 @@ export function ResultsPanel() {
       analysis?.expenses.filter(
         (expense) =>
           expense.subcategory === ExpenseSubcategory.MOBILE &&
-          !expense.mobileDataUnlimited &&
-          !(typeof expense.mobileIncludedDataGB === "number" &&
-            Number.isFinite(expense.mobileIncludedDataGB)) &&
-          !(typeof expense.mobileDataGB === "number" && Number.isFinite(expense.mobileDataGB))
+          ((
+            !expense.mobileDataUnlimited &&
+            !(typeof expense.mobileIncludedDataGB === "number" &&
+              Number.isFinite(expense.mobileIncludedDataGB)) &&
+            !(typeof expense.mobileDataGB === "number" && Number.isFinite(expense.mobileDataGB))
+          ) || (
+            expense.mobileAllowLowerDataOffers === true &&
+            !(typeof expense.mobileMinimumDataGB === "number" &&
+              Number.isFinite(expense.mobileMinimumDataGB) &&
+              expense.mobileMinimumDataGB > 0)
+          ))
       ) ?? [],
     [analysis]
   );
@@ -933,7 +983,10 @@ export function ResultsPanel() {
                       checked={!manualForm.mobileAllowLowerDataOffers}
                       className="h-4 w-4 accent-sage-600"
                       name="mobile-lower-data"
-                      onChange={() => updateManualForm("mobileAllowLowerDataOffers", false)}
+                      onChange={() => {
+                        updateManualForm("mobileAllowLowerDataOffers", false);
+                        updateManualForm("mobileMinimumDataGB", "");
+                      }}
                       type="radio"
                     />
                     Non, je souhaite conserver mon volume actuel.
@@ -949,6 +1002,28 @@ export function ResultsPanel() {
                     Oui, je souhaite également découvrir des forfaits avec moins de Go.
                   </label>
                 </div>
+                {manualForm.mobileAllowLowerDataOffers ? (
+                  <label className="mt-4 block text-sm font-semibold text-navy-900">
+                    Volume minimum acceptable (Go)
+                    <input
+                      className={manualInputClass}
+                      inputMode="decimal"
+                      min="0.01"
+                      onChange={(event) =>
+                        updateManualForm("mobileMinimumDataGB", event.target.value)
+                      }
+                      placeholder="Ex : 300"
+                      required
+                      step="any"
+                      type="number"
+                      value={manualForm.mobileMinimumDataGB}
+                    />
+                    <span className="mt-2 block text-xs font-normal leading-5 text-slate-600">
+                      Futéo n'affichera aucun forfait limité sous ce seuil. La consommation
+                      observée peut relever automatiquement ce minimum avec une marge de sécurité.
+                    </span>
+                  </label>
+                ) : null}
               </fieldset>
             ) : null}
 
@@ -1021,20 +1096,17 @@ export function ResultsPanel() {
           <div className="flex items-center gap-2">
             <AlertTriangle className="text-amber-700" size={22} />
             <h2 className="text-lg font-semibold text-navy-900">
-              Confirmez le volume inclus avant la comparaison mobile
+              Confirmez vos besoins avant la comparaison mobile
             </h2>
           </div>
           <p className="mt-2 text-sm leading-6 text-slate-600">
-            Le document ne permet pas d'identifier avec certitude le volume inclus. Futéo ne
-            présentera aucune offre comme équivalente avant votre confirmation.
+            Confirmez le volume inclus et, si vous acceptez un forfait moins généreux, le seuil
+            minimum qui reste adapté à vos besoins. Futéo ne proposera rien sous ce seuil.
           </p>
           <div className="mt-4 space-y-4">
             {mobileExpensesNeedingConfirmation.map((expense) => {
-              const confirmation = mobileDataConfirmations[expense.id] ?? {
-                mobileDataGB: "",
-                mobileDataUnlimited: false,
-                mobileAllowLowerDataOffers: false
-              };
+              const confirmation =
+                mobileDataConfirmations[expense.id] ?? getMobileDataConfirmation(expense);
 
               return (
                 <div className="rounded-xl border border-amber-200 bg-white p-4" key={expense.id}>
@@ -1050,7 +1122,7 @@ export function ResultsPanel() {
                         inputMode="decimal"
                         min="0"
                         onChange={(event) =>
-                          updateMobileDataConfirmation(expense.id, {
+                          updateMobileDataConfirmation(expense, {
                             mobileDataGB: event.target.value
                           })
                         }
@@ -1065,7 +1137,7 @@ export function ResultsPanel() {
                         checked={confirmation.mobileDataUnlimited}
                         className="h-4 w-4 accent-sage-600"
                         onChange={(event) =>
-                          updateMobileDataConfirmation(expense.id, {
+                          updateMobileDataConfirmation(expense, {
                             mobileDataUnlimited: event.target.checked,
                             ...(event.target.checked ? { mobileDataGB: "" } : {})
                           })
@@ -1090,8 +1162,9 @@ export function ResultsPanel() {
                           className="h-4 w-4 accent-sage-600"
                           name={`mobile-lower-data-${expense.id}`}
                           onChange={() =>
-                            updateMobileDataConfirmation(expense.id, {
-                              mobileAllowLowerDataOffers: false
+                            updateMobileDataConfirmation(expense, {
+                              mobileAllowLowerDataOffers: false,
+                              mobileMinimumDataGB: ""
                             })
                           }
                           type="radio"
@@ -1104,7 +1177,7 @@ export function ResultsPanel() {
                           className="h-4 w-4 accent-sage-600"
                           name={`mobile-lower-data-${expense.id}`}
                           onChange={() =>
-                            updateMobileDataConfirmation(expense.id, {
+                            updateMobileDataConfirmation(expense, {
                               mobileAllowLowerDataOffers: true
                             })
                           }
@@ -1113,6 +1186,30 @@ export function ResultsPanel() {
                         Oui, je souhaite également découvrir des forfaits avec moins de Go.
                       </label>
                     </div>
+                    {confirmation.mobileAllowLowerDataOffers ? (
+                      <label className="mt-4 block text-sm font-semibold text-navy-900">
+                        Volume minimum acceptable (Go)
+                        <input
+                          className={manualInputClass}
+                          inputMode="decimal"
+                          min="0.01"
+                          onChange={(event) =>
+                            updateMobileDataConfirmation(expense, {
+                              mobileMinimumDataGB: event.target.value
+                            })
+                          }
+                          placeholder="Ex : 300"
+                          required
+                          step="any"
+                          type="number"
+                          value={confirmation.mobileMinimumDataGB}
+                        />
+                        <span className="mt-2 block text-xs font-normal leading-5 text-slate-600">
+                          Aucune offre limitée sous ce seuil ne sera proposée. Si une consommation
+                          est connue, Futéo conserve aussi une marge de sécurité de 20 %.
+                        </span>
+                      </label>
+                    ) : null}
                   </fieldset>
                   <Button
                     className="mt-4"

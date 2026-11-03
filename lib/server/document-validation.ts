@@ -15,7 +15,8 @@ const corrections = z.object({
   notes: z.string().max(2000).optional(),
   mobileDataGB: z.number().finite().nonnegative().max(100_000).optional(),
   mobileDataUnlimited: z.boolean().optional(),
-  mobileAllowLowerDataOffers: z.boolean().optional()
+  mobileAllowLowerDataOffers: z.boolean().optional(),
+  mobileMinimumDataGB: z.number().finite().positive().max(100_000).optional()
 });
 const metadata = z.object({
   id: z.string().regex(/^[a-zA-Z0-9_-]{1,128}$/),

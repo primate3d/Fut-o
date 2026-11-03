@@ -744,7 +744,11 @@ test("mixed EDF / MACIF multi-contract / SFR box / mobile preserves every docume
   const alternatives = findAlternativeOffers(
     result.expenses.map((expense) =>
       expense.subcategory === ExpenseSubcategory.MOBILE
-        ? { ...expense, mobileAllowLowerDataOffers: true }
+        ? {
+            ...expense,
+            mobileAllowLowerDataOffers: true,
+            mobileMinimumDataGB: 20
+          }
         : expense
     ),
     {
@@ -928,7 +932,7 @@ test("manual mobile contracts require included data, accept decimals and preserv
   assert.equal(unlimitedExpense.mobileDataGB, undefined);
   assert.equal(unlimitedExpense.mobileIncludedDataGB, undefined);
 
-  const updated = await analyze(new Request("http://local.test/api/analyse", {
+  const missingMinimum = await analyze(new Request("http://local.test/api/analyse", {
     method: "POST",
     body: JSON.stringify({
       code: key.code,
@@ -940,6 +944,22 @@ test("manual mobile contracts require included data, accept decimals and preserv
       }
     })
   }));
+  assert.equal(missingMinimum.status, 400);
+  assert.match(await missingMinimum.text(), /volume mobile minimum accepte manquant/i);
+
+  const updated = await analyze(new Request("http://local.test/api/analyse", {
+    method: "POST",
+    body: JSON.stringify({
+      code: key.code,
+      mobileContractPreferences: {
+        expenseId: decimalExpense.id,
+        mobileDataGB: 100,
+        mobileDataUnlimited: false,
+        mobileAllowLowerDataOffers: true,
+        mobileMinimumDataGB: 20
+      }
+    })
+  }));
   assert.equal(updated.status, 200);
   const updatedAnalysis = ((await updated.json()) as { analysis: MockAnalysis }).analysis;
   const updatedExpense = updatedAnalysis.expenses.find(
@@ -947,6 +967,7 @@ test("manual mobile contracts require included data, accept decimals and preserv
   )!;
   assert.equal(updatedExpense.mobileIncludedDataGB, 100);
   assert.equal(updatedExpense.mobileAllowLowerDataOffers, true);
+  assert.equal(updatedExpense.mobileMinimumDataGB, 20);
   assert.equal((await repo.findKeyByCode(key.code))!.usesRemaining, 8);
   assert.deepEqual(
     (await repo.getAnalysisByKey(key.code))!.expenses,
@@ -1504,7 +1525,11 @@ test("mobile comparison uses included data and separates opt-in lower-data compr
   );
 
   const optedIn = findAlternativeOffers([
-    { ...current, mobileAllowLowerDataOffers: true }
+    {
+      ...current,
+      mobileAllowLowerDataOffers: true,
+      mobileMinimumDataGB: 5
+    }
   ], options);
   const primary = optedIn.filter(isPrimaryAlternative);
   const reduced = optedIn.filter((offer) => offer.comparisonKind === "reduced_data");
@@ -1514,7 +1539,7 @@ test("mobile comparison uses included data and separates opt-in lower-data compr
   );
   assert.ok(reduced.length > 0);
   assert.ok(reduced.every((offer) => (offer.mobileDataLimitGB ?? 0) < 100));
-  assert.ok(reduced.every((offer) => (offer.mobileDataLimitGB ?? 0) >= 10));
+  assert.ok(reduced.every((offer) => (offer.mobileDataLimitGB ?? 0) >= 12));
   assert.ok(reduced.every((offer) => /compromis|non equivalente/i.test(offer.reason)));
 
   const decimalOffers = findAlternativeOffers([
@@ -1536,7 +1561,8 @@ test("mobile comparison uses included data and separates opt-in lower-data compr
       mobileDataGB: undefined,
       mobileIncludedDataGB: undefined,
       mobileDataUnlimited: true,
-      mobileAllowLowerDataOffers: true
+      mobileAllowLowerDataOffers: true,
+      mobileMinimumDataGB: 300
     })
   ], options);
   assert.ok(unlimitedOptIn.length > 0);

@@ -53,6 +53,7 @@ export type DocumentUserCorrections = {
   mobileDataGB?: number;
   mobileDataUnlimited?: boolean;
   mobileAllowLowerDataOffers?: boolean;
+  mobileMinimumDataGB?: number;
 };
 
 export type UploadedDocumentType =
@@ -126,6 +127,7 @@ export type Expense = {
   mobileRoamingIncludedDataGB?: number;
   mobileDataUnlimited?: boolean;
   mobileAllowLowerDataOffers?: boolean;
+  mobileMinimumDataGB?: number;
   mobileInvoiceTotalTTC?: number;
   mobileInvoiceTotalHT?: number;
   mobileSubscriptionBeforeDiscount?: number;

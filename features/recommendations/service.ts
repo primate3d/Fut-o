@@ -429,6 +429,27 @@ function roundMoney(value: number) {
   return Math.round(value * 100) / 100;
 }
 
+export const MOBILE_CONSUMPTION_SAFETY_MARGIN = 1.2;
+
+export function getMobileComparisonMinimumDataGB(expense: Expense) {
+  if (!expense.mobileAllowLowerDataOffers) return null;
+  if (
+    typeof expense.mobileMinimumDataGB !== "number" ||
+    !Number.isFinite(expense.mobileMinimumDataGB) ||
+    expense.mobileMinimumDataGB <= 0
+  ) {
+    return null;
+  }
+
+  const consumptionFloor =
+    typeof expense.mobileConsumedDataGB === "number" &&
+    Number.isFinite(expense.mobileConsumedDataGB) &&
+    expense.mobileConsumedDataGB >= 0
+      ? Math.ceil(expense.mobileConsumedDataGB * MOBILE_CONSUMPTION_SAFETY_MARGIN)
+      : 0;
+  return Math.max(expense.mobileMinimumDataGB, consumptionFloor);
+}
+
 function isConditionalPromotion(offer: MobileOffer) {
   return offer.promotionPrice !== null && offer.conditionalPrices.some(
     (conditional) =>
@@ -517,10 +538,11 @@ function mobileComparisonKind(
   }
 
   if (reducedData) {
-    if (!expense.mobileAllowLowerDataOffers) return null;
+    const minimumDataGB = getMobileComparisonMinimumDataGB(expense);
     if (
-      typeof expense.mobileConsumedDataGB === "number" &&
-      (offerIncluded === null || offerIncluded < expense.mobileConsumedDataGB)
+      minimumDataGB === null ||
+      offerIncluded === null ||
+      offerIncluded < minimumDataGB
     ) {
       return null;
     }
@@ -554,7 +576,7 @@ function mobileReason(
       : `${formatMobileData(offer.includedDataGB ?? 0)} Go inclus.`,
     offer.technology ? `Réseau ${offer.technology}.` : null,
     kind === "reduced_data"
-      ? "Volume inférieur : compromis accepté par l'utilisateur, jamais traité comme équivalent."
+      ? `Volume inférieur : compromis accepté par l'utilisateur, jamais traité comme équivalent. Seuil minimum retenu : ${formatMobileData(getMobileComparisonMinimumDataGB(expense) ?? 0)} Go.`
       : null,
     kind === "additional_commitment"
       ? `Engagement de ${offer.commitmentMonths} mois : validation nécessaire.`
@@ -667,14 +689,43 @@ function mobileAlternativesForExpense(
     }];
   });
 
-  const score = (offer: AlternativeOffer) =>
-    offer.netFirstYearSaving ?? offer.recurringYearlySaving ?? 0;
-  const sorted = offers.sort((left, right) => score(right) - score(left));
+  const hasVerifiedNetSaving = (offer: AlternativeOffer) =>
+    typeof offer.netFirstYearSaving === "number" &&
+    Number.isFinite(offer.netFirstYearSaving);
+  const compareEconomicInterest = (left: AlternativeOffer, right: AlternativeOffer) => {
+    const leftHasVerifiedNetSaving = hasVerifiedNetSaving(left);
+    const rightHasVerifiedNetSaving = hasVerifiedNetSaving(right);
+    if (leftHasVerifiedNetSaving !== rightHasVerifiedNetSaving) {
+      return rightHasVerifiedNetSaving ? 1 : -1;
+    }
+
+    if (leftHasVerifiedNetSaving && rightHasVerifiedNetSaving) {
+      const netSavingDifference = right.netFirstYearSaving! - left.netFirstYearSaving!;
+      if (netSavingDifference !== 0) return netSavingDifference;
+    }
+
+    const recurringSavingDifference =
+      (right.recurringYearlySaving ?? 0) - (left.recurringYearlySaving ?? 0);
+    if (recurringSavingDifference !== 0) return recurringSavingDifference;
+
+    if (left.mobileDataUnlimited !== right.mobileDataUnlimited) {
+      return right.mobileDataUnlimited ? 1 : -1;
+    }
+    const dataDifference =
+      (right.mobileDataLimitGB ?? 0) - (left.mobileDataLimitGB ?? 0);
+    if (dataDifference !== 0) return dataDifference;
+
+    const commitmentDifference =
+      (left.commitmentMonths ?? 0) - (right.commitmentMonths ?? 0);
+    if (commitmentDifference !== 0) return commitmentDifference;
+    return left.id.localeCompare(right.id);
+  };
+  const sorted = offers.sort(compareEconomicInterest);
   const equivalent = sorted.filter(isPrimaryAlternative).slice(0, 4);
   const temporary = sorted.filter((offer) => offer.savingKind === "temporary").slice(0, 2);
   const compromises = sorted.filter(
     (offer) => !isPrimaryAlternative(offer) && offer.savingKind !== "temporary"
-  ).slice(0, 4);
+  ).sort(compareEconomicInterest).slice(0, 4);
   return [...equivalent, ...temporary, ...compromises];
 }
 

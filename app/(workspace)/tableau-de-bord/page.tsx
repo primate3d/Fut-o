@@ -20,6 +20,10 @@ import {
 } from "@/features/analysis";
 import { getStoredAccessKey } from "@/features/billing/access-keys";
 import {
+  isPrimaryAlternative,
+  type AlternativeOffer
+} from "@/features/recommendations/service";
+import {
   getStoredUploadedDocuments,
   getStoredUploadedDocumentsServer
 } from "@/features/upload/storage";
@@ -45,6 +49,44 @@ function getStoredSavingsFallback() {
   return Number.isFinite(storedSavings) && storedSavings > 0 ? storedSavings : 0;
 }
 
+function computeAlternativeSavings(analysis: MockAnalysis, alternatives: AlternativeOffer[]) {
+  const expenseIds = new Set(analysis.expenses.map((expense) => expense.id));
+  const bestSavingByExpense = alternatives
+    .filter(isPrimaryAlternative)
+    .reduce<Record<string, number>>((savings, offer) => {
+      const expenseId = offer.sourceExpenseId ?? analysis.expenses.find((expense) =>
+        offer.id.startsWith(`alternative_${expense.id}_`)
+      )?.id;
+      if (!expenseId || !expenseIds.has(expenseId)) return savings;
+      savings[expenseId] = Math.max(
+        savings[expenseId] ?? 0,
+        offer.estimatedYearlySaving
+      );
+      return savings;
+    }, {});
+  return Object.values(bestSavingByExpense).reduce(
+    (total, saving) => total + Math.max(0, saving),
+    0
+  );
+}
+
+async function loadComparisonSavings(analysis: MockAnalysis) {
+  const activeKey = getStoredAccessKey();
+  if (!activeKey) return null;
+  try {
+    const response = await fetch("/api/alternatives", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ code: activeKey.code })
+    });
+    if (!response.ok) return 0;
+    const payload = (await response.json()) as { alternatives?: AlternativeOffer[] };
+    return computeAlternativeSavings(analysis, payload.alternatives ?? []);
+  } catch {
+    return 0;
+  }
+}
+
 export default function DashboardPage() {
   const [analysis, setAnalysis] = useState<MockAnalysis | null>(null);
   const [documents, setDocuments] = useState<UploadedDocument[]>([]);
@@ -66,10 +108,19 @@ export default function DashboardPage() {
         : isAnalysisForDocuments(localAnalysis, serverDocuments)
           ? localAnalysis
           : null;
+      const comparisonSavings = nextAnalysis
+        ? await loadComparisonSavings(nextAnalysis)
+        : null;
+      const synchronizedAnalysis =
+        nextAnalysis && comparisonSavings !== null
+          ? { ...nextAnalysis, yearlyPotentialSavings: comparisonSavings }
+          : nextAnalysis;
 
-      setAnalysis(nextAnalysis);
+      setAnalysis(synchronizedAnalysis);
       setSavingsFallback(
-        !nextAnalysis?.yearlyPotentialSavings ? getStoredSavingsFallback() : 0
+        comparisonSavings === null && !synchronizedAnalysis?.yearlyPotentialSavings
+          ? getStoredSavingsFallback()
+          : 0
       );
       setDocuments(serverDocuments);
     }
@@ -116,7 +167,7 @@ export default function DashboardPage() {
             </h1>
             <p className="mt-4 max-w-2xl text-base leading-7 text-slate-600">
               {hasAnalysis
-                ? "Nous avons comparé vos contrats avec les meilleures offres du marché. Découvrez les alternatives plus avantageuses identifiées pour votre foyer et préparez vos démarches."
+                ? "Nous avons comparé vos contrats avec les offres actuellement disponibles dans Futéo. Découvrez les alternatives adaptées identifiées pour votre foyer et préparez vos démarches."
                 : hasDocuments
                   ? "Vos documents sont prêts. Lancez l'analyse pour découvrir les offres les plus intéressantes et les économies que vous pouvez réaliser."
                   : "Commencez par ajouter un contrat ou une facture pour que nous puissions rechercher des offres plus avantageuses."}

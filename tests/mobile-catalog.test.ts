@@ -7,12 +7,15 @@ import {
 } from "../features/recommendations/mobile-catalog";
 import {
   findAlternativeOffers,
+  getMobileComparisonMinimumDataGB,
   isPrimaryAlternative
 } from "../features/recommendations/service";
+import { getMobileComparisonMessage } from "../lib/server/comparison";
 import {
   ExpenseCategory,
   ExpenseSubcategory,
-  type Expense
+  type Expense,
+  type MockAnalysis
 } from "../types";
 import {
   MOBILE_CATALOG_FIXTURE_NOW,
@@ -76,6 +79,20 @@ function mobileExpense(overrides: Partial<Expense> = {}): Expense {
     mobileIncludedDataGB: 100,
     mobileAllowLowerDataOffers: false,
     ...overrides
+  };
+}
+
+function analysisFor(expense: Expense): MockAnalysis {
+  return {
+    id: "mobile-analysis",
+    generatedAt: VERIFIED_AT,
+    documents: [],
+    expenses: [expense],
+    recommendations: [],
+    anomalies: [],
+    totalMonthlyAmount: expense.monthlyAmount,
+    totalYearlyAmount: expense.yearlyAmount,
+    yearlyPotentialSavings: 0
   };
 }
 
@@ -207,4 +224,226 @@ test("plusieurs contrats conservent des identifiants stables et séparés", () =
     firstRun.map((offer) => offer.id).sort(),
     secondRun.map((offer) => offer.id).sort()
   );
+});
+
+test("Free illimité respecte le seuil utilisateur de 300 Go", () => {
+  const current = mobileExpense({
+    provider: "Free Mobile",
+    monthlyAmount: 9.99,
+    yearlyAmount: 119.88,
+    mobileDataGB: undefined,
+    mobileIncludedDataGB: undefined,
+    mobileDataUnlimited: true,
+    mobileAllowLowerDataOffers: true,
+    mobileMinimumDataGB: 300
+  });
+  const offers = findAlternativeOffers([current], {
+    mobileCatalog: catalog(
+      mobileOffer({ offerName: "10 Go", monthlyPrice: 7.99, includedDataGB: 10 }),
+      mobileOffer({ offerName: "300 Go", monthlyPrice: 6.99, includedDataGB: 300 }),
+      mobileOffer({ offerName: "500 Go", monthlyPrice: 8.99, includedDataGB: 500 }),
+      mobileOffer({
+        offerName: "Illimité",
+        monthlyPrice: 9.49,
+        includedDataGB: null,
+        unlimitedData: true
+      })
+    )
+  });
+
+  assert.ok(offers.some((offer) => offer.name === "Illimité"));
+  assert.ok(offers.some((offer) => offer.name === "500 Go"));
+  assert.ok(offers.some((offer) => offer.name === "300 Go"));
+  assert.ok(offers.every((offer) => offer.name !== "10 Go"));
+  assert.deepEqual(
+    offers
+      .filter((offer) => offer.comparisonKind === "reduced_data")
+      .map((offer) => offer.mobileDataLimitGB),
+    [300, 500]
+  );
+});
+
+test("les frais connus et les promotions sont compares sur la meme premiere annee", () => {
+  const current = mobileExpense({
+    monthlyAmount: 9.99,
+    yearlyAmount: 119.88,
+    mobileDataGB: undefined,
+    mobileIncludedDataGB: undefined,
+    mobileDataUnlimited: true,
+    mobileAllowLowerDataOffers: true,
+    mobileMinimumDataGB: 300
+  });
+  const offers = findAlternativeOffers([current], {
+    mobileCatalog: catalog(
+      mobileOffer({
+        offerName: "300 Go avec frais",
+        monthlyPrice: 5,
+        includedDataGB: 300,
+        activationFees: 50
+      }),
+      mobileOffer({ offerName: "500 Go sans frais", monthlyPrice: 8.99, includedDataGB: 500 }),
+      mobileOffer({
+        offerName: "300 Go promotion courte",
+        monthlyPrice: 9.5,
+        includedDataGB: 300,
+        promotionPrice: 1,
+        promotionDuration: 1,
+        priceAfterPromotion: 9.5
+      })
+    )
+  });
+
+  assert.deepEqual(
+    offers.map((offer) => offer.name),
+    ["300 Go promotion courte", "500 Go sans frais", "300 Go avec frais"]
+  );
+  assert.equal(offers[0]?.netFirstYearSaving, 14.38);
+  assert.equal(offers[0]?.recurringYearlySaving, 5.88);
+  assert.equal(offers[1]?.netFirstYearSaving, 12);
+  assert.equal(offers[2]?.netFirstYearSaving, 9.88);
+});
+
+test("une economie non certifiable reste derriere une economie nette verifiee", () => {
+  const current = mobileExpense({
+    monthlyAmount: 9.99,
+    yearlyAmount: 119.88,
+    mobileDataGB: undefined,
+    mobileIncludedDataGB: undefined,
+    mobileDataUnlimited: true,
+    mobileAllowLowerDataOffers: true,
+    mobileMinimumDataGB: 300
+  });
+  const offers = findAlternativeOffers([current], {
+    mobileCatalog: catalog(
+      mobileOffer({
+        offerName: "300 Go frais inconnus",
+        monthlyPrice: 5,
+        includedDataGB: 300,
+        activationFees: null
+      }),
+      mobileOffer({ offerName: "500 Go economie certifiee", monthlyPrice: 8.99, includedDataGB: 500 })
+    )
+  });
+
+  assert.deepEqual(
+    offers.map((offer) => offer.name),
+    ["500 Go economie certifiee", "300 Go frais inconnus"]
+  );
+  assert.equal(offers[1]?.netFirstYearSaving, undefined);
+  assert.equal(offers[1]?.estimatedYearlySaving, 0);
+  assert.equal(offers[1]?.savingKind, "recurring_only");
+});
+
+test("a economie egale le meilleur volume de donnees departage les offres", () => {
+  const current = mobileExpense({
+    monthlyAmount: 9.99,
+    yearlyAmount: 119.88,
+    mobileDataGB: undefined,
+    mobileIncludedDataGB: undefined,
+    mobileDataUnlimited: true,
+    mobileAllowLowerDataOffers: true,
+    mobileMinimumDataGB: 300
+  });
+  const offers = findAlternativeOffers([current], {
+    mobileCatalog: catalog(
+      mobileOffer({ offerName: "300 Go", monthlyPrice: 8, includedDataGB: 300 }),
+      mobileOffer({ offerName: "500 Go", monthlyPrice: 8, includedDataGB: 500 })
+    )
+  });
+
+  assert.deepEqual(offers.map((offer) => offer.name), ["500 Go", "300 Go"]);
+});
+
+test("une offre 300 Go est un compromis transparent, jamais un équivalent", () => {
+  const current = mobileExpense({
+    monthlyAmount: 9.99,
+    yearlyAmount: 119.88,
+    mobileDataGB: undefined,
+    mobileIncludedDataGB: undefined,
+    mobileDataUnlimited: true,
+    mobileAllowLowerDataOffers: true,
+    mobileMinimumDataGB: 300
+  });
+  const [offer] = findAlternativeOffers([current], {
+    mobileCatalog: catalog(mobileOffer({
+      offerName: "300 Go moins cher",
+      monthlyPrice: 8.49,
+      includedDataGB: 300
+    }))
+  });
+
+  assert.equal(offer.comparisonKind, "reduced_data");
+  assert.equal(isPrimaryAlternative(offer), false);
+  assert.match(offer.reason, /seuil minimum retenu\s*:\s*300 Go/i);
+});
+
+test("un forfait illimité sans accord de réduction refuse toutes les offres limitées", () => {
+  const offers = findAlternativeOffers([
+    mobileExpense({
+      mobileDataGB: undefined,
+      mobileIncludedDataGB: undefined,
+      mobileDataUnlimited: true,
+      mobileAllowLowerDataOffers: false
+    })
+  ], {
+    mobileCatalog: catalog(mobileOffer({ monthlyPrice: 5, includedDataGB: 500 }))
+  });
+  assert.deepEqual(offers, []);
+});
+
+test("la consommation NRJ applique une marge de sécurité de 20 pour cent", () => {
+  const current = mobileExpense({
+    provider: "NRJ Mobile",
+    monthlyAmount: 17.49,
+    yearlyAmount: 209.88,
+    mobileIncludedDataGB: 500,
+    mobileConsumedDataGB: 248.99,
+    mobileAllowLowerDataOffers: true,
+    mobileMinimumDataGB: 100
+  });
+  assert.equal(getMobileComparisonMinimumDataGB(current), 299);
+
+  const offers = findAlternativeOffers([current], {
+    mobileCatalog: catalog(
+      mobileOffer({ offerName: "250 Go insuffisants", monthlyPrice: 7, includedDataGB: 250 }),
+      mobileOffer({ offerName: "300 Go adaptés", monthlyPrice: 9, includedDataGB: 300 })
+    )
+  });
+  assert.deepEqual(offers.map((offer) => offer.name), ["300 Go adaptés"]);
+});
+
+test("aucune offre satisfaisante recommande de conserver le forfait actuel", () => {
+  const current = mobileExpense({ monthlyAmount: 9.99, yearlyAmount: 119.88 });
+  const currentCatalog = catalog(mobileOffer({ monthlyPrice: 12, includedDataGB: 100 }));
+  const offers = findAlternativeOffers([current], { mobileCatalog: currentCatalog });
+  assert.deepEqual(offers, []);
+  assert.match(
+    getMobileComparisonMessage(analysisFor(current), currentCatalog, offers) ?? "",
+    /forfait actuel reste compétitif/i
+  );
+});
+
+test("un seuil absent et un catalogue vide ou périmé restent non concluants", () => {
+  const missingThreshold = mobileExpense({
+    mobileDataGB: undefined,
+    mobileIncludedDataGB: undefined,
+    mobileDataUnlimited: true,
+    mobileAllowLowerDataOffers: true,
+    mobileMinimumDataGB: undefined
+  });
+  const freshCatalog = catalog(mobileOffer({ monthlyPrice: 5, includedDataGB: 10 }));
+  const offers = findAlternativeOffers([missingThreshold], { mobileCatalog: freshCatalog });
+  assert.deepEqual(offers, []);
+  assert.match(
+    getMobileComparisonMessage(analysisFor(missingThreshold), freshCatalog, offers) ?? "",
+    /volume minimum/i
+  );
+
+  for (const status of ["stale", "empty"] as const) {
+    const unavailableCatalog: MobileCatalog = { ...freshCatalog, status, offers: [] };
+    assert.match(
+      getMobileComparisonMessage(analysisFor(missingThreshold), unavailableCatalog, []) ?? "",
+      /comparaison n'est pas concluante/i
+    );
+  }
 });

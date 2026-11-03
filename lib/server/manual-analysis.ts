@@ -40,6 +40,7 @@ export type ManualContractInput = {
   mobileDataGB?: unknown;
   mobileDataUnlimited?: unknown;
   mobileAllowLowerDataOffers?: unknown;
+  mobileMinimumDataGB?: unknown;
   internetTvIncluded?: unknown;
   clientFirstName?: unknown;
   clientLastName?: unknown;
@@ -197,12 +198,24 @@ export function buildManualAnalysis(input: ManualContractInput, key: AccessKey):
   }
   const mobileDataUnlimited = input.mobileDataUnlimited === true;
   const mobileAllowLowerDataOffers = input.mobileAllowLowerDataOffers === true;
+  const mobileMinimumDataGB = input.mobileMinimumDataGB === undefined || input.mobileMinimumDataGB === null || input.mobileMinimumDataGB === ""
+    ? undefined
+    : Number(input.mobileMinimumDataGB);
+  if (
+    mobileMinimumDataGB !== undefined &&
+    (!Number.isFinite(mobileMinimumDataGB) || mobileMinimumDataGB <= 0 || mobileMinimumDataGB > 100_000)
+  ) {
+    throw new RequestError("Volume mobile minimum accepte invalide", 400);
+  }
   if (documentType === "mobile_invoice") {
     if (mobileDataUnlimited && mobileDataGB !== undefined) {
       throw new RequestError("Choisissez un volume mobile ou un forfait illimite", 400);
     }
     if (!mobileDataUnlimited && mobileDataGB === undefined) {
       throw new RequestError("Volume de donnees inclus manquant", 400);
+    }
+    if (mobileAllowLowerDataOffers && mobileMinimumDataGB === undefined) {
+      throw new RequestError("Volume mobile minimum accepte manquant", 400);
     }
   }
 
@@ -295,7 +308,8 @@ export function buildManualAnalysis(input: ManualContractInput, key: AccessKey):
             mobileDataGB,
             mobileIncludedDataGB: mobileDataGB,
             mobileDataUnlimited,
-            mobileAllowLowerDataOffers
+            mobileAllowLowerDataOffers,
+            mobileMinimumDataGB: mobileAllowLowerDataOffers ? mobileMinimumDataGB : undefined
           }
         : {}),
       ...(documentType === "internet_invoice" ? { internetTvIncluded: input.internetTvIncluded === true } : {})
@@ -313,6 +327,7 @@ export type MobileContractPreferencesInput = {
   mobileDataGB?: unknown;
   mobileDataUnlimited?: unknown;
   mobileAllowLowerDataOffers?: unknown;
+  mobileMinimumDataGB?: unknown;
 };
 
 export function applyMobileContractPreferences(
@@ -335,6 +350,7 @@ export function applyMobileContractPreferences(
   }
 
   const mobileDataUnlimited = input.mobileDataUnlimited;
+  const mobileAllowLowerDataOffers = input.mobileAllowLowerDataOffers;
   const mobileDataGB = input.mobileDataGB === undefined || input.mobileDataGB === null || input.mobileDataGB === ""
     ? undefined
     : Number(input.mobileDataGB);
@@ -350,6 +366,18 @@ export function applyMobileContractPreferences(
   if (!mobileDataUnlimited && mobileDataGB === undefined) {
     throw new RequestError("Volume de donnees inclus manquant", 400);
   }
+  const mobileMinimumDataGB = input.mobileMinimumDataGB === undefined || input.mobileMinimumDataGB === null || input.mobileMinimumDataGB === ""
+    ? undefined
+    : Number(input.mobileMinimumDataGB);
+  if (
+    mobileMinimumDataGB !== undefined &&
+    (!Number.isFinite(mobileMinimumDataGB) || mobileMinimumDataGB <= 0 || mobileMinimumDataGB > 100_000)
+  ) {
+    throw new RequestError("Volume mobile minimum accepte invalide", 400);
+  }
+  if (mobileAllowLowerDataOffers && mobileMinimumDataGB === undefined) {
+    throw new RequestError("Volume mobile minimum accepte manquant", 400);
+  }
 
   const updateExpense = (candidate: Expense): Expense =>
     candidate.id === expenseId
@@ -358,7 +386,8 @@ export function applyMobileContractPreferences(
           mobileDataGB,
           mobileIncludedDataGB: mobileDataGB,
           mobileDataUnlimited,
-          mobileAllowLowerDataOffers: input.mobileAllowLowerDataOffers as boolean
+          mobileAllowLowerDataOffers,
+          mobileMinimumDataGB: mobileAllowLowerDataOffers ? mobileMinimumDataGB : undefined
         }
       : candidate;
 
