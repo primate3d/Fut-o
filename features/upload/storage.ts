@@ -23,13 +23,9 @@ export function getStoredUploadedDocuments(): UploadedDocument[] {
   }
 }
 
-export async function getStoredUploadedDocumentsServer(): Promise<UploadedDocument[]> {
-  const localDocuments = getStoredUploadedDocuments();
+export async function getStoredUploadedDocumentsServerStrict(): Promise<UploadedDocument[]> {
   const activeKey = getStoredAccessKey();
-
-  if (!activeKey) {
-    return localDocuments;
-  }
+  if (!activeKey) throw new Error("Aucune clé d'accès active.");
 
   const controller = new AbortController();
   const timeoutId = window.setTimeout(() => controller.abort(), 2500);
@@ -39,34 +35,47 @@ export async function getStoredUploadedDocumentsServer(): Promise<UploadedDocume
       headers: createAccessKeyHeaders(activeKey.code),
       signal: controller.signal
     });
-    if (!response.ok) return localDocuments;
+    if (!response.ok) {
+      throw new Error("La lecture serveur des documents a échoué.");
+    }
 
     const { documents } = (await response.json()) as {
       documents?: UploadedDocument[];
     };
-
-    return Array.isArray(documents)
-      ? documents
-      : localDocuments;
-  } catch {
-    return localDocuments;
+    if (!Array.isArray(documents)) {
+      throw new Error("La réponse serveur des documents est incomplète.");
+    }
+    return documents;
   } finally {
     window.clearTimeout(timeoutId);
   }
 }
 
+export async function getStoredUploadedDocumentsServer(): Promise<UploadedDocument[]> {
+  const localDocuments = getStoredUploadedDocuments();
+  try {
+    return await getStoredUploadedDocumentsServerStrict();
+  } catch {
+    return localDocuments;
+  }
+}
+
 export async function storeUploadedDocumentServer(
   document: UploadedDocument,
-  file: File
-): Promise<UploadedDocument | null> {
+  file: File,
+  replacementBatchId?: string
+): Promise<UploadedDocument> {
   const activeKey = getStoredAccessKey();
-  if (!activeKey) return null;
+  if (!activeKey) throw new Error("Aucune clé d'accès active.");
 
   try {
     const formData = new FormData();
     formData.append("code", activeKey.code);
     formData.append("document", JSON.stringify(document));
     formData.append("file", file);
+    if (replacementBatchId) {
+      formData.append("replacementBatchId", replacementBatchId);
+    }
 
     const response = await fetch("/api/documents", {
       method: "POST",
@@ -74,15 +83,70 @@ export async function storeUploadedDocumentServer(
     });
 
     if (!response.ok) {
-      return null;
+      throw new Error("L'enregistrement serveur du document a échoué.");
     }
 
     const data = (await response.json()) as { document?: UploadedDocument };
-    return data.document ?? null;
-  } catch {
+    if (!data.document) {
+      throw new Error("La réponse serveur du document est incomplète.");
+    }
+    return data.document;
+  } catch (error) {
     console.error("Synchronisation serveur du document indisponible");
-    return null;
+    throw error;
   }
+}
+
+async function updateDocumentReplacementServer(
+  replacementAction: "commit" | "rollback",
+  replacementBatchId: string,
+  replacementDocumentIds?: string[]
+) {
+  const activeKey = getStoredAccessKey();
+  if (!activeKey) throw new Error("Aucune clé d'accès active.");
+
+  const response = await fetch("/api/documents", {
+    method: "DELETE",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      code: activeKey.code,
+      replacementAction,
+      replacementBatchId,
+      replacementDocumentIds
+    })
+  });
+
+  if (!response.ok) {
+    throw new Error(
+      replacementAction === "commit"
+        ? "Le remplacement de l'audit a échoué."
+        : "L'annulation du remplacement a échoué."
+    );
+  }
+
+  return response;
+}
+
+export async function commitDocumentReplacementServer(
+  replacementBatchId: string,
+  replacementDocumentIds: string[]
+): Promise<UploadedDocument[]> {
+  const response = await updateDocumentReplacementServer(
+    "commit",
+    replacementBatchId,
+    replacementDocumentIds
+  );
+  const data = (await response.json()) as { documents?: UploadedDocument[] };
+  if (!Array.isArray(data.documents)) {
+    throw new Error("La réponse de remplacement est incomplète.");
+  }
+  return data.documents;
+}
+
+export async function rollbackDocumentReplacementServer(
+  replacementBatchId: string
+): Promise<void> {
+  await updateDocumentReplacementServer("rollback", replacementBatchId);
 }
 
 export function storeUploadedDocuments(documents: UploadedDocument[]) {
@@ -148,17 +212,19 @@ export function applyDocumentCorrections(
   });
 }
 
-export async function deleteDocumentServer(documentId: string) {
+export async function deleteDocumentServer(documentId: string): Promise<boolean> {
   const activeKey = getStoredAccessKey();
-  if (!activeKey) return;
+  if (!activeKey) return false;
 
   try {
-    await fetch("/api/documents", {
+    const response = await fetch("/api/documents", {
       method: "DELETE",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ code: activeKey.code, documentId })
     });
+    return response.ok;
   } catch {
     console.error("Suppression serveur du document indisponible");
+    return false;
   }
 }

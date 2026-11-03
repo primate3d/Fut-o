@@ -1,10 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import snapshot from "../experiments/mobile-offers/snapshots/latest.json";
-import type {
-  CollectionSnapshot,
-  MobileOffer
-} from "../experiments/mobile-offers/types";
+import type { MobileOffer } from "../experiments/mobile-offers/types";
 import {
   adaptMobileCatalog,
   type MobileCatalog
@@ -18,6 +14,10 @@ import {
   ExpenseSubcategory,
   type Expense
 } from "../types";
+import {
+  MOBILE_CATALOG_FIXTURE_NOW,
+  mobileCatalogSnapshotFixture
+} from "./fixtures/mobile-catalog";
 
 const VERIFIED_AT = "2026-11-02T09:20:33.000Z";
 
@@ -79,10 +79,10 @@ function mobileExpense(overrides: Partial<Expense> = {}): Expense {
   };
 }
 
-test("le snapshot Lot 1 expose uniquement ses 31 offres vérifiées tant qu'il est frais", () => {
+test("la fixture expose uniquement ses 31 offres vérifiées tant qu'elle est fraîche", () => {
   const adapted = adaptMobileCatalog(
-    snapshot as CollectionSnapshot,
-    new Date("2026-11-02T10:00:00.000Z")
+    mobileCatalogSnapshotFixture,
+    MOBILE_CATALOG_FIXTURE_NOW
   );
   assert.equal(adapted.detectedOffers, 45);
   assert.equal(adapted.verifiedOffers, 31);
@@ -93,7 +93,7 @@ test("le snapshot Lot 1 expose uniquement ses 31 offres vérifiées tant qu'il e
 
 test("un snapshot périmé ne produit aucune offre", () => {
   const adapted = adaptMobileCatalog(
-    snapshot as CollectionSnapshot,
+    mobileCatalogSnapshotFixture,
     new Date("2026-11-06T10:00:00.000Z")
   );
   assert.equal(adapted.status, "stale");

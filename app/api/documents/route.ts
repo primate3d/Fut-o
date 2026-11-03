@@ -8,7 +8,12 @@ import {
   isBlockedProductionAdminCode,
   requiresHouseholdProfile
 } from "@/features/billing/access-keys";
-import { findKeyByCode, getDocumentsByKey, saveDocuments } from "@/lib/server/db";
+import {
+  deleteAnalysisByKey,
+  findKeyByCode,
+  getDocumentsByKey,
+  saveDocuments
+} from "@/lib/server/db";
 import { storage } from "@/lib/server/storage";
 import { withKeyLock } from "@/lib/server/key-lock";
 import { RequestError } from "@/lib/server/request-error";
@@ -20,6 +25,31 @@ import { readAccessKeyHeader } from "@/lib/access-key-transport";
 type StoredUploadedDocument = UploadedDocument & {
   physicalFileName?: string;
 };
+
+const replacementStatusPrefix = "replacement:";
+const replacementBatchIdPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+function replacementStatus(batchId: string) {
+  return `${replacementStatusPrefix}${batchId}`;
+}
+
+function isReplacementDocument(document: StoredUploadedDocument) {
+  return String(document.status).startsWith(replacementStatusPrefix);
+}
+
+function physicalFileNameFor(document: StoredUploadedDocument) {
+  return document.physicalFileName || `${document.id}.pdf`;
+}
+
+async function deleteFilesAfterCommit(documents: StoredUploadedDocument[]) {
+  await Promise.all(
+    documents.map((document) =>
+      storage.delete(physicalFileNameFor(document)).catch(() => {
+        console.error("Nettoyage de fichier document a reprendre");
+      })
+    )
+  );
+}
 
 export async function GET(request: Request) {
   const code = readAccessKeyHeader(request);
@@ -45,7 +75,8 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: "Clé expirée", expired: true }, { status: 403 });
   }
 
-  const documents = await getDocumentsByKey(code);
+  const documents = (await getDocumentsByKey(code) as StoredUploadedDocument[])
+    .filter((document) => !isReplacementDocument(document));
   return NextResponse.json({ documents });
 }
 
@@ -58,11 +89,19 @@ export async function POST(request: Request) {
     const formData = await new Response(bytes, { headers: { "Content-Type": request.headers.get("content-type") || "" } }).formData();
     const rawCode = formData.get("code");
     const code = typeof rawCode === "string" ? rawCode.trim().toUpperCase() : "";
+    const rawReplacementBatchId = formData.get("replacementBatchId");
+    const replacementBatchId = typeof rawReplacementBatchId === "string"
+      ? rawReplacementBatchId.trim()
+      : "";
     const documentJson = formData.get("document");
     const file = formData.get("file");
 
     if (!code || typeof documentJson !== "string" || !(file instanceof File)) {
       return NextResponse.json({ error: "Données d'upload manquantes" }, { status: 400 });
+    }
+
+    if (replacementBatchId && !replacementBatchIdPattern.test(replacementBatchId)) {
+      return NextResponse.json({ error: "Lot de remplacement invalide" }, { status: 400 });
     }
 
     if (isBlockedProductionAdminCode(code)) {
@@ -92,20 +131,42 @@ export async function POST(request: Request) {
       );
     }
 
-    const physicalFileName = crypto.randomUUID() + extension;
+    const currentDocs = (await getDocumentsByKey(code, tx)) as StoredUploadedDocument[];
+    const duplicateCandidates = currentDocs.filter((item) => {
+      if (item.id === document.id || item.fileSize !== buffer.length) return false;
+      return replacementBatchId
+        ? String(item.status) === replacementStatus(replacementBatchId)
+        : item.status === "ready";
+    });
+    for (const candidate of duplicateCandidates) {
+      const existingBuffer = await storage.get(physicalFileNameFor(candidate));
+      if (existingBuffer?.equals(buffer)) {
+        throw new RequestError("Ce document est deja present dans cet audit", 409);
+      }
+    }
 
+    const physicalFileName = crypto.randomUUID() + extension;
     await storage.put(physicalFileName, buffer);
     createdFile = physicalFileName;
 
-    const currentDocs = (await getDocumentsByKey(code, tx)) as StoredUploadedDocument[];
     const updatedDocument: StoredUploadedDocument = {
       ...document,
-      status: "ready",
+      status: (replacementBatchId
+        ? replacementStatus(replacementBatchId)
+        : "ready") as UploadedDocument["status"],
       physicalFileName
     };
 
     const index = currentDocs.findIndex((item) => item.id === document.id);
     const updatedDocs = [...currentDocs];
+
+    if (
+      replacementBatchId &&
+      index >= 0 &&
+      String(currentDocs[index].status) !== replacementStatus(replacementBatchId)
+    ) {
+      throw new RequestError("Identifiant de document deja utilise", 409);
+    }
 
     if (index >= 0) {
       const oldDoc = currentDocs[index];
@@ -142,8 +203,18 @@ export async function DELETE(request: Request) {
       documentId?: string;
       purge?: boolean;
       clearRecords?: boolean;
+      replacementAction?: "commit" | "rollback";
+      replacementBatchId?: string;
+      replacementDocumentIds?: string[];
     };
-    const { documentId, purge, clearRecords } = body;
+    const {
+      documentId,
+      purge,
+      clearRecords,
+      replacementAction,
+      replacementBatchId,
+      replacementDocumentIds
+    } = body;
     const code = typeof body.code === "string" ? body.code.trim().toUpperCase() : "";
 
     if (!code) {
@@ -152,6 +223,100 @@ export async function DELETE(request: Request) {
 
     if (isBlockedProductionAdminCode(code)) {
       return NextResponse.json({ error: "Cle invalide ou non autorisee" }, { status: 403 });
+    }
+
+    if (
+      replacementAction !== undefined &&
+      replacementAction !== "commit" &&
+      replacementAction !== "rollback"
+    ) {
+      return NextResponse.json({ error: "Action de remplacement invalide" }, { status: 400 });
+    }
+
+    if (replacementAction) {
+      if (!replacementBatchId || !replacementBatchIdPattern.test(replacementBatchId)) {
+        return NextResponse.json({ error: "Lot de remplacement invalide" }, { status: 400 });
+      }
+
+      let filesToDelete: StoredUploadedDocument[] = [];
+      const response = await withKeyLock(`key:${code}`, async (tx) => {
+        const key = (await findKeyByCode(code, tx)) ??
+          (isAdminAccessCode(code) ? createAdminAccessKey() : undefined);
+        if (!key) {
+          return NextResponse.json({ error: "Clé invalide" }, { status: 403 });
+        }
+        if (!key.isActive) {
+          return NextResponse.json({ error: "Clé non active" }, { status: 403 });
+        }
+        if (!hasValidAccessExpiration(key)) {
+          return NextResponse.json({ error: "Clé expirée" }, { status: 403 });
+        }
+
+        const currentDocs = (await getDocumentsByKey(code, tx)) as StoredUploadedDocument[];
+        const expectedStatus = replacementStatus(replacementBatchId);
+        const replacementDocs = currentDocs.filter(
+          (document) => String(document.status) === expectedStatus
+        );
+
+        if (replacementAction === "rollback") {
+          if (replacementDocs.length === 0) {
+            return NextResponse.json(
+              { error: "Lot de remplacement introuvable" },
+              { status: 409 }
+            );
+          }
+          await saveDocuments(
+            code,
+            currentDocs.filter((document) => String(document.status) !== expectedStatus),
+            tx
+          );
+          filesToDelete = replacementDocs;
+          return NextResponse.json({ success: true, rolledBack: true });
+        }
+
+        const requestedIds = Array.isArray(replacementDocumentIds)
+          ? replacementDocumentIds
+          : [];
+        const uniqueRequestedIds = new Set(requestedIds);
+        const actualIds = new Set(replacementDocs.map((document) => document.id));
+        const isExactReplacement =
+          requestedIds.length > 0 &&
+          uniqueRequestedIds.size === requestedIds.length &&
+          actualIds.size === uniqueRequestedIds.size &&
+          [...actualIds].every((id) => uniqueRequestedIds.has(id));
+
+        if (!isExactReplacement) {
+          return NextResponse.json(
+            { error: "Lot de remplacement incomplet" },
+            { status: 409 }
+          );
+        }
+        for (const document of replacementDocs) {
+          if (!(await storage.get(physicalFileNameFor(document)))) {
+            return NextResponse.json(
+              { error: "Fichier prepare indisponible" },
+              { status: 409 }
+            );
+          }
+        }
+
+        const committedDocuments = replacementDocs.map((document) => ({
+          ...document,
+          status: "ready" as const
+        }));
+        filesToDelete = currentDocs.filter(
+          (document) => String(document.status) !== expectedStatus
+        );
+        await saveDocuments(code, committedDocuments, tx);
+        await deleteAnalysisByKey(code, tx);
+
+        return NextResponse.json({ success: true, documents: committedDocuments });
+      });
+
+      if (response.ok) {
+        await deleteFilesAfterCommit(filesToDelete);
+      }
+      return response;
     }
 
     return await withKeyLock(`key:${code}`, async (tx) => {

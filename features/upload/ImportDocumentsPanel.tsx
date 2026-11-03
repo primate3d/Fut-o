@@ -37,10 +37,13 @@ import {
 import {
   applyDocumentCorrections,
   clearStoredDocumentCorrections,
+  commitDocumentReplacementServer,
   deleteDocumentServer,
   getStoredDocumentCorrections,
   getStoredUploadedDocumentsServer,
+  getStoredUploadedDocumentsServerStrict,
   removeStoredDocumentCorrection,
+  rollbackDocumentReplacementServer,
   storeUploadedDocumentServer,
   storeDocumentCorrections,
   storeUploadedDocuments
@@ -90,36 +93,6 @@ function clearStoredAnalysis() {
   window.localStorage.removeItem(MOCK_ANALYSIS_STORAGE_KEY);
 }
 
-async function deleteStoredAnalysisServer() {
-  const activeKey = getStoredAccessKey();
-  if (!activeKey) return;
-
-  await fetch("/api/analyse", {
-    method: "DELETE",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ code: activeKey.code })
-  });
-}
-
-async function purgeStoredDocumentsServer() {
-  const activeKey = getStoredAccessKey();
-  if (!activeKey) return;
-
-  await fetch("/api/documents", {
-    method: "DELETE",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ code: activeKey.code, purge: true, clearRecords: true })
-  });
-}
-
-async function resetCurrentAuditDocuments() {
-  await deleteStoredAnalysisServer();
-  await purgeStoredDocumentsServer();
-  clearStoredAnalysis();
-  clearStoredDocumentCorrections();
-  storeUploadedDocuments([]);
-}
-
 function hasAcceptedFileType(file: File) {
   const extension = file.name.split(".").pop()?.toLowerCase();
   const acceptedExtension = ["pdf", "jpg", "jpeg", "png", "csv"].includes(
@@ -166,9 +139,11 @@ function isLikelyMultiContractInsuranceDocument(document: UploadedDocument) {
 export function ImportDocumentsPanel() {
   const router = useRouter();
   const inputRef = useRef<HTMLInputElement>(null);
+  const uploadInProgressRef = useRef(false);
   const [documents, setDocuments] = useState<UploadedDocument[]>([]);
   const [isDragging, setIsDragging] = useState(false);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [isUploading, setIsUploading] = useState(false);
   const [hasLoadedDocuments, setHasLoadedDocuments] = useState(false);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [complianceError, setComplianceError] = useState<{
@@ -206,16 +181,6 @@ export function ImportDocumentsPanel() {
     return hasExistingAudit && documents.some((document) => document.status !== "error");
   }
 
-  function getDuplicateFileNames(filesArray: File[]) {
-    const existingNames = new Set(
-      documents.map((document) => document.fileName.trim().toLowerCase())
-    );
-
-    return filesArray
-      .map((file) => file.name)
-      .filter((fileName) => existingNames.has(fileName.trim().toLowerCase()));
-  }
-
   function queueFilesForAuditChoice(fileList: FileList | File[]) {
     const filesArray = Array.from(fileList);
 
@@ -233,14 +198,34 @@ export function ImportDocumentsPanel() {
   }
 
   async function addFiles(fileList: FileList | File[], mode: "append" | "replace") {
-    const filesArray = Array.from(fileList);
-    const duplicateFileNames = mode === "append" ? getDuplicateFileNames(filesArray) : [];
+    if (uploadInProgressRef.current) {
+      return;
+    }
 
-    if (mode === "replace") {
-      await resetCurrentAuditDocuments();
-      setDocuments([]);
-      setDocumentCorrections({});
-      setHasExistingAudit(false);
+    const requestedFiles = Array.from(fileList);
+    const seenNames = new Set(
+      mode === "append"
+        ? documents.map((document) => document.fileName.trim().toLowerCase())
+        : []
+    );
+    const duplicateFileNames: string[] = [];
+    for (const file of requestedFiles) {
+      const normalizedName = file.name.trim().toLowerCase();
+      if (seenNames.has(normalizedName)) {
+        duplicateFileNames.push(file.name);
+      }
+      seenNames.add(normalizedName);
+    }
+    const filesArray = requestedFiles;
+
+    if (filesArray.length === 0) {
+      setPendingFiles(null);
+      setStatusMessage(
+        duplicateFileNames.length > 0
+          ? `Document déjà présent dans cet audit : ${duplicateFileNames.join(", ")}.`
+          : "Aucun document à ajouter."
+      );
+      return;
     }
 
     const preparedDocuments = filesArray.map((file) => {
@@ -251,35 +236,134 @@ export function ImportDocumentsPanel() {
       };
     });
 
-    setDocuments((current) =>
-      mode === "replace"
-        ? preparedDocuments.map((item) => item.uploadingDocument)
-        : [...preparedDocuments.map((item) => item.uploadingDocument), ...current]
-    );
-
-    for (let index = 0; index < filesArray.length; index += 1) {
-      const file = filesArray[index];
-      const { localDocument, uploadingDocument } = preparedDocuments[index];
-
-      const serverDocument = await storeUploadedDocumentServer(uploadingDocument, file);
-      setDocuments((current) =>
-        current.map((document) =>
-          document.id === uploadingDocument.id
-            ? serverDocument ?? localDocument
-            : document
-        )
+    if (
+      mode === "replace" &&
+      preparedDocuments.some(({ localDocument }) => localDocument.status === "error")
+    ) {
+      setStatusMessage(
+        "Le nouvel audit n'a pas été créé : vérifiez le format et la taille de tous les fichiers."
       );
+      return;
     }
 
-    setPendingFiles(null);
+    uploadInProgressRef.current = true;
+    setIsUploading(true);
     setStatusMessage(
-      duplicateFileNames.length > 0
-        ? `Document déjà présent dans cet audit : ${duplicateFileNames.join(", ")}. Vérifiez avant de relancer l'analyse.`
-        : mode === "replace"
-          ? "Nouvel audit créé. Seuls les nouveaux documents seront analysés."
-          : "Documents ajoutés à l'audit actuel."
+      mode === "replace"
+        ? "Préparation du nouvel audit. L'audit actuel reste conservé jusqu'à la fin."
+        : null
     );
-    clearStoredAnalysis();
+
+    try {
+      if (mode === "replace") {
+        const replacementBatchId = crypto.randomUUID();
+        const stagedDocuments: UploadedDocument[] = [];
+        const finishReplacement = (committedDocuments: UploadedDocument[]) => {
+          storeUploadedDocuments(committedDocuments);
+          setDocuments(committedDocuments);
+          setDocumentCorrections({});
+          clearStoredDocumentCorrections();
+          clearStoredAnalysis();
+          setHasExistingAudit(false);
+          setPendingFiles(null);
+          setStatusMessage(
+            "Nouvel audit créé. Seuls les nouveaux documents seront analysés."
+          );
+        };
+
+        try {
+          for (let index = 0; index < filesArray.length; index += 1) {
+            stagedDocuments.push(
+              await storeUploadedDocumentServer(
+                preparedDocuments[index].uploadingDocument,
+                filesArray[index],
+                replacementBatchId
+              )
+            );
+          }
+
+          const committedDocuments = await commitDocumentReplacementServer(
+            replacementBatchId,
+            stagedDocuments.map((document) => document.id)
+          );
+          finishReplacement(committedDocuments);
+        } catch {
+          try {
+            const serverDocuments = await getStoredUploadedDocumentsServerStrict();
+            const stagedIds = new Set(stagedDocuments.map((document) => document.id));
+            if (
+              serverDocuments.length === stagedIds.size &&
+              serverDocuments.every((document) => stagedIds.has(document.id))
+            ) {
+              finishReplacement(serverDocuments);
+              return;
+            }
+          } catch {
+            // The rollback below remains the source of truth when reconciliation fails.
+          }
+
+          let rollbackFailed = false;
+          try {
+            await rollbackDocumentReplacementServer(replacementBatchId);
+          } catch {
+            rollbackFailed = true;
+          }
+          setStatusMessage(
+            rollbackFailed
+              ? "Le nouvel audit n'a pas été créé. L'ancien audit reste disponible, mais le nettoyage des fichiers préparés devra être retenté."
+              : "Le nouvel audit n'a pas été créé. L'ancien audit et ses corrections ont été conservés."
+          );
+        }
+        return;
+      }
+
+      setDocuments((current) => [
+        ...preparedDocuments.map((item) => item.uploadingDocument),
+        ...current
+      ]);
+      let uploadedCount = 0;
+      let failedCount = 0;
+
+      for (let index = 0; index < filesArray.length; index += 1) {
+        const { uploadingDocument } = preparedDocuments[index];
+        try {
+          const serverDocument = await storeUploadedDocumentServer(
+            uploadingDocument,
+            filesArray[index]
+          );
+          uploadedCount += 1;
+          setDocuments((current) =>
+            current.map((document) =>
+              document.id === uploadingDocument.id ? serverDocument : document
+            )
+          );
+        } catch {
+          failedCount += 1;
+          setDocuments((current) =>
+            current.map((document) =>
+              document.id === uploadingDocument.id
+                ? { ...document, status: "error" }
+                : document
+            )
+          );
+        }
+      }
+
+      setPendingFiles(null);
+      if (uploadedCount > 0) {
+        clearStoredAnalysis();
+      }
+      setStatusMessage(
+        failedCount > 0
+          ? `${uploadedCount} document(s) ajouté(s), ${failedCount} échec(s) d'enregistrement serveur.`
+          : duplicateFileNames.length > 0
+            ? `Documents ajoutés. Des fichiers portent le même nom mais ont été conservés séparément : ${duplicateFileNames.join(", ")}.`
+            : "Documents ajoutés à l'audit actuel."
+      );
+    } finally {
+      uploadInProgressRef.current = false;
+      setIsUploading(false);
+    }
   }
 
   function handleFileInputChange(event: ChangeEvent<HTMLInputElement>) {
@@ -341,7 +425,11 @@ export function ImportDocumentsPanel() {
     clearStoredAnalysis();
   }
 
-  function removeDocument(id: string) {
+  async function removeDocument(id: string) {
+    if (!(await deleteDocumentServer(id))) {
+      setStatusMessage("La suppression du document a échoué. Aucun changement local n'a été appliqué.");
+      return;
+    }
     setDocuments((currentDocuments) =>
       currentDocuments.filter((document) => document.id !== id)
     );
@@ -351,7 +439,6 @@ export function ImportDocumentsPanel() {
       return nextCorrections;
     });
     removeStoredDocumentCorrection(id);
-    void deleteDocumentServer(id);
     clearStoredAnalysis();
   }
 
@@ -522,7 +609,12 @@ export function ImportDocumentsPanel() {
           ref={inputRef}
           type="file"
         />
-        <Button className="mt-6" onClick={() => inputRef.current?.click()} type="button">
+        <Button
+          className="mt-6"
+          disabled={isUploading}
+          onClick={() => inputRef.current?.click()}
+          type="button"
+        >
           Sélectionner des fichiers
         </Button>
         <p className="mt-3 max-w-xl text-xs leading-5 text-slate-500">
@@ -543,6 +635,7 @@ export function ImportDocumentsPanel() {
           </p>
           <div className="mt-4 flex flex-wrap gap-3">
             <Button
+              disabled={isUploading}
               onClick={() => void addFiles(pendingFiles, "append")}
               type="button"
               variant="secondary"
@@ -550,12 +643,14 @@ export function ImportDocumentsPanel() {
               Ajouter à cet audit
             </Button>
             <Button
+              disabled={isUploading}
               onClick={() => void addFiles(pendingFiles, "replace")}
               type="button"
             >
               Créer un nouvel audit
             </Button>
             <Button
+              disabled={isUploading}
               onClick={() => setPendingFiles(null)}
               type="button"
               variant="ghost"
@@ -621,7 +716,7 @@ export function ImportDocumentsPanel() {
             </p>
           </div>
           <Button
-            disabled={usableDocumentCount === 0 || isAnalyzing}
+            disabled={usableDocumentCount === 0 || isAnalyzing || isUploading}
             onClick={launchAnalysis}
             type="button"
           >
@@ -719,7 +814,8 @@ export function ImportDocumentsPanel() {
                       <button
                         aria-label={`Supprimer ${document.fileName}`}
                         className="inline-flex h-10 w-10 items-center justify-center rounded-lg text-slate-500 transition hover:bg-red-50 hover:text-red-600"
-                        onClick={() => removeDocument(document.id)}
+                        disabled={isUploading}
+                        onClick={() => void removeDocument(document.id)}
                         type="button"
                       >
                         <Trash2 size={18} />

@@ -12,6 +12,10 @@ import EmbeddedPostgres from "embedded-postgres";
 import postgres from "postgres";
 import snapshot from "../drizzle/meta/0000_snapshot.json";
 import { householdDocuments, aiHouseholdPayload, emptyAnalysis } from "./fixtures/household";
+import {
+  MOBILE_CATALOG_FIXTURE_NOW,
+  mobileCatalogSnapshotFixture
+} from "./fixtures/mobile-catalog";
 import { registerE2eWorkflows } from "./e2e-workflows.test";
 import {
   ExpenseCategory,
@@ -22,6 +26,7 @@ import {
 } from "../types";
 import { jsPDF } from "jspdf";
 import type Stripe from "stripe";
+import { adaptMobileCatalog } from "../features/recommendations/mobile-catalog";
 
 let pg: EmbeddedPostgres;
 let sql: ReturnType<typeof postgres>;
@@ -41,6 +46,13 @@ const fakeKey = (code = randomUUID().toUpperCase()) => ({
 });
 const legacyFreeAccessCode = "FUTEO-LEGACY-EXPIRED";
 const legacyDuplicateCode = "FUTEO-LEGACY-DUPLICATE";
+
+function getTestMobileCatalog() {
+  return adaptMobileCatalog(
+    mobileCatalogSnapshotFixture,
+    MOBILE_CATALOG_FIXTURE_NOW
+  );
+}
 
 function paidSession(id: string, planId: "foyer" | "famille" = "foyer") {
   return {
@@ -188,7 +200,13 @@ test("activation is idempotent, keeps expiration and refuses expired/inactive ke
   }
 });
 
-async function uploadRequest(code: string, id: string, content?: File, fixtureId = id) {
+async function uploadRequest(
+  code: string,
+  id: string,
+  content?: File,
+  fixtureId = id,
+  replacementBatchId?: string
+) {
   const { POST } = await import("../app/api/documents/route");
   const fixture = householdDocuments.find((doc) => doc.id === fixtureId) ?? householdDocuments[3];
   const pdf = new jsPDF();
@@ -198,7 +216,26 @@ async function uploadRequest(code: string, id: string, content?: File, fixtureId
   form.set("code", code);
   form.set("document", JSON.stringify({ ...fixture, id }));
   form.set("file", file);
+  if (replacementBatchId) form.set("replacementBatchId", replacementBatchId);
   return POST(new Request("http://local.test/api/documents", { method: "POST", body: form }));
+}
+
+async function replaceDocumentsRequest(
+  code: string,
+  replacementAction: "commit" | "rollback",
+  replacementBatchId: string,
+  replacementDocumentIds?: string[]
+) {
+  const { DELETE } = await import("../app/api/documents/route");
+  return DELETE(new Request("http://local.test/api/documents", {
+    method: "DELETE",
+    body: JSON.stringify({
+      code,
+      replacementAction,
+      replacementBatchId,
+      replacementDocumentIds
+    })
+  }));
 }
 
 function analysisRequest(code: string, documents: unknown[]) {
@@ -297,6 +334,348 @@ test("concurrent uploads preserve both documents after retrying the busy request
   assert.equal((await repo.getDocumentsByKey(key.code)).length, 2);
 });
 
+test("replacement stays hidden and preserves the current audit when an import fails", async () => {
+  const { GET } = await import("../app/api/documents/route");
+  const { storage } = await import("../lib/server/storage");
+  const key = fakeKey();
+  await repo.saveKey(key);
+  const oldId = randomUUID();
+  const oldDocument = ((await (await uploadRequest(key.code, oldId)).json()) as {
+    document: UploadedDocument & { physicalFileName: string };
+  }).document;
+  await repo.saveAnalysis(key.code, analysisWithProvider(key.code, "EDF"));
+
+  const batchId = randomUUID();
+  const stagedId = randomUUID();
+  const stagedDocument = ((await (await uploadRequest(
+    key.code,
+    stagedId,
+    undefined,
+    "mobile",
+    batchId
+  )).json()) as {
+    document: UploadedDocument & { physicalFileName: string };
+  }).document;
+  const invalidUpload = await uploadRequest(
+    key.code,
+    randomUUID(),
+    new File(["not a PDF"], "invalid.pdf", { type: "application/pdf" }),
+    "mobile",
+    batchId
+  );
+  assert.equal(invalidUpload.status, 415);
+
+  const visibleResponse = await GET(new Request("http://local.test/api/documents", {
+    headers: { "x-futeo-access-key": key.code }
+  }));
+  const visibleDocuments = ((await visibleResponse.json()) as {
+    documents: UploadedDocument[];
+  }).documents;
+  assert.deepEqual(visibleDocuments.map((document) => document.id), [oldId]);
+  assert.ok(await repo.getAnalysisByKey(key.code));
+  const { POST: analyze } = await import("../app/api/analyse/route");
+  const quotaBeforeRejectedStage = (await repo.findKeyByCode(key.code))!.usesRemaining;
+  assert.equal(
+    (await analyze(analysisRequest(key.code, [stagedDocument]))).status,
+    403
+  );
+  assert.equal(
+    (await repo.findKeyByCode(key.code))!.usesRemaining,
+    quotaBeforeRejectedStage
+  );
+
+  assert.equal((await replaceDocumentsRequest(
+    key.code,
+    "commit",
+    batchId,
+    [stagedId, randomUUID()]
+  )).status, 409);
+  assert.ok(await repo.getAnalysisByKey(key.code));
+  assert.ok(await storage.get(oldDocument.physicalFileName));
+
+  assert.equal((await replaceDocumentsRequest(
+    key.code,
+    "rollback",
+    batchId
+  )).status, 200);
+  assert.deepEqual(
+    (await repo.getDocumentsByKey(key.code)).map((document) => document.id),
+    [oldId]
+  );
+  assert.equal(await storage.get(stagedDocument.physicalFileName), null);
+  assert.ok(await storage.get(oldDocument.physicalFileName));
+  assert.ok(await repo.getAnalysisByKey(key.code));
+});
+
+test("replacement atomically swaps documents and removes only the previous analysis", async () => {
+  const { GET } = await import("../app/api/documents/route");
+  const { storage } = await import("../lib/server/storage");
+  const key = fakeKey();
+  const foreignKey = fakeKey();
+  await repo.saveKey(key);
+  await repo.saveKey(foreignKey);
+  const oldId = randomUUID();
+  const oldDocument = ((await (await uploadRequest(key.code, oldId)).json()) as {
+    document: UploadedDocument & { physicalFileName: string };
+  }).document;
+  await repo.saveAnalysis(key.code, analysisWithProvider(key.code, "EDF"));
+
+  const batchId = randomUUID();
+  const newIds = [randomUUID(), randomUUID()];
+  const stagedDocuments: Array<UploadedDocument & { physicalFileName: string }> = [];
+  for (let index = 0; index < newIds.length; index += 1) {
+    const response = await uploadRequest(
+      key.code,
+      newIds[index],
+      undefined,
+      index === 0 ? "mobile" : "sfr",
+      batchId
+    );
+    assert.equal(response.status, 200);
+    stagedDocuments.push(((await response.json()) as {
+      document: UploadedDocument & { physicalFileName: string };
+    }).document);
+  }
+
+  assert.equal((await replaceDocumentsRequest(
+    foreignKey.code,
+    "commit",
+    batchId,
+    newIds
+  )).status, 409);
+  assert.equal((await repo.getDocumentsByKey(foreignKey.code)).length, 0);
+
+  const commitResponse = await replaceDocumentsRequest(
+    key.code,
+    "commit",
+    batchId,
+    newIds
+  );
+  assert.equal(commitResponse.status, 200);
+  const committedDocuments = ((await commitResponse.json()) as {
+    documents: UploadedDocument[];
+  }).documents;
+  assert.deepEqual(
+    committedDocuments.map((document) => document.id).sort(),
+    [...newIds].sort()
+  );
+  assert.ok(committedDocuments.every((document) => document.status === "ready"));
+  assert.equal(await repo.getAnalysisByKey(key.code), null);
+  assert.equal(await storage.get(oldDocument.physicalFileName), null);
+  for (const document of stagedDocuments) {
+    assert.ok(await storage.get(document.physicalFileName));
+  }
+  assert.equal((await replaceDocumentsRequest(
+    key.code,
+    "rollback",
+    batchId
+  )).status, 409);
+
+  const reloaded = await GET(new Request("http://local.test/api/documents", {
+    headers: { "x-futeo-access-key": key.code }
+  }));
+  assert.deepEqual(
+    ((await reloaded.json()) as { documents: UploadedDocument[] }).documents
+      .map((document) => document.id)
+      .sort(),
+    [...newIds].sort()
+  );
+});
+
+test("missing prepared file cannot replace the current audit", async () => {
+  const { storage } = await import("../lib/server/storage");
+  const key = fakeKey();
+  await repo.saveKey(key);
+  const oldId = randomUUID();
+  const oldDocument = ((await (await uploadRequest(
+    key.code,
+    oldId,
+    undefined,
+    "edf"
+  )).json()) as {
+    document: UploadedDocument & { physicalFileName: string };
+  }).document;
+  await repo.saveAnalysis(key.code, analysisWithProvider(key.code, "EDF"));
+
+  const batchId = randomUUID();
+  const stagedId = randomUUID();
+  const stagedDocument = ((await (await uploadRequest(
+    key.code,
+    stagedId,
+    undefined,
+    "mobile",
+    batchId
+  )).json()) as {
+    document: UploadedDocument & { physicalFileName: string };
+  }).document;
+  await storage.delete(stagedDocument.physicalFileName);
+
+  assert.equal((await replaceDocumentsRequest(
+    key.code,
+    "commit",
+    batchId,
+    [stagedId]
+  )).status, 409);
+  assert.ok(await storage.get(oldDocument.physicalFileName));
+  assert.ok(await repo.getAnalysisByKey(key.code));
+  assert.ok((await repo.getDocumentsByKey(key.code)).some(
+    (document) => document.id === oldId
+  ));
+  assert.equal((await replaceDocumentsRequest(
+    key.code,
+    "rollback",
+    batchId
+  )).status, 200);
+});
+
+test("concurrent replacements never mix batches", async () => {
+  const key = fakeKey();
+  await repo.saveKey(key);
+  const oldId = randomUUID();
+  assert.equal((await uploadRequest(key.code, oldId, undefined, "edf")).status, 200);
+  await repo.saveAnalysis(key.code, analysisWithProvider(key.code, "EDF"));
+
+  const batches: string[] = [randomUUID(), randomUUID()];
+  const ids: string[] = [randomUUID(), randomUUID()];
+  assert.equal((await uploadRequest(
+    key.code,
+    ids[0],
+    undefined,
+    "mobile",
+    batches[0]
+  )).status, 200);
+  assert.equal((await uploadRequest(
+    key.code,
+    ids[1],
+    undefined,
+    "sfr",
+    batches[1]
+  )).status, 200);
+
+  const responses = await Promise.all([
+    replaceDocumentsRequest(key.code, "commit", batches[0], [ids[0]]),
+    replaceDocumentsRequest(key.code, "commit", batches[1], [ids[1]])
+  ]);
+  assert.equal(responses.filter((response) => response.status === 200).length, 1);
+  assert.equal(responses.filter((response) => response.status === 409).length, 1);
+
+  const stored = await repo.getDocumentsByKey(key.code);
+  assert.equal(stored.length, 1);
+  assert.ok(ids.includes(stored[0].id));
+  assert.equal(stored[0].status, "ready");
+  assert.equal(await repo.getAnalysisByKey(key.code), null);
+});
+
+test("same file name keeps distinct contents and rejects exact duplicates", async () => {
+  const key = fakeKey();
+  await repo.saveKey(key);
+  const first = pdfFile("facture.pdf", "Facture EDF contenu A");
+  const second = pdfFile("facture.pdf", "Facture SFR contenu B");
+
+  assert.equal((await uploadRequest(
+    key.code,
+    randomUUID(),
+    first,
+    "edf"
+  )).status, 200);
+  assert.equal((await uploadRequest(
+    key.code,
+    randomUUID(),
+    second,
+    "sfr"
+  )).status, 200);
+  assert.equal((await repo.getDocumentsByKey(key.code)).length, 2);
+
+  const exactDuplicate = pdfFile("copie-renommee.pdf", "Contenu strictement identique");
+  const duplicateBytes = await exactDuplicate.arrayBuffer();
+  assert.equal((await uploadRequest(
+    key.code,
+    randomUUID(),
+    new File([duplicateBytes], "original.pdf", { type: "application/pdf" }),
+    "mobile"
+  )).status, 200);
+  assert.equal((await uploadRequest(
+    key.code,
+    randomUUID(),
+    new File([duplicateBytes], "copie.pdf", { type: "application/pdf" }),
+    "mobile"
+  )).status, 409);
+});
+
+test("expired prepared documents are purged with their physical files", async () => {
+  const { storage } = await import("../lib/server/storage");
+  const key = fakeKey();
+  await repo.saveKey(key);
+  const batchId = randomUUID();
+  const staged = ((await (await uploadRequest(
+    key.code,
+    randomUUID(),
+    undefined,
+    "mobile",
+    batchId
+  )).json()) as {
+    document: UploadedDocument & { physicalFileName: string };
+  }).document;
+  assert.ok(await storage.get(staged.physicalFileName));
+
+  await sql`delete from access_keys where code=${key.code}`;
+  await repo.saveKey({
+    ...key,
+    expiresAt: new Date(Date.now() - 60_000).toISOString()
+  });
+  await repo.purgeExpiredData();
+
+  assert.equal(await storage.get(staged.physicalFileName), null);
+  assert.equal((await repo.getDocumentsByKey(key.code)).length, 0);
+});
+
+test("client storage helpers reject failed upload and delete responses", async () => {
+  const originalFetch = globalThis.fetch;
+  const originalWindow = globalThis.window;
+  const key = fakeKey();
+  const values = new Map<string, string>([
+    ["futeo.activeAccessKey", JSON.stringify(key)]
+  ]);
+  const localStorage = {
+    getItem: (name: string) => values.get(name) ?? null,
+    setItem: (name: string, value: string) => values.set(name, value),
+    removeItem: (name: string) => values.delete(name),
+    clear: () => values.clear(),
+    key: (index: number) => [...values.keys()][index] ?? null,
+    get length() { return values.size; }
+  };
+
+  Object.defineProperty(globalThis, "window", {
+    configurable: true,
+    value: { localStorage }
+  });
+  try {
+    const {
+      deleteDocumentServer,
+      storeUploadedDocumentServer
+    } = await import("../features/upload/storage");
+    globalThis.fetch = async () => new Response(
+      JSON.stringify({ error: "simulated failure" }),
+      { status: 500, headers: { "Content-Type": "application/json" } }
+    );
+
+    assert.equal(await deleteDocumentServer(randomUUID()), false);
+    await assert.rejects(
+      storeUploadedDocumentServer(
+        { ...householdDocuments[3], id: randomUUID() },
+        pdfFile("failed-upload.pdf", householdDocuments[3].extractedText)
+      ),
+      /enregistrement serveur/i
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+    Object.defineProperty(globalThis, "window", {
+      configurable: true,
+      value: originalWindow
+    });
+  }
+});
+
 test("analysis rejects foreign documents, forged paths and duplicate IDs before OCR/AI", async () => {
   const { POST } = await import("../app/api/analyse/route");
   const key = fakeKey(); await repo.saveKey(key);
@@ -362,9 +741,6 @@ test("mixed EDF / MACIF multi-contract / SFR box / mobile preserves every docume
   assert.equal(result.expenses.filter((expense) => expense.sourceDocumentId === "sfr").length, 1);
   assert.equal(result.expenses.find((expense) => expense.sourceDocumentId === "mobile")!.mobileDataGB, 100);
   const { findAlternativeOffers } = await import("../features/recommendations/service");
-  const { getEmbeddedMobileCatalog } = await import(
-    "../features/recommendations/embedded-mobile-catalog"
-  );
   const alternatives = findAlternativeOffers(
     result.expenses.map((expense) =>
       expense.subcategory === ExpenseSubcategory.MOBILE
@@ -372,7 +748,7 @@ test("mixed EDF / MACIF multi-contract / SFR box / mobile preserves every docume
         : expense
     ),
     {
-      mobileCatalog: getEmbeddedMobileCatalog(new Date("2026-11-02T10:00:00.000Z"))
+      mobileCatalog: getTestMobileCatalog()
     }
   );
   assert.ok(alternatives.length > 0);
@@ -1056,9 +1432,6 @@ test("mobile PDF normalization separates recurring prices, invoice totals and da
 
 test("uncertain mobile recurring totals do not produce alternatives", async () => {
   const { findAlternativeOffers } = await import("../features/recommendations/service");
-  const { getEmbeddedMobileCatalog } = await import(
-    "../features/recommendations/embedded-mobile-catalog"
-  );
   const expense: Expense = {
     id: `mobile_${randomUUID()}`,
     label: "Forfait mobile",
@@ -1075,7 +1448,7 @@ test("uncertain mobile recurring totals do not produce alternatives", async () =
   };
 
   assert.deepEqual(findAlternativeOffers([expense], {
-    mobileCatalog: getEmbeddedMobileCatalog(new Date("2026-11-02T10:00:00.000Z"))
+    mobileCatalog: getTestMobileCatalog()
   }), []);
 });
 
@@ -1100,11 +1473,8 @@ test("mobile comparison uses included data and separates opt-in lower-data compr
   const { findAlternativeOffers, isPrimaryAlternative } = await import(
     "../features/recommendations/service"
   );
-  const { getEmbeddedMobileCatalog } = await import(
-    "../features/recommendations/embedded-mobile-catalog"
-  );
   const options = {
-    mobileCatalog: getEmbeddedMobileCatalog(new Date("2026-11-02T10:00:00.000Z"))
+    mobileCatalog: getTestMobileCatalog()
   };
   const mobileExpense = (overrides: Partial<Expense> = {}): Expense => ({
     id: `mobile_${randomUUID()}`,
