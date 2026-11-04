@@ -19,6 +19,12 @@ import { ProviderLogo } from "@/components/ui/ProviderLogo";
 import { StatCard } from "@/components/ui/StatCard";
 import { getStoredAccessKey, isDiscoveryPlan } from "@/features/billing/access-keys";
 import {
+  buildFinancialSummary,
+  getRealizedSavingsForAnalysis,
+  isReliablePotentialOffer,
+  type RealizedSavingRecord
+} from "@/features/reports/financial-summary";
+import {
   findConditionalInternetSupportOffers,
   isPrimaryAlternative,
   type AlternativeOffer
@@ -45,6 +51,7 @@ import {
 import { getProviderBranding } from "@/lib/provider-branding";
 import { LatestRequestController } from "@/features/analysis/latest-request";
 import type {
+  ContractComparisonState,
   DocumentUserCorrections,
   Expense,
   MockAnalysis,
@@ -84,6 +91,21 @@ function hasUsableAmounts(analysis: MockAnalysis | null) {
   );
 }
 
+function getComparisonMessageForExpenses(
+  expenses: Expense[],
+  comparisonStates: ContractComparisonState[]
+) {
+  const states = expenses
+    .map((expense) => comparisonStates.find((state) => state.expenseId === expense.id))
+    .filter((state): state is ContractComparisonState => Boolean(state));
+  if (states.some((state) => state.status === "alternative_found")) return null;
+  return states.find((state) => state.status === "missing_information")?.message
+    ?? states.find((state) => state.status === "disabled")?.message
+    ?? states.find((state) => state.status === "unavailable")?.message
+    ?? states.find((state) => state.status === "no_better_offer")?.message
+    ?? "La comparaison des offres n'est pas disponible actuellement.";
+}
+
 function isManualAnalysis(analysis: MockAnalysis | null) {
   return Boolean(
     analysis?.documents.some((document) => document.mimeType === "manual/input")
@@ -98,7 +120,7 @@ function getExpenseIdFromAlternativeId(offer: AlternativeOffer, analysis: MockAn
 }
 
 function computeAlternativeSavings(analysis: MockAnalysis, alternatives: AlternativeOffer[]) {
-  const bestSavingByExpense = alternatives.filter(isPrimaryAlternative).reduce<Record<string, number>>((savings, offer) => {
+  const bestSavingByExpense = alternatives.filter(isReliablePotentialOffer).reduce<Record<string, number>>((savings, offer) => {
     const expenseId = getExpenseIdFromAlternativeId(offer, analysis);
     if (!expenseId) return savings;
 
@@ -252,12 +274,14 @@ const manualFrequencyOptions: Array<{
 
 export function ResultsPanel() {
   const router = useRouter();
+  const activeAccessKeyCode = getStoredAccessKey()?.code;
   const [analysis, setAnalysis] = useState<MockAnalysis | null>(null);
   const [alternatives, setAlternatives] = useState<AlternativeOffer[]>([]);
   const [isLoadingAlternatives, setIsLoadingAlternatives] = useState(false);
   const [alternativesUpdatedAt, setAlternativesUpdatedAt] = useState<string | null>(null);
   const [catalogStatus, setCatalogStatus] = useState<"fresh" | "stale" | "empty" | null>(null);
   const [comparisonMessage, setComparisonMessage] = useState<string | null>(null);
+  const [comparisonStates, setComparisonStates] = useState<ContractComparisonState[]>([]);
   const [selectedOffer, setSelectedOffer] = useState<SelectedAlternativeOffer | null>(null);
   const [serviceMessage, setServiceMessage] = useState<string | null>(null);
   const [manualForm, setManualForm] = useState<ManualEntryForm>({
@@ -287,6 +311,7 @@ export function ResultsPanel() {
     Record<string, MobileDataConfirmation>
   >({});
   const [savingMobileExpenseId, setSavingMobileExpenseId] = useState<string | null>(null);
+  const [realizedSavings, setRealizedSavings] = useState<RealizedSavingRecord[]>([]);
   const alternativesRequestController = useRef<LatestRequestController | null>(null);
   if (!alternativesRequestController.current) {
     alternativesRequestController.current = new LatestRequestController();
@@ -521,6 +546,7 @@ export function ResultsPanel() {
           verifiedAt?: string | null;
         };
         comparisonMessage?: string | null;
+        comparisonStates?: ContractComparisonState[];
       };
       if (!requestController.isCurrent(request)) return;
 
@@ -550,6 +576,7 @@ export function ResultsPanel() {
       setAlternativesUpdatedAt(payload.catalog?.verifiedAt ?? null);
       setCatalogStatus(payload.catalog?.status ?? null);
       setComparisonMessage(payload.comparisonMessage ?? null);
+      setComparisonStates(payload.comparisonStates ?? []);
     } catch {
       if (!requestController.isCurrent(request)) return;
 
@@ -557,6 +584,7 @@ export function ResultsPanel() {
       setAlternativesUpdatedAt(null);
       setCatalogStatus(null);
       setComparisonMessage(null);
+      setComparisonStates([]);
       setServiceMessage(
         "Les alternatives détaillées seront affichées quand le service de comparaison sera connecté."
       );
@@ -608,9 +636,42 @@ export function ResultsPanel() {
     void loadServerState();
   }, []);
 
+  useEffect(() => {
+    setRealizedSavings(
+      analysis ? getRealizedSavingsForAnalysis(analysis, activeAccessKeyCode) : []
+    );
+  }, [activeAccessKeyCode, analysis]);
+
+  const financialSummary = useMemo(
+    () => analysis
+      ? buildFinancialSummary(
+          analysis,
+          alternatives,
+          comparisonStates,
+          realizedSavings
+        )
+      : null,
+    [alternatives, analysis, comparisonStates, realizedSavings]
+  );
+  const currentDisplayExpenses = useMemo(
+    () => analysis
+      ? analysis.expenses.map((expense) => {
+          const contract = financialSummary?.contracts[expense.id];
+          return contract
+            ? {
+                ...expense,
+                monthlyAmount: contract.currentMonthlyAmount,
+                yearlyAmount: contract.currentYearlyAmount
+              }
+            : expense;
+        })
+      : [],
+    [analysis, financialSummary]
+  );
+
   const categorySummaries = useMemo(
-    () => (analysis ? summarizeExpensesByCategory(analysis.expenses) : []),
-    [analysis]
+    () => summarizeExpensesByCategory(currentDisplayExpenses),
+    [currentDisplayExpenses]
   );
   const firstManualExpenseByCategory = useMemo(() => {
     if (!analysis) return {};
@@ -647,8 +708,8 @@ export function ResultsPanel() {
     );
   }, [analysis]);
   const topExpenses = useMemo(
-    () => (analysis ? getTopExpenses(analysis.expenses, 5) : []),
-    [analysis]
+    () => getTopExpenses(currentDisplayExpenses, 5),
+    [currentDisplayExpenses]
   );
   const primaryAlternatives = useMemo(
     () => alternatives.filter(isPrimaryAlternative),
@@ -728,7 +789,6 @@ export function ResultsPanel() {
       {}
     );
   }, [primaryAlternatives, analysis]);
-
   if (showManualForm || !analysis || analysis.expenses.length === 0) {
     return (
       <section className="space-y-6">
@@ -1042,7 +1102,8 @@ export function ResultsPanel() {
     );
   }
 
-  const hasMeaningfulSavings = analysis.yearlyPotentialSavings > 0;
+  const currentFinancialSummary = financialSummary!;
+  const hasMeaningfulSavings = currentFinancialSummary.potentialYearlySaving > 0;
   const isDiscoveryAccess = isDiscoveryPlan(getStoredAccessKey()?.plan);
   const conditionalSupportOffers = isDiscoveryAccess
     ? []
@@ -1229,20 +1290,31 @@ export function ResultsPanel() {
         </Card>
       ) : null}
 
-      <div className="grid gap-4 md:grid-cols-3">
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         <StatCard
-          label="Total mensuel estimé"
-          value={formatCurrency(analysis.totalMonthlyAmount)}
+          label="Dépenses actuelles mensuelles"
+          value={formatCurrency(currentFinancialSummary.currentMonthlyAmount)}
         />
         <StatCard
-          label="Total annuel estimé"
-          value={formatCurrency(analysis.totalYearlyAmount)}
+          label="Dépenses actuelles annuelles"
+          value={formatCurrency(currentFinancialSummary.currentYearlyAmount)}
         />
         <StatCard
-          helper="Estimation à confirmer"
+          helper={currentFinancialSummary.potentialStatus === "partial"
+            ? "Montant partiel vérifié"
+            : currentFinancialSummary.potentialStatus === "undetermined"
+              ? "Comparaison insuffisante"
+              : "Comparaisons vérifiées"}
           icon={<Lightbulb size={22} />}
-          label="Pistes d'économies"
-          value={formatCurrency(analysis.yearlyPotentialSavings)}
+          label="Économies potentielles"
+          value={currentFinancialSummary.potentialStatus === "undetermined"
+            ? "Non déterminé"
+            : `${formatCurrency(currentFinancialSummary.potentialYearlySaving)} / an`}
+        />
+        <StatCard
+          helper="Réductions confirmées et effectives"
+          label="Économies réalisées"
+          value={`${formatCurrency(currentFinancialSummary.realizedYearlySaving)} / an`}
         />
       </div>
 
@@ -1291,6 +1363,10 @@ export function ResultsPanel() {
               const frequencyWarning = uncertainExpense
                 ? formatFrequencyWarning(uncertainExpense)
                 : null;
+              const noAlternativeMessage = getComparisonMessageForExpenses(
+                summary.expenses,
+                comparisonStates
+              );
 
               return (
                 <div className="rounded-lg border border-navy-100 p-4" key={summary.category}>
@@ -1310,7 +1386,7 @@ export function ResultsPanel() {
                   ) : null}
                   {!bestOffer && !isLoadingAlternatives ? (
                     <p className="mt-3 text-xs font-medium text-slate-500">
-                      Aucune alternative fiable disponible pour ce type de contrat.
+                      {noAlternativeMessage}
                     </p>
                   ) : null}
                   {frequencyWarning ? (
@@ -1381,6 +1457,9 @@ export function ResultsPanel() {
           <div className="mt-4 space-y-3">
             {topExpenses.map((expense) => {
               const bestOffer = bestAlternativeByExpense[expense.id];
+              const comparisonState = comparisonStates.find(
+                (state) => state.expenseId === expense.id
+              );
 
               return (
                 <div className="rounded-lg border border-transparent bg-white p-3" key={expense.id}>
@@ -1405,6 +1484,11 @@ export function ResultsPanel() {
                         {formatFrequencyWarning(expense) ? (
                           <p className="mt-1 text-xs font-medium text-amber-700">
                             {formatFrequencyWarning(expense)}
+                          </p>
+                        ) : null}
+                        {!bestOffer && comparisonState ? (
+                          <p className="mt-1 text-xs font-medium text-slate-500">
+                            {comparisonState.message}
                           </p>
                         ) : null}
                       </div>

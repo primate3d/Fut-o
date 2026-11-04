@@ -32,6 +32,7 @@ import {
   addAuditActionLog,
   getAuditActionLogs,
   getStoredLetterRecord,
+  getStoredLetterRecords,
   saveFollowupLetter,
   savePreparedLetter,
   type LetterActionSnapshot
@@ -286,6 +287,7 @@ export function LettersPanel() {
   const followupActionId = searchParams.get("relance");
   const followupRecordId = searchParams.get("relanceRecord");
   const savedRecordId = searchParams.get("courrier");
+  const savedActionId = searchParams.get("action");
   const selectedExpenseId = searchParams.get("expenseId");
   const activeKey = getStoredAccessKey();
   const activeKeyCode = activeKey?.code;
@@ -367,7 +369,16 @@ export function LettersPanel() {
     };
   }
 
+  function saveLetterAsPrepared(letter: GeneratedLetter, content: string) {
+    if (!letterAuditId) return null;
+    const snapshot = getLetterActionSnapshot(letter, content);
+    return isFollowupDraft && sourceLetterRecordId
+      ? saveFollowupLetter(sourceLetterRecordId, snapshot)
+      : savePreparedLetter(letterAuditId, snapshot);
+  }
+
   async function downloadLetterPdf(letter: GeneratedLetter, content: string) {
+    const letterSnapshot = getLetterActionSnapshot(letter, content);
     generatePDF(
       `${letter.provider}-${letter.type}.pdf`.replaceAll(" ", "-"),
       letter.title,
@@ -380,12 +391,14 @@ export function LettersPanel() {
         analysis?.documents.map((document) => document.fileName).join(", ") ??
         followupSourceDocumentName,
       provider: letter.provider,
-      letterSnapshot: getLetterActionSnapshot(letter, content)
+      letterSnapshot
     });
+    saveLetterAsPrepared(letter, content);
     await purgeSourcesAfterDownload();
   }
 
   async function downloadLetterText(letter: GeneratedLetter, content: string) {
+    const letterSnapshot = getLetterActionSnapshot(letter, content);
     downloadTextFile(
       `${letter.provider}-${letter.type}.txt`.replaceAll(" ", "-"),
       content
@@ -397,8 +410,9 @@ export function LettersPanel() {
         analysis?.documents.map((document) => document.fileName).join(", ") ??
         followupSourceDocumentName,
       provider: letter.provider,
-      letterSnapshot: getLetterActionSnapshot(letter, content)
+      letterSnapshot
     });
+    saveLetterAsPrepared(letter, content);
     await purgeSourcesAfterDownload();
   }
 
@@ -411,6 +425,7 @@ export function LettersPanel() {
       provider: letter.provider,
       letterSnapshot
     });
+    saveLetterAsPrepared(letter, content);
     sendEmail(letter.subject, content);
   }
 
@@ -420,10 +435,7 @@ export function LettersPanel() {
       return;
     }
 
-    const snapshot = getLetterActionSnapshot(selectedLetter, renderedLetter);
-    const record = isFollowupDraft && sourceLetterRecordId
-      ? saveFollowupLetter(sourceLetterRecordId, snapshot)
-      : savePreparedLetter(letterAuditId, snapshot);
+    const record = saveLetterAsPrepared(selectedLetter, renderedLetter);
     setServiceMessage(
       record
         ? isFollowupDraft
@@ -436,6 +448,7 @@ export function LettersPanel() {
   useEffect(() => {
     if (isDiscoveryAccess) return;
 
+    const currentAuditId = getStoredMockAnalysis()?.id ?? null;
     const savedRecord = savedRecordId ? getStoredLetterRecord(savedRecordId) : null;
     if (savedRecord) {
       const savedLetter = savedRecord.snapshot.renderedContent
@@ -459,13 +472,47 @@ export function LettersPanel() {
       return;
     }
 
+    const savedAction = savedActionId
+      ? getAuditActionLogs().find((action) => action.id === savedActionId)
+      : undefined;
+    if (savedAction?.letterSnapshot) {
+      const savedLetter = savedAction.letterSnapshot.renderedContent
+        ? {
+            ...savedAction.letterSnapshot.letter,
+            bodyTemplate: savedAction.letterSnapshot.renderedContent
+          }
+        : savedAction.letterSnapshot.letter;
+      setLetters([savedLetter]);
+      setSelectedLetterId(savedLetter.id);
+      setPersonalization(savedAction.letterSnapshot.personalization);
+      setFollowupSourceDocumentName(savedAction.letterSnapshot.documentName);
+      setLetterAuditId(currentAuditId);
+      setIsFollowupDraft(false);
+      setSourceLetterRecordId(null);
+      setServiceMessage(
+        "Courrier historique affiché. Son téléchargement ou sa préparation par e-mail ne prouve pas son envoi."
+      );
+      return;
+    }
+
     const sourceRecord = followupRecordId
       ? getStoredLetterRecord(followupRecordId)
       : null;
     if (sourceRecord && !sourceRecord.parentRecordId) {
+      if (
+        sourceRecord.auditId !== currentAuditId ||
+        sourceRecord.status !== "sent" ||
+        !sourceRecord.sentAt
+      ) {
+        setLetters([]);
+        setServiceMessage(
+          "Confirmez d'abord la date réelle d'envoi depuis le rapport avant de préparer une relance."
+        );
+        return;
+      }
       const followupLetter = createFollowupLetterFromSnapshot(
         sourceRecord.snapshot.letter,
-        sourceRecord.sentAt ?? sourceRecord.createdAt
+        sourceRecord.sentAt
       );
       setLetters([followupLetter]);
       setSelectedLetterId(followupLetter.id);
@@ -484,16 +531,32 @@ export function LettersPanel() {
       ? getAuditActionLogs().find((action) => action.id === followupActionId)
       : undefined;
     if (queuedFollowup?.letterSnapshot) {
+      const confirmedSourceRecord = getStoredLetterRecords().find(
+        (record) =>
+          !record.parentRecordId &&
+          record.auditId === currentAuditId &&
+          record.snapshot.letter.id === queuedFollowup.letterSnapshot?.letter.id &&
+          record.status === "sent" &&
+          Boolean(record.sentAt)
+      );
+      if (!confirmedSourceRecord?.sentAt) {
+        setLetters([]);
+        setServiceMessage(
+          "Cette ancienne action ne comporte aucune date d'envoi confirmée. Confirmez-la depuis le rapport avant de préparer une relance."
+        );
+        return;
+      }
       const followupLetter = createFollowupLetterFromSnapshot(
         queuedFollowup.letterSnapshot.letter,
-        queuedFollowup.createdAt
+        confirmedSourceRecord.sentAt
       );
       setLetters([followupLetter]);
       setSelectedLetterId(followupLetter.id);
       setPersonalization(queuedFollowup.letterSnapshot.personalization);
       setFollowupSourceDocumentName(queuedFollowup.letterSnapshot.documentName);
-      setLetterAuditId(getStoredMockAnalysis()?.id ?? null);
+      setLetterAuditId(confirmedSourceRecord.auditId);
       setIsFollowupDraft(true);
+      setSourceLetterRecordId(confirmedSourceRecord.id);
       setServiceMessage(
         "Relance préparée à partir du courrier précédemment généré. Vérifiez le contenu avant envoi."
       );
@@ -546,6 +609,7 @@ export function LettersPanel() {
     followupRecordId,
     isDiscoveryAccess,
     loadValidatedLetters,
+    savedActionId,
     savedRecordId
   ]);
 

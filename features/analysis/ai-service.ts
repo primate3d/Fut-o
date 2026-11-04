@@ -376,7 +376,20 @@ REGLES MULTI-LIGNES / MULTI-CONTRATS - EXEMPLES CONCRETS OBLIGATOIRES :
           monthlyAmount: serviceLine.monthlyAmount,
           yearlyAmount: serviceLine.yearlyAmount,
           recurrence: "monthly" as const,
-          documentType: profile.documentType,
+          documentType: serviceLine.subcategory === "GAS"
+            ? "gas_invoice" as const
+            : "electricity_invoice" as const,
+          contractDetails: {
+            version: 1 as const,
+            source: "document" as const,
+            sourceDocumentId: profile.documentId,
+            kind: serviceLine.subcategory === "GAS" ? "gas" as const : "electricity" as const,
+            documentKind: "PAYMENT_SCHEDULE" as const,
+            annualConsumptionKwh: serviceLine.annualConsumptionKwh,
+            fieldSources: serviceLine.annualConsumptionKwh === undefined
+              ? undefined
+              : { annualConsumptionKwh: "document" as const }
+          },
           sourceDocumentId: profile.documentId,
           sourceDocumentName: profile.fileName,
           customerNumber: profile.customer?.customerNumber,
@@ -454,7 +467,11 @@ REGLES MULTI-LIGNES / MULTI-CONTRATS - EXEMPLES CONCRETS OBLIGATOIRES :
       const sourceDocumentId = expense.sourceDocumentId ?? documents[0]?.id;
       const profile = sourceDocumentId ? documentProfiles[sourceDocumentId] : undefined;
       const contractDetails = sourceDocumentId
-        ? normalizeAiContractDetails(expense.contractDetails, profile?.documentType, sourceDocumentId)
+        ? normalizeAiContractDetails(
+            expense.contractDetails,
+            expense.documentType ?? profile?.documentType,
+            sourceDocumentId
+          )
         : undefined;
       return attachDocumentProfileToExpense(
         {

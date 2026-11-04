@@ -40,12 +40,17 @@ function optionalStrings(value: unknown, field: string) {
 }
 
 function expectedKind(expense: Expense): ContractDetails["kind"] | null {
+  if (expense.subcategory === ExpenseSubcategory.INTERNET) return "internet";
+  if (expense.subcategory === ExpenseSubcategory.ELECTRICITY) return "electricity";
+  if (expense.subcategory === ExpenseSubcategory.GAS) return "gas";
+  if (expense.subcategory === ExpenseSubcategory.CAR_INSURANCE) return "car_insurance";
+  if (expense.subcategory === ExpenseSubcategory.HOME_INSURANCE) return "home_insurance";
+  if (expense.documentType === "internet_invoice") return "internet";
+  if (expense.documentType === "electricity_invoice") return "electricity";
+  if (expense.documentType === "gas_invoice") return "gas";
+  if (expense.documentType === "car_insurance") return "car_insurance";
+  if (expense.documentType === "home_insurance") return "home_insurance";
   if (expense.contractDetails) return expense.contractDetails.kind;
-  if (expense.documentType === "internet_invoice" || expense.subcategory === ExpenseSubcategory.INTERNET) return "internet";
-  if (expense.documentType === "electricity_invoice" || expense.subcategory === ExpenseSubcategory.ELECTRICITY) return "electricity";
-  if (expense.documentType === "gas_invoice" || expense.subcategory === ExpenseSubcategory.GAS) return "gas";
-  if (expense.documentType === "car_insurance" || expense.subcategory === ExpenseSubcategory.CAR_INSURANCE) return "car_insurance";
-  if (expense.documentType === "home_insurance" || expense.subcategory === ExpenseSubcategory.HOME_INSURANCE) return "home_insurance";
   return null;
 }
 

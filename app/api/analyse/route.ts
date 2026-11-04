@@ -291,11 +291,20 @@ export async function POST(request: Request) {
       return NextResponse.json({ analysis: mergedAnalysis, cached: false });
     }
 
-    const documents = selectOwnedDocuments(body.documents, await getDocumentsByKey(code, tx));
+    const storedDocuments = await getDocumentsByKey(code, tx);
+    const documents = selectOwnedDocuments(body.documents, storedDocuments);
+    const analysisScopeDocuments = Array.from(
+      new Map(
+        [
+          ...storedDocuments.filter((document) => document.status === "purged"),
+          ...documents
+        ].map((document) => [document.id, document])
+      ).values()
+    );
     if (documents) {
       const documentsForPlanValidation = [
         ...(existingAnalysis?.documents.filter(isManualDocument) ?? []),
-        ...documents
+        ...analysisScopeDocuments
       ];
       if (key.plan === "decouverte" && documentsForPlanValidation.length > 1) {
         return NextResponse.json(
@@ -316,7 +325,7 @@ export async function POST(request: Request) {
     }
 
     const currentAnalysis = existingAnalysis
-      ? filterAnalysisToDocuments(existingAnalysis, documents)
+      ? filterAnalysisToDocuments(existingAnalysis, analysisScopeDocuments)
       : null;
     const analyzedDocuments = new Map(
       currentAnalysis?.documents
@@ -336,7 +345,8 @@ export async function POST(request: Request) {
     if (
       currentAnalysis &&
       isNonEmptyAnalysis(currentAnalysis) &&
-      (documentsToAnalyze.length === 0 || (!force && isAnalysisForDocuments(currentAnalysis, documents)))
+      (documentsToAnalyze.length === 0 ||
+        (!force && isAnalysisForDocuments(currentAnalysis, analysisScopeDocuments)))
     ) {
       if (currentAnalysis !== existingAnalysis) {
         await saveAnalysis(code, currentAnalysis, tx);
@@ -515,7 +525,7 @@ export async function POST(request: Request) {
     const analysisBase = incremental && currentAnalysis
       ? filterAnalysisToDocuments(
           currentAnalysis,
-          documents.filter((document) =>
+          analysisScopeDocuments.filter((document) =>
             !documentsToAnalyze.some((candidate) => candidate.id === document.id)
           )
         )

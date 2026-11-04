@@ -7,16 +7,22 @@ import { Card } from "@/components/ui/Card";
 import { getStoredAccessKey } from "@/features/billing/access-keys";
 import { getMissingContractFields } from "./contract-details";
 import type { ContractDetails, Expense, MockAnalysis } from "@/types";
+import { ExpenseSubcategory } from "@/types";
 
 type Draft = Record<string, string> & { tempoConsumptionKwh?: never };
 
 function supportedKind(expense: Expense): ContractDetails["kind"] | null {
-  if (expense.contractDetails) return expense.contractDetails.kind;
+  if (expense.subcategory === ExpenseSubcategory.INTERNET) return "internet";
+  if (expense.subcategory === ExpenseSubcategory.ELECTRICITY) return "electricity";
+  if (expense.subcategory === ExpenseSubcategory.GAS) return "gas";
+  if (expense.subcategory === ExpenseSubcategory.CAR_INSURANCE) return "car_insurance";
+  if (expense.subcategory === ExpenseSubcategory.HOME_INSURANCE) return "home_insurance";
   if (expense.documentType === "internet_invoice") return "internet";
   if (expense.documentType === "electricity_invoice") return "electricity";
   if (expense.documentType === "gas_invoice") return "gas";
   if (expense.documentType === "car_insurance") return "car_insurance";
   if (expense.documentType === "home_insurance") return "home_insurance";
+  if (expense.contractDetails) return expense.contractDetails.kind;
   return null;
 }
 
@@ -93,33 +99,40 @@ export function ContractDetailsConfirmationPanel({
         {relevantExpenses.map((expense) => {
           const kind = supportedKind(expense)!;
           const draft = drafts[expense.id] ?? {};
+          const missingFields = getMissingContractFields(expense);
+          const isMissing = (field: string) => missingFields.includes(field);
           const option = draft.tariffOption || (expense.contractDetails?.kind === "electricity" ? expense.contractDetails.tariffOption : "");
           return (
             <form className="rounded-lg border border-amber-200 bg-white p-4" key={expense.id} onSubmit={(event) => void submit(event, expense)}>
               <h3 className="font-semibold text-navy-900">{expense.provider} — {expense.label}</h3>
-              <p className="mt-1 text-xs text-amber-800">Manquant : {getMissingContractFields(expense).join(", ")}</p>
+              <p className="mt-1 text-xs text-amber-800">Manquant : {missingFields.join(", ")}</p>
               <div className="mt-3 grid gap-3 md:grid-cols-3">
                 {kind === "internet" ? <>
-                  <label className="text-sm font-medium text-navy-900">Technologie<select className={inputClass()} onChange={(event) => setField(expense.id, "technology", event.target.value)} value={draft.technology ?? ""}><option value="">Choisir</option><option value="FIBER">Fibre</option><option value="CABLE">Câble</option><option value="ADSL">ADSL</option><option value="VDSL">VDSL</option></select></label>
-                  <label className="text-sm font-medium text-navy-900">Engagement (mois)<input className={inputClass()} min="0" onChange={(event) => setField(expense.id, "commitmentMonths", event.target.value)} type="number" value={draft.commitmentMonths ?? ""} /></label>
-                  <label className="text-sm font-medium text-navy-900">Débit descendant (Mbit/s)<input className={inputClass()} min="0" onChange={(event) => setField(expense.id, "downloadMbps", event.target.value)} type="number" value={draft.downloadMbps ?? ""} /></label>
-                  <label className="text-sm font-medium text-navy-900">Services inclus<input className={inputClass()} onChange={(event) => setField(expense.id, "includedServices", event.target.value)} placeholder="TV, téléphonie, ou Aucun" value={draft.includedServices ?? ""} /></label>
+                  {isMissing("technologie") ? <label className="text-sm font-medium text-navy-900">Technologie<select className={inputClass()} onChange={(event) => setField(expense.id, "technology", event.target.value)} value={draft.technology ?? ""}><option value="">Choisir</option><option value="FIBER">Fibre</option><option value="CABLE">Câble</option><option value="ADSL">ADSL</option><option value="VDSL">VDSL</option></select></label> : null}
+                  {isMissing("engagement") ? <label className="text-sm font-medium text-navy-900">Engagement (mois)<input className={inputClass()} min="0" onChange={(event) => setField(expense.id, "commitmentMonths", event.target.value)} type="number" value={draft.commitmentMonths ?? ""} /></label> : null}
+                  {isMissing("debit descendant") ? <label className="text-sm font-medium text-navy-900">Débit descendant (Mbit/s)<input className={inputClass()} min="0" onChange={(event) => setField(expense.id, "downloadMbps", event.target.value)} type="number" value={draft.downloadMbps ?? ""} /></label> : null}
+                  {isMissing("services inclus") ? <label className="text-sm font-medium text-navy-900">Services inclus<input className={inputClass()} onChange={(event) => setField(expense.id, "includedServices", event.target.value)} placeholder="TV, téléphonie, ou Aucun" value={draft.includedServices ?? ""} /></label> : null}
                 </> : null}
                 {kind === "electricity" ? <>
-                  <label className="text-sm font-medium text-navy-900">Puissance (kVA)<input className={inputClass()} min="0" onChange={(event) => setField(expense.id, "powerKva", event.target.value)} step="0.1" type="number" value={draft.powerKva ?? ""} /></label>
-                  <label className="text-sm font-medium text-navy-900">Option<select className={inputClass()} onChange={(event) => setField(expense.id, "tariffOption", event.target.value)} value={option ?? ""}><option value="">Choisir</option><option value="BASE">Base</option><option value="HPHC">HP/HC</option><option value="TEMPO">Tempo</option></select></label>
-                  <label className="text-sm font-medium text-navy-900">Consommation annuelle (kWh)<input className={inputClass()} min="0" onChange={(event) => setField(expense.id, "annualConsumptionKwh", event.target.value)} type="number" value={draft.annualConsumptionKwh ?? ""} /></label>
-                  {option === "HPHC" ? <><label className="text-sm font-medium text-navy-900">Heures pleines (kWh)<input className={inputClass()} min="0" onChange={(event) => setField(expense.id, "peakConsumptionKwh", event.target.value)} type="number" value={draft.peakConsumptionKwh ?? ""} /></label><label className="text-sm font-medium text-navy-900">Heures creuses (kWh)<input className={inputClass()} min="0" onChange={(event) => setField(expense.id, "offPeakConsumptionKwh", event.target.value)} type="number" value={draft.offPeakConsumptionKwh ?? ""} /></label></> : null}
-                  {option === "TEMPO" ? ["bluePeak", "blueOffPeak", "whitePeak", "whiteOffPeak", "redPeak", "redOffPeak"].map((field) => <label className="text-sm font-medium text-navy-900" key={field}>Tempo {field}<input className={inputClass()} min="0" onChange={(event) => setField(expense.id, field, event.target.value)} type="number" value={draft[field] ?? ""} /></label>) : null}
+                  {isMissing("puissance kVA") ? <label className="text-sm font-medium text-navy-900">Puissance (kVA)<input className={inputClass()} min="0" onChange={(event) => setField(expense.id, "powerKva", event.target.value)} step="0.1" type="number" value={draft.powerKva ?? ""} /></label> : null}
+                  {isMissing("option tarifaire") ? <label className="text-sm font-medium text-navy-900">Option<select className={inputClass()} onChange={(event) => setField(expense.id, "tariffOption", event.target.value)} value={option ?? ""}><option value="">Choisir</option><option value="BASE">Base</option><option value="HPHC">HP/HC</option><option value="TEMPO">Tempo</option></select></label> : null}
+                  {isMissing("consommation annuelle") ? <label className="text-sm font-medium text-navy-900">Consommation annuelle (kWh)<input className={inputClass()} min="0" onChange={(event) => setField(expense.id, "annualConsumptionKwh", event.target.value)} type="number" value={draft.annualConsumptionKwh ?? ""} /></label> : null}
+                  {option === "HPHC" && isMissing("consommation heures pleines") ? <label className="text-sm font-medium text-navy-900">Heures pleines (kWh)<input className={inputClass()} min="0" onChange={(event) => setField(expense.id, "peakConsumptionKwh", event.target.value)} type="number" value={draft.peakConsumptionKwh ?? ""} /></label> : null}
+                  {option === "HPHC" && isMissing("consommation heures creuses") ? <label className="text-sm font-medium text-navy-900">Heures creuses (kWh)<input className={inputClass()} min="0" onChange={(event) => setField(expense.id, "offPeakConsumptionKwh", event.target.value)} type="number" value={draft.offPeakConsumptionKwh ?? ""} /></label> : null}
+                  {option === "TEMPO" ? [
+                    ["bluePeak", "Tempo bleu HP"], ["blueOffPeak", "Tempo bleu HC"],
+                    ["whitePeak", "Tempo blanc HP"], ["whiteOffPeak", "Tempo blanc HC"],
+                    ["redPeak", "Tempo rouge HP"], ["redOffPeak", "Tempo rouge HC"]
+                  ].filter(([, label]) => isMissing(label)).map(([field, label]) => <label className="text-sm font-medium text-navy-900" key={field}>{label}<input className={inputClass()} min="0" onChange={(event) => setField(expense.id, field, event.target.value)} type="number" value={draft[field] ?? ""} /></label>) : null}
                 </> : null}
                 {kind === "gas" ? <>
-                  <label className="text-sm font-medium text-navy-900">Consommation annuelle (kWh)<input className={inputClass()} min="0" onChange={(event) => setField(expense.id, "annualConsumptionKwh", event.target.value)} type="number" value={draft.annualConsumptionKwh ?? ""} /></label>
-                  <label className="text-sm font-medium text-navy-900">Zone tarifaire<input className={inputClass()} onChange={(event) => setField(expense.id, "tariffZone", event.target.value)} value={draft.tariffZone ?? ""} /></label>
-                  <label className="text-sm font-medium text-navy-900">Classe de consommation<input className={inputClass()} onChange={(event) => setField(expense.id, "consumptionClass", event.target.value)} value={draft.consumptionClass ?? ""} /></label>
+                  {isMissing("consommation annuelle") ? <label className="text-sm font-medium text-navy-900">Consommation annuelle (kWh)<input className={inputClass()} min="0" onChange={(event) => setField(expense.id, "annualConsumptionKwh", event.target.value)} type="number" value={draft.annualConsumptionKwh ?? ""} /></label> : null}
+                  {isMissing("zone tarifaire") ? <label className="text-sm font-medium text-navy-900">Zone tarifaire<input className={inputClass()} onChange={(event) => setField(expense.id, "tariffZone", event.target.value)} value={draft.tariffZone ?? ""} /></label> : null}
+                  {isMissing("classe de consommation") ? <label className="text-sm font-medium text-navy-900">Classe de consommation<input className={inputClass()} onChange={(event) => setField(expense.id, "consumptionClass", event.target.value)} value={draft.consumptionClass ?? ""} /></label> : null}
                 </> : null}
                 {kind === "car_insurance" || kind === "home_insurance" ? <>
-                  <label className="text-sm font-medium text-navy-900">Garanties<textarea className={inputClass()} onChange={(event) => setField(expense.id, "guarantees", event.target.value)} placeholder="Séparées par des virgules" value={draft.guarantees ?? ""} /></label>
-                  <label className="text-sm font-medium text-navy-900">Franchises<textarea className={inputClass()} onChange={(event) => setField(expense.id, "deductibles", event.target.value)} placeholder="Séparées par des virgules" value={draft.deductibles ?? ""} /></label>
+                  {isMissing("garanties") ? <label className="text-sm font-medium text-navy-900">Garanties<textarea className={inputClass()} onChange={(event) => setField(expense.id, "guarantees", event.target.value)} placeholder="Séparées par des virgules" value={draft.guarantees ?? ""} /></label> : null}
+                  {isMissing("franchises") ? <label className="text-sm font-medium text-navy-900">Franchises<textarea className={inputClass()} onChange={(event) => setField(expense.id, "deductibles", event.target.value)} placeholder="Séparées par des virgules" value={draft.deductibles ?? ""} /></label> : null}
                 </> : null}
               </div>
               <Button className="mt-4" disabled={savingId === expense.id} type="submit" variant="secondary">{savingId === expense.id ? <Loader2 className="animate-spin" size={16} /> : null}Enregistrer et comparer</Button>

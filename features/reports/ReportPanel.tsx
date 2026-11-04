@@ -1,8 +1,16 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
-import { Download, FileSearch, Loader2, Printer } from "lucide-react";
+import {
+  CircleCheck,
+  Download,
+  FileSearch,
+  Loader2,
+  Printer,
+  TrendingDown,
+  Wallet
+} from "lucide-react";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
@@ -14,10 +22,10 @@ import {
   hasDocumentProfiles,
   storeMockAnalysis
 } from "@/features/analysis";
+import { getMissingContractFields } from "@/features/analysis/contract-details";
 import { getStoredAccessKey, isDiscoveryPlan } from "@/features/billing/access-keys";
 import { generateLettersFromAnalysis } from "@/features/letters/service";
 import {
-  isPrimaryAlternative,
   type AlternativeOffer
 } from "@/features/recommendations/service";
 import {
@@ -31,6 +39,7 @@ import {
   confirmLetterSent,
   getAuditActionLogs,
   getStoredLetterRecords,
+  savePreparedLetter,
   type AuditActionLog,
   type StoredLetterRecord
 } from "@/features/privacy/action-log";
@@ -41,7 +50,14 @@ import {
   getTopExpenses,
   summarizeExpensesByCategory
 } from "@/lib/expense-summary";
-import type { GeneratedLetter, MockAnalysis } from "@/types";
+import type { ContractComparisonState, GeneratedLetter, MockAnalysis } from "@/types";
+import {
+  buildFinancialSummary,
+  confirmRealizedSaving,
+  getRealizedSavingsForAnalysis,
+  isReliablePotentialOffer,
+  type RealizedSavingRecord
+} from "./financial-summary";
 import { generatePdfReport } from "./service";
 
 function formatCurrency(value: number) {
@@ -69,7 +85,7 @@ function getExpenseIdFromAlternativeId(offer: AlternativeOffer, analysis: MockAn
 
 function applyAlternativeSavings(analysis: MockAnalysis, alternatives: AlternativeOffer[]) {
   const bestSavingByExpense = alternatives
-    .filter(isPrimaryAlternative)
+    .filter(isReliablePotentialOffer)
     .reduce<Record<string, number>>((savings, offer) => {
       const expenseId = getExpenseIdFromAlternativeId(offer, analysis);
       if (!expenseId) return savings;
@@ -95,16 +111,22 @@ function getBestAlternativeForExpense(
   return alternatives
     .filter(
       (offer) =>
-        isPrimaryAlternative(offer) &&
+        isReliablePotentialOffer(offer) &&
         getExpenseIdFromAlternativeId(offer, analysis) === expenseId
     )
     .sort((first, second) => second.estimatedYearlySaving - first.estimatedYearlySaving)[0];
 }
 
-function getOptimizationScore(analysis: MockAnalysis) {
-  if (analysis.totalYearlyAmount <= 0) {
-    return 100;
-  }
+export function getOptimizationScore(
+  analysis: MockAnalysis,
+  comparisonStates: ContractComparisonState[]
+) {
+  if (analysis.totalYearlyAmount <= 0 || comparisonStates.length === 0) return null;
+  if (comparisonStates.some((state) =>
+    state.status === "disabled" ||
+    state.status === "missing_information" ||
+    state.status === "unavailable"
+  )) return null;
 
   const savingRatio = analysis.yearlyPotentialSavings / analysis.totalYearlyAmount;
   return Math.max(0, Math.min(100, Math.round(100 - savingRatio * 220)));
@@ -132,6 +154,30 @@ function formatActionDate(createdAt: string) {
   return new Date(createdAt).toLocaleDateString("fr-FR");
 }
 
+function getLetterTypeLabel(type: GeneratedLetter["type"]) {
+  const labels: Record<GeneratedLetter["type"], string> = {
+    subscription_cancellation: "Résiliation",
+    price_negotiation: "Négociation",
+    provider_followup: "Relance",
+    offer_change: "Changement d'offre",
+    comparison_report: "Comparaison"
+  };
+  return labels[type];
+}
+
+function getTodayDateInputValue() {
+  const today = new Date();
+  const year = today.getFullYear();
+  const month = String(today.getMonth() + 1).padStart(2, "0");
+  const day = String(today.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+type ReductionDraft = {
+  newMonthlyAmount: string;
+  effectiveDate: string;
+};
+
 export function ReportPanel() {
   const router = useRouter();
   const activeKey = getStoredAccessKey();
@@ -145,8 +191,15 @@ export function ReportPanel() {
   const [serviceMessage, setServiceMessage] = useState<string | null>(null);
   const [sourcePurgeMessage, setSourcePurgeMessage] = useState<string | null>(null);
   const [comparisonMessage, setComparisonMessage] = useState<string | null>(null);
+  const [comparisonStates, setComparisonStates] = useState<ContractComparisonState[]>([]);
   const [actionLogs, setActionLogs] = useState<AuditActionLog[]>([]);
   const [letterRecords, setLetterRecords] = useState<StoredLetterRecord[]>([]);
+  const [realizedSavings, setRealizedSavings] = useState<RealizedSavingRecord[]>([]);
+  const [reductionDrafts, setReductionDrafts] = useState<Record<string, ReductionDraft>>({});
+  const [reductionMessage, setReductionMessage] = useState<string | null>(null);
+  const [confirmingLetterId, setConfirmingLetterId] = useState<string | null>(null);
+  const [confirmedSentDate, setConfirmedSentDate] = useState("");
+  const [letterTrackingMessage, setLetterTrackingMessage] = useState<string | null>(null);
 
   useEffect(() => {
     if (isDiscoveryAccess) return;
@@ -185,6 +238,7 @@ export function ReportPanel() {
         const alternativesPayload = (await alternativesResponse.json()) as {
           alternatives?: AlternativeOffer[];
           comparisonMessage?: string | null;
+          comparisonStates?: ContractComparisonState[];
         };
         const lettersPayload = (await lettersResponse.json()) as {
           letters?: GeneratedLetter[];
@@ -195,6 +249,7 @@ export function ReportPanel() {
         const analysisWithSavings = applyAlternativeSavings(analysisToLoad, allAlternatives);
         setAlternatives(allAlternatives);
         setComparisonMessage(alternativesPayload.comparisonMessage ?? null);
+        setComparisonStates(alternativesPayload.comparisonStates ?? []);
         setSelectedOffer(refreshedOffer);
         setAnalysis(analysisWithSavings);
         setRecommendedLetters((lettersPayload.letters ?? []).slice(0, 5));
@@ -205,6 +260,7 @@ export function ReportPanel() {
         setComparisonMessage(
           "Comparaison indisponible : aucune économie non vérifiée n'est utilisée en remplacement."
         );
+        setComparisonStates([]);
         setSelectedOffer(null);
         setAnalysis(analysisWithoutVerifiedSavings);
         setRecommendedLetters(
@@ -254,7 +310,10 @@ export function ReportPanel() {
 
   useEffect(() => {
     setLetterRecords(analysis ? getStoredLetterRecords(analysis.id) : []);
-  }, [analysis]);
+    setRealizedSavings(
+      analysis ? getRealizedSavingsForAnalysis(analysis, activeKeyCode) : []
+    );
+  }, [activeKeyCode, analysis]);
 
   async function handleDownload() {
     if (!analysis) return;
@@ -266,7 +325,9 @@ export function ReportPanel() {
         recommendedLetters,
         selectedOffer,
         actionLogs,
-        comparisonMessage
+        comparisonMessage,
+        comparisonStates,
+        realizedSavings
       );
       setActionLogs(
         addAuditActionLog({
@@ -298,14 +359,62 @@ export function ReportPanel() {
   }
 
   function handlePrepareStoredFollowup(record: StoredLetterRecord) {
+    if (record.status !== "sent" || !record.sentAt) {
+      setLetterTrackingMessage(
+        "Confirmez la date réelle d'envoi avant de préparer une relance."
+      );
+      return;
+    }
     router.push(`/courriers?relanceRecord=${encodeURIComponent(record.id)}&returnTo=rapport`);
   }
 
-  function handleConfirmLetterSent(record: StoredLetterRecord) {
-    if (!window.confirm("Confirmez-vous avoir envoyé ce courrier ?")) return;
-    const updated = confirmLetterSent(record.id);
-    if (!updated || !analysis) return;
+  function startSentDateConfirmation(recordId: string) {
+    setConfirmingLetterId(recordId);
+    setConfirmedSentDate("");
+    setLetterTrackingMessage(null);
+  }
+
+  function finishSentDateConfirmation(record: StoredLetterRecord) {
+    if (!analysis || !confirmedSentDate) {
+      setLetterTrackingMessage("Indiquez la date réelle d'envoi du courrier.");
+      return;
+    }
+    const updated = confirmLetterSent(record.id, confirmedSentDate);
+    if (!updated) {
+      setLetterTrackingMessage("La date d'envoi est invalide ou située dans le futur.");
+      return;
+    }
     setLetterRecords(getStoredLetterRecords(analysis.id));
+    setConfirmingLetterId(null);
+    setConfirmedSentDate("");
+    setLetterTrackingMessage("Envoi confirmé. La relance est maintenant disponible.");
+  }
+
+  function finishLegacySentDateConfirmation(action: AuditActionLog) {
+    if (!analysis || !action.letterSnapshot || !confirmedSentDate) {
+      setLetterTrackingMessage("Indiquez la date réelle d'envoi du courrier.");
+      return;
+    }
+    const record = savePreparedLetter(
+      analysis.id,
+      action.letterSnapshot,
+      action.createdAt
+    );
+    const updated = record ? confirmLetterSent(record.id, confirmedSentDate) : null;
+    if (!updated) {
+      setLetterTrackingMessage(
+        "Ce courrier historique ne peut pas être confirmé avec cette date."
+      );
+      return;
+    }
+    setLetterRecords(getStoredLetterRecords(analysis.id));
+    setConfirmingLetterId(null);
+    setConfirmedSentDate("");
+    setLetterTrackingMessage("Envoi confirmé. La relance est maintenant disponible.");
+  }
+
+  function handleViewLegacyAction(action: AuditActionLog) {
+    router.push(`/courriers?action=${encodeURIComponent(action.id)}&returnTo=rapport`);
   }
 
   function handleChooseLetter(
@@ -318,13 +427,85 @@ export function ReportPanel() {
     router.push(`/courriers?expenseId=${encodeURIComponent(expenseId)}&returnTo=rapport`);
   }
 
+  function updateReductionDraft(expenseId: string, update: Partial<ReductionDraft>) {
+    setReductionDrafts((currentDrafts) => ({
+      ...currentDrafts,
+      [expenseId]: {
+        newMonthlyAmount: currentDrafts[expenseId]?.newMonthlyAmount ?? "",
+        effectiveDate: currentDrafts[expenseId]?.effectiveDate ?? getTodayDateInputValue(),
+        ...update
+      }
+    }));
+  }
+
+  function handleConfirmReduction(
+    event: FormEvent<HTMLFormElement>,
+    expense: MockAnalysis["expenses"][number]
+  ) {
+    event.preventDefault();
+    if (!analysis) return;
+
+    const draft = reductionDrafts[expense.id];
+    const newMonthlyAmount = Number((draft?.newMonthlyAmount ?? "").replace(",", "."));
+    try {
+      confirmRealizedSaving(
+        activeKeyCode,
+        {
+          auditId: analysis.id,
+          expense,
+          newMonthlyAmount,
+          effectiveDate: draft?.effectiveDate || getTodayDateInputValue()
+        }
+      );
+      setRealizedSavings(getRealizedSavingsForAnalysis(analysis, activeKeyCode));
+      setReductionDrafts((currentDrafts) => {
+        const nextDrafts = { ...currentDrafts };
+        delete nextDrafts[expense.id];
+        return nextDrafts;
+      });
+      setReductionMessage(
+        `Réduction confirmée pour ${normalizeDisplayText(expense.provider)}. Le budget actuel sera mis à jour à la date d'effet.`
+      );
+    } catch (error) {
+      setReductionMessage(
+        error instanceof Error ? error.message : "La réduction n'a pas pu être enregistrée."
+      );
+    }
+  }
+
+  const financialSummary = useMemo(
+    () => analysis
+      ? buildFinancialSummary(
+          analysis,
+          alternatives,
+          comparisonStates,
+          realizedSavings
+        )
+      : null,
+    [alternatives, analysis, comparisonStates, realizedSavings]
+  );
+  const currentDisplayExpenses = useMemo(
+    () => analysis
+      ? analysis.expenses.map((expense) => {
+          const contract = financialSummary?.contracts[expense.id];
+          return contract
+            ? {
+                ...expense,
+                monthlyAmount: contract.currentMonthlyAmount,
+                yearlyAmount: contract.currentYearlyAmount
+              }
+            : expense;
+        })
+      : [],
+    [analysis, financialSummary]
+  );
   const categorySummaries = useMemo(
-    () => (analysis ? summarizeExpensesByCategory(analysis.expenses) : []),
-    [analysis]
+    () => summarizeExpensesByCategory(currentDisplayExpenses),
+    [currentDisplayExpenses]
   );
   const topExpenses = useMemo(
-    () => (analysis ? getTopExpenses(analysis.expenses, 5) : []),
-    [analysis]
+    () => getTopExpenses(currentDisplayExpenses, 5),
+    [currentDisplayExpenses]
   );
 
   if (isDiscoveryAccess) {
@@ -357,8 +538,10 @@ export function ReportPanel() {
     );
   }
 
-  const score = getOptimizationScore(analysis);
-  const scoreBadge = getScoreBadge(score);
+  const score = getOptimizationScore(analysis, comparisonStates);
+  const scoreBadge = score === null
+    ? { label: "Comparaison incomplète", tone: "amber" as const }
+    : getScoreBadge(score);
   const priorityRecommendations = analysis.recommendations
     .filter((recommendation) => recommendation.priority !== "low")
     .slice(0, 4);
@@ -368,18 +551,13 @@ export function ReportPanel() {
       offer: getBestAlternativeForExpense(expense.id, alternatives, analysis),
       recommendation: analysis.recommendations.find(
         (recommendation) => recommendation.category === expense.category
-      )
+      ),
+      comparisonState: comparisonStates.find((state) => state.expenseId === expense.id)
     }));
   const reducedDataAlternatives = alternatives.filter(
     (offer) => offer.comparisonKind === "reduced_data"
   );
-  const summaryStats = [
-    { label: "Total mensuel estimé", value: formatCurrency(analysis.totalMonthlyAmount) },
-    { label: "Total annuel estimé", value: formatCurrency(analysis.totalYearlyAmount) },
-    { label: "Pistes annuelles", value: formatCurrency(analysis.yearlyPotentialSavings) },
-    { label: "Postes détectés", value: `${analysis.expenses.length}` },
-    { label: "Points à vérifier", value: `${analysis.anomalies.length}` }
-  ];
+  const currentFinancialSummary = financialSummary!;
 
   return (
     <section className="space-y-6 print:space-y-4">
@@ -420,13 +598,119 @@ export function ReportPanel() {
         </div>
       ) : null}
 
+      {reductionMessage ? (
+        <div className="rounded-xl border border-sage-200 bg-sage-50 px-4 py-3 text-sm font-medium leading-6 text-sage-900 print:hidden">
+          {reductionMessage}
+        </div>
+      ) : null}
+
+      {letterTrackingMessage ? (
+        <div className="rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm font-medium leading-6 text-blue-900 print:hidden">
+          {letterTrackingMessage}
+        </div>
+      ) : null}
+
+      <div className="grid gap-4 lg:grid-cols-3">
+        <Card className="border-blue-200 bg-blue-50/70 p-6 print:shadow-none">
+          <div className="flex items-center gap-3 text-[#102A4C]">
+            <span className="rounded-xl bg-white/80 p-2.5"><Wallet size={22} /></span>
+            <p className="text-xs font-bold uppercase tracking-[0.12em]">
+              Vos dépenses actuelles
+            </p>
+          </div>
+          <p className="mt-5 text-3xl font-bold text-[#102A4C] md:text-4xl">
+            {formatCurrency(currentFinancialSummary.currentMonthlyAmount)}
+            <span className="ml-1 text-base font-semibold">/ mois</span>
+          </p>
+          <p className="mt-1 text-lg font-bold text-[#102A4C]">
+            {formatCurrency(currentFinancialSummary.currentYearlyAmount)} / an
+          </p>
+          <p className="mt-4 text-sm text-slate-600">Total de vos contrats analysés</p>
+        </Card>
+
+        <Card className="border-orange-200 bg-orange-50/80 p-6 print:shadow-none">
+          <div className="flex items-center gap-3 text-[#D97706]">
+            <span className="rounded-xl bg-white/80 p-2.5"><TrendingDown size={22} /></span>
+            <p className="text-xs font-bold uppercase tracking-[0.12em]">
+              Vos économies potentielles
+            </p>
+          </div>
+          {currentFinancialSummary.potentialStatus === "undetermined" ? (
+            <p className="mt-5 text-2xl font-bold text-[#D97706] md:text-3xl">
+              Non déterminé
+            </p>
+          ) : (
+            <>
+              <p className="mt-5 text-3xl font-bold text-[#D97706] md:text-4xl">
+                {formatCurrency(currentFinancialSummary.potentialMonthlySaving)}
+                <span className="ml-1 text-base font-semibold">/ mois</span>
+              </p>
+              <p className="mt-1 text-lg font-bold text-[#D97706]">
+                {formatCurrency(currentFinancialSummary.potentialYearlySaving)} / an
+              </p>
+            </>
+          )}
+          <p className="mt-4 text-sm text-slate-600">
+            {currentFinancialSummary.potentialStatus === "partial"
+              ? "Montant partiel vérifié, certaines comparaisons restent à compléter"
+              : currentFinancialSummary.potentialStatus === "undetermined"
+                ? "Données commerciales insuffisantes pour calculer un montant fiable"
+                : "Économies supplémentaires identifiées"}
+          </p>
+        </Card>
+
+        <Card className="border-green-200 bg-green-50/80 p-6 print:shadow-none">
+          <div className="flex items-center gap-3 text-[#15803D]">
+            <span className="rounded-xl bg-white/80 p-2.5"><CircleCheck size={22} /></span>
+            <p className="text-xs font-bold uppercase tracking-[0.12em]">
+              Vos économies réalisées
+            </p>
+          </div>
+          <p className="mt-5 text-3xl font-bold text-[#15803D] md:text-4xl">
+            {formatCurrency(currentFinancialSummary.realizedMonthlySaving)}
+            <span className="ml-1 text-base font-semibold">/ mois</span>
+          </p>
+          <p className="mt-1 text-lg font-bold text-[#15803D]">
+            {formatCurrency(currentFinancialSummary.realizedYearlySaving)} / an
+          </p>
+          <p className="mt-4 text-sm text-slate-600">Réductions effectivement obtenues</p>
+        </Card>
+      </div>
+
+      <Card className="overflow-hidden border-navy-200 bg-gradient-to-r from-[#102A4C] to-[#1f456f] p-0 text-white print:shadow-none">
+        <div className="flex flex-col gap-3 px-6 py-5 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <p className="text-xs font-bold uppercase tracking-[0.14em] text-blue-100">
+              Votre budget après optimisation
+            </p>
+            <p className="mt-2 text-sm text-blue-50">
+              Projection si les économies potentielles vérifiées sont effectivement obtenues.
+            </p>
+          </div>
+          {currentFinancialSummary.potentialStatus === "undetermined" ? (
+            <p className="text-xl font-bold">Projection non calculable</p>
+          ) : (
+            <div className="sm:text-right">
+              <p className="text-3xl font-bold">
+                {formatCurrency(currentFinancialSummary.projectedMonthlyAmount)} / mois
+              </p>
+              <p className="mt-1 text-sm font-semibold text-blue-100">
+                {formatCurrency(currentFinancialSummary.projectedYearlyAmount)} / an, montant non garanti
+              </p>
+            </div>
+          )}
+        </div>
+      </Card>
+
       <Card className="print:shadow-none">
         <div className="grid gap-6 lg:grid-cols-[220px_1fr]">
           <div className="rounded-xl bg-sage-50 p-6 text-center">
             <p className="text-sm font-semibold text-slate-500">
               Score d'optimisation
             </p>
-            <p className="mt-3 text-3xl font-semibold text-slate-800">{score}</p>
+            <p className="mt-3 text-3xl font-semibold text-slate-800">
+              {score === null ? "Non déterminé" : score}
+            </p>
             <div className="mt-4">
               <Badge tone={scoreBadge.tone}>{scoreBadge.label}</Badge>
             </div>
@@ -434,29 +718,18 @@ export function ReportPanel() {
           <div>
             <h2 className="text-xl font-semibold text-navy-900">Résumé global</h2>
             <p className="mt-3 text-sm leading-6 text-slate-600">
-              L'analyse a fait ressortir {analysis.expenses.length} poste(s),{" "}
-              {analysis.anomalies.length} point(s) à vérifier et{" "}
-              <span className="whitespace-nowrap font-medium">
-                {formatCurrency(analysis.yearlyPotentialSavings)}
-              </span>{" "}
-              de pistes
-              d'économies annuelles. Ces montants servent à prioriser les contrats
-              à regarder en premier.
+              L'analyse a fait ressortir {analysis.expenses.length} poste(s) et{" "}
+              {analysis.anomalies.length + comparisonStates.filter((state) => state.status === "missing_information").length} point(s) à vérifier.{" "}
+              {score === null
+                ? "L'optimisation reste non déterminée tant que les comparaisons nécessaires ne sont pas disponibles ou complètes."
+                 : `${formatCurrency(currentFinancialSummary.potentialYearlySaving)} de pistes d'économies annuelles supplémentaires ont été validées.`}
             </p>
+             <p className="mt-2 text-xs leading-5 text-slate-500">
+               Le score est un indicateur de comparaison, pas une garantie que tous les contrats sont déjà optimisés.
+             </p>
           </div>
         </div>
       </Card>
-
-      <div className="flex flex-wrap gap-4">
-        {summaryStats.map((stat) => (
-          <Card className="min-h-28 min-w-[180px] flex-1 p-5 print:shadow-none" key={stat.label}>
-            <p className="text-sm font-semibold text-slate-500">{stat.label}</p>
-            <p className="mt-2 whitespace-nowrap text-xl font-semibold text-slate-800 md:text-2xl">
-              {stat.value}
-            </p>
-          </Card>
-        ))}
-      </div>
 
       {contractComparisons.length > 0 ? (
         <Card className="border-sage-200 bg-white p-4 print:shadow-none">
@@ -468,26 +741,31 @@ export function ReportPanel() {
             offre plus compétitive n&apos;a été identifiée.
           </p>
           <div className="mt-4 flex flex-col gap-3">
-            {contractComparisons.map(({ expense, offer, recommendation }) => {
-              const hasSaving = Boolean(offer && offer.estimatedYearlySaving > 0);
+            {contractComparisons.map(({ expense, offer, recommendation, comparisonState }) => {
+              const contractFinancial = currentFinancialSummary.contracts[expense.id];
+              const hasSaving = contractFinancial.potentialYearlySaving > 0;
+              const realizedSaving = contractFinancial.realizedSaving;
               const expenseRecords = letterRecords
                 .filter((record) => record.expenseId === expense.id)
                 .sort(
                   (first, second) =>
                     Date.parse(second.updatedAt) - Date.parse(first.updatedAt)
                 );
-              const initialLetter = expenseRecords.find(
+              const initialLetters = expenseRecords.filter(
                 (record) => !record.parentRecordId
               );
-              const followupLetter = initialLetter
-                ? expenseRecords.find(
-                    (record) => record.parentRecordId === initialLetter.id
-                  )
-                : undefined;
+              const trackedLetterIds = new Set(
+                initialLetters.map((record) => record.snapshot.letter.id)
+              );
+              const legacyActions = actionLogs.filter(
+                (action) =>
+                  action.letterSnapshot?.letter.sourceExpenseId === expense.id &&
+                  !trackedLetterIds.has(action.letterSnapshot.letter.id)
+              );
 
               return (
                 <div
-                  className="flex w-full flex-col gap-3 rounded-xl border border-slate-100 bg-white p-4 lg:flex-row lg:items-center lg:justify-between"
+                  className="flex w-full flex-col gap-3 rounded-xl border border-slate-100 bg-white p-4 lg:flex-row lg:flex-wrap lg:items-start lg:justify-between"
                   key={expense.id}
                 >
                   <div className="min-w-0 flex-1">
@@ -498,12 +776,37 @@ export function ReportPanel() {
                       {getExpenseDisplayLabel(expense)} — {normalizeDisplayText(expense.provider)}
                     </p>
                     <p className="mt-1 text-xs text-slate-500 md:text-sm">
-                      {formatCurrency(expense.monthlyAmount)} / mois · {formatCurrency(expense.yearlyAmount)} / an
+                      Dépense actuelle : {formatCurrency(contractFinancial.currentMonthlyAmount)} / mois · {formatCurrency(contractFinancial.currentYearlyAmount)} / an
+                    </p>
+                    {realizedSaving ? (
+                      <p className="mt-1 text-xs font-medium text-green-700 md:text-sm">
+                        {contractFinancial.realizedSavingIsEffective
+                          ? `Économie réalisée : ${formatCurrency(contractFinancial.realizedMonthlySaving)} / mois · ${formatCurrency(contractFinancial.realizedYearlySaving)} / an`
+                          : `Nouveau tarif confirmé à partir du ${new Date(`${realizedSaving.effectiveDate}T12:00:00`).toLocaleDateString("fr-FR")}, pas encore comptabilisé`}
+                      </p>
+                    ) : null}
+                    <p className="mt-1 text-xs font-medium text-orange-700 md:text-sm">
+                      {hasSaving
+                        ? `Économie potentielle supplémentaire : ${formatCurrency(contractFinancial.potentialMonthlySaving)} / mois · ${formatCurrency(contractFinancial.potentialYearlySaving)} / an`
+                        : "Aucune économie potentielle certifiée"}
+                    </p>
+                    <p className="mt-1 text-xs text-slate-500 md:text-sm">
+                      Document source : {expense.sourceDocumentName ?? "Saisie manuelle"}
                     </p>
                     <p className="mt-2 text-xs leading-5 text-slate-500 md:text-sm">
                       {hasSaving && offer
                         ? `Alternative vérifiée : ${normalizeDisplayText(offer.provider)} - ${normalizeDisplayText(offer.name)}`
-                        : recommendation?.description ?? "Aucune alternative vérifiée plus avantageuse actuellement."}
+                        : comparisonState?.message ?? recommendation?.description ?? "La comparaison des offres n'est pas disponible actuellement."}
+                    </p>
+                    {getMissingContractFields(expense).length > 0 ? (
+                      <p className="mt-1 text-xs font-medium text-amber-700">
+                        Informations manquantes : {getMissingContractFields(expense).join(", ")}
+                      </p>
+                    ) : null}
+                    <p className="mt-2 text-xs font-medium text-slate-600">
+                      État de la comparaison : {comparisonState?.message ?? (hasSaving
+                        ? "Alternative vérifiée disponible."
+                        : "Comparaison non disponible actuellement.")}
                     </p>
                   </div>
                   <div className="flex shrink-0 flex-col items-start gap-2 lg:items-end print:hidden">
@@ -512,55 +815,7 @@ export function ReportPanel() {
                         ? `+ ${formatCurrency(offer?.estimatedYearlySaving ?? 0)} / an`
                         : "Aucune économie certifiée"}
                     </p>
-                    {initialLetter ? (
-                      <div className="flex max-w-sm flex-col items-start gap-2 rounded-lg border border-sage-200 bg-sage-50/60 p-3 lg:items-end">
-                        <p className="text-sm font-semibold text-sage-900">
-                          {followupLetter
-                            ? `Relance préparée le ${formatActionDate(followupLetter.createdAt)}`
-                            : `Courrier préparé le ${formatActionDate(initialLetter.createdAt)}`}
-                        </p>
-                        {initialLetter.sentAt ? (
-                          <p className="text-xs text-slate-600">
-                            Envoi confirmé le {formatActionDate(initialLetter.sentAt)}
-                          </p>
-                        ) : null}
-                        <div className="flex flex-wrap gap-2 lg:justify-end">
-                          <Button
-                            onClick={() => handleViewStoredLetter(initialLetter)}
-                            type="button"
-                            variant="secondary"
-                          >
-                            Voir le courrier initial
-                          </Button>
-                          {followupLetter ? (
-                            <Button
-                              onClick={() => handleViewStoredLetter(followupLetter)}
-                              type="button"
-                              variant="secondary"
-                            >
-                              Voir la relance
-                            </Button>
-                          ) : (
-                            <Button
-                              onClick={() => handlePrepareStoredFollowup(initialLetter)}
-                              type="button"
-                              variant="secondary"
-                            >
-                              Préparer une relance
-                            </Button>
-                          )}
-                          {!initialLetter.sentAt ? (
-                            <Button
-                              onClick={() => handleConfirmLetterSent(initialLetter)}
-                              type="button"
-                              variant="ghost"
-                            >
-                              Confirmer l&apos;envoi
-                            </Button>
-                          ) : null}
-                        </div>
-                      </div>
-                    ) : (
+                    {initialLetters.length === 0 && legacyActions.length === 0 ? (
                       <Button
                         onClick={() => handleChooseLetter(expense.id, offer)}
                         type="button"
@@ -568,8 +823,204 @@ export function ReportPanel() {
                       >
                         Choisir un courrier
                       </Button>
-                    )}
+                    ) : null}
                   </div>
+                  {initialLetters.length > 0 || legacyActions.length > 0 ? (
+                    <div className="basis-full space-y-3 border-t border-slate-100 pt-3 print:hidden">
+                      {initialLetters.map((initialLetter) => {
+                        const followupLetter = expenseRecords.find(
+                          (record) => record.parentRecordId === initialLetter.id
+                        );
+                        const confirmationKey = `record:${initialLetter.id}`;
+                        return (
+                          <div
+                            className="rounded-lg border border-sage-200 bg-sage-50/50 p-3"
+                            key={initialLetter.id}
+                          >
+                            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                              <div>
+                                <p className="text-sm font-semibold text-sage-900">
+                                  {getLetterTypeLabel(initialLetter.letterType)}
+                                </p>
+                                <p className="mt-1 text-xs text-slate-600">
+                                  Préparé le {formatActionDate(initialLetter.createdAt)} · Statut : {initialLetter.status === "sent"
+                                    ? `envoyé le ${formatActionDate(initialLetter.sentAt!)}`
+                                    : "préparé, envoi non confirmé"}
+                                  {followupLetter
+                                    ? ` · Relance préparée le ${formatActionDate(followupLetter.createdAt)}`
+                                    : ""}
+                                </p>
+                              </div>
+                              <div className="flex flex-wrap gap-2">
+                                <Button
+                                  onClick={() => handleViewStoredLetter(initialLetter)}
+                                  type="button"
+                                  variant="secondary"
+                                >
+                                  Voir mon courrier
+                                </Button>
+                                {initialLetter.status === "sent" && initialLetter.sentAt ? (
+                                  followupLetter ? (
+                                    <Button
+                                      onClick={() => handleViewStoredLetter(followupLetter)}
+                                      type="button"
+                                      variant="secondary"
+                                    >
+                                      Voir la relance
+                                    </Button>
+                                  ) : (
+                                    <Button
+                                      onClick={() => handlePrepareStoredFollowup(initialLetter)}
+                                      type="button"
+                                      variant="secondary"
+                                    >
+                                      Préparer une relance
+                                    </Button>
+                                  )
+                                ) : (
+                                  <Button
+                                    onClick={() => startSentDateConfirmation(confirmationKey)}
+                                    type="button"
+                                    variant="ghost"
+                                  >
+                                    Confirmer l&apos;envoi
+                                  </Button>
+                                )}
+                              </div>
+                            </div>
+                            {confirmingLetterId === confirmationKey ? (
+                              <div className="mt-3 flex flex-col gap-2 rounded-lg border border-sage-200 bg-white p-3 sm:flex-row sm:items-end">
+                                <label className="text-sm font-semibold text-navy-900">
+                                  Date réelle d&apos;envoi
+                                  <input
+                                    className="mt-1 block rounded-lg border border-slate-200 px-3 py-2 font-normal"
+                                    max={getTodayDateInputValue()}
+                                    onChange={(event) => setConfirmedSentDate(event.target.value)}
+                                    required
+                                    type="date"
+                                    value={confirmedSentDate}
+                                  />
+                                </label>
+                                <Button
+                                  onClick={() => finishSentDateConfirmation(initialLetter)}
+                                  type="button"
+                                >
+                                  Valider la date
+                                </Button>
+                              </div>
+                            ) : null}
+                          </div>
+                        );
+                      })}
+                      {legacyActions.map((action) => {
+                        const confirmationKey = `action:${action.id}`;
+                        return (
+                          <div
+                            className="rounded-lg border border-blue-200 bg-blue-50/50 p-3"
+                            key={action.id}
+                          >
+                            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                              <div>
+                                <p className="text-sm font-semibold text-navy-900">
+                                  {getLetterTypeLabel(action.letterSnapshot!.letter.type)}
+                                </p>
+                                <p className="mt-1 text-xs text-slate-600">
+                                  Préparé le {formatActionDate(action.createdAt)} · Statut : envoi non confirmé
+                                </p>
+                              </div>
+                              <div className="flex flex-wrap gap-2">
+                                <Button
+                                  onClick={() => handleViewLegacyAction(action)}
+                                  type="button"
+                                  variant="secondary"
+                                >
+                                  Voir mon courrier
+                                </Button>
+                                <Button
+                                  onClick={() => startSentDateConfirmation(confirmationKey)}
+                                  type="button"
+                                  variant="ghost"
+                                >
+                                  Confirmer l&apos;envoi
+                                </Button>
+                              </div>
+                            </div>
+                            {confirmingLetterId === confirmationKey ? (
+                              <div className="mt-3 flex flex-col gap-2 rounded-lg border border-blue-200 bg-white p-3 sm:flex-row sm:items-end">
+                                <label className="text-sm font-semibold text-navy-900">
+                                  Date réelle d&apos;envoi
+                                  <input
+                                    className="mt-1 block rounded-lg border border-slate-200 px-3 py-2 font-normal"
+                                    max={getTodayDateInputValue()}
+                                    onChange={(event) => setConfirmedSentDate(event.target.value)}
+                                    required
+                                    type="date"
+                                    value={confirmedSentDate}
+                                  />
+                                </label>
+                                <Button
+                                  onClick={() => finishLegacySentDateConfirmation(action)}
+                                  type="button"
+                                >
+                                  Valider la date
+                                </Button>
+                              </div>
+                            ) : null}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  ) : null}
+                  {expense.isRecurring && expense.recurrence !== "one_time" && expense.monthlyAmount > 0 ? (
+                    <details className="basis-full rounded-lg border border-green-200 bg-green-50/50 p-3 print:hidden">
+                      <summary className="cursor-pointer text-sm font-semibold text-green-800">
+                        {realizedSaving
+                          ? "Mettre à jour la réduction obtenue"
+                          : "Confirmer une réduction effectivement obtenue"}
+                      </summary>
+                      <form
+                        className="mt-4 grid gap-3 sm:grid-cols-[1fr_1fr_auto] sm:items-end"
+                        onSubmit={(event) => handleConfirmReduction(event, expense)}
+                      >
+                        <label className="text-sm font-semibold text-navy-900">
+                          Nouveau tarif mensuel
+                          <input
+                            className="mt-2 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 font-normal text-slate-900 outline-none focus:border-green-500 focus:ring-2 focus:ring-green-100"
+                            inputMode="decimal"
+                            min="0"
+                            onChange={(event) => updateReductionDraft(expense.id, {
+                              newMonthlyAmount: event.target.value
+                            })}
+                            placeholder={`Inférieur à ${formatCurrency(realizedSaving?.previousMonthlyAmount ?? expense.monthlyAmount)}`}
+                            required
+                            step="0.01"
+                            type="number"
+                            value={reductionDrafts[expense.id]?.newMonthlyAmount ?? (realizedSaving ? String(realizedSaving.newMonthlyAmount) : "")}
+                          />
+                        </label>
+                        <label className="text-sm font-semibold text-navy-900">
+                          Date d&apos;effet
+                          <input
+                            className="mt-2 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 font-normal text-slate-900 outline-none focus:border-green-500 focus:ring-2 focus:ring-green-100"
+                            onChange={(event) => updateReductionDraft(expense.id, {
+                              effectiveDate: event.target.value
+                            })}
+                            required
+                            type="date"
+                            value={reductionDrafts[expense.id]?.effectiveDate ?? realizedSaving?.effectiveDate ?? getTodayDateInputValue()}
+                          />
+                        </label>
+                        <Button type="submit">Confirmer la réduction</Button>
+                      </form>
+                      <p className="mt-3 text-xs leading-5 text-slate-600">
+                        Montant d&apos;origine conservé : {formatCurrency(realizedSaving?.previousMonthlyAmount ?? expense.monthlyAmount)} / mois. Un courrier ou une relance ne valide jamais cette économie automatiquement.
+                      </p>
+                    </details>
+                  ) : (
+                    <p className="basis-full text-xs text-slate-500">
+                      Dépense ponctuelle ou périodicité non mensuelle confirmée : aucune réduction mensuelle n&apos;est déduite automatiquement.
+                    </p>
+                  )}
                 </div>
               );
             })}
@@ -578,7 +1029,7 @@ export function ReportPanel() {
                 💰 Total de vos économies annuelles potentielles
               </p>
               <p className="whitespace-nowrap text-base font-bold text-emerald-600">
-                + {formatCurrency(analysis.yearlyPotentialSavings)} / an
+                + {formatCurrency(currentFinancialSummary.potentialYearlySaving)} / an
               </p>
             </div>
           </div>
@@ -724,7 +1175,7 @@ export function ReportPanel() {
                 type="button"
                 variant="secondary"
               >
-                Voir le document
+                Voir mon courrier
               </Button>
             </div>
           ))}
@@ -742,6 +1193,15 @@ export function ReportPanel() {
                     {action.documentName ? ` - ${action.documentName}` : ""}
                   </p>
                 </div>
+                  {action.letterSnapshot ? (
+                    <Button
+                      onClick={() => handleViewLegacyAction(action)}
+                      type="button"
+                      variant="secondary"
+                    >
+                      Voir mon courrier
+                    </Button>
+                  ) : null}
               </div>
             ))
           ) : letterRecords.length === 0 ? (

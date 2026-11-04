@@ -338,6 +338,20 @@ export type AnalysisReport = {
   recommendationsCount: number;
 };
 
+export type ContractComparisonStatus =
+  | "disabled"
+  | "missing_information"
+  | "unavailable"
+  | "no_better_offer"
+  | "alternative_found";
+
+export type ContractComparisonState = {
+  expenseId: string;
+  status: ContractComparisonStatus;
+  message: string;
+  missingFields?: string[];
+};
+
 export type MockAnalysis = {
   id: string;
   generatedAt: string;

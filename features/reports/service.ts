@@ -1,11 +1,18 @@
 import { jsPDF } from "jspdf";
-import { ExpenseSubcategory, type GeneratedLetter, type MockAnalysis } from "@/types";
 import {
-  isPrimaryAlternative,
-  type AlternativeOffer
-} from "@/features/recommendations/service";
+  ExpenseSubcategory,
+  type ContractComparisonState,
+  type GeneratedLetter,
+  type MockAnalysis,
+} from "@/types";
+import type { AlternativeOffer } from "@/features/recommendations/service";
 import type { SelectedAlternativeOffer } from "@/features/recommendations/selected-offer";
 import type { AuditActionLog } from "@/features/privacy/action-log";
+import {
+  buildFinancialSummary,
+  isReliablePotentialOffer,
+  type RealizedSavingRecord
+} from "./financial-summary";
 import {
   getExpenseDisplayLabel,
   getTopExpenses,
@@ -66,7 +73,7 @@ function getBestAlternativeForExpense(
   return alternatives
     .filter(
       (offer) =>
-        isPrimaryAlternative(offer) &&
+        isReliablePotentialOffer(offer) &&
         getExpenseIdFromAlternativeId(offer, analysis) === expenseId
     )
     .sort((first, second) => second.estimatedYearlySaving - first.estimatedYearlySaving)[0];
@@ -78,7 +85,9 @@ export async function generatePdfReport(
   _letters: GeneratedLetter[] = [],
   _selectedOffer?: SelectedAlternativeOffer | null,
   actionLogs: AuditActionLog[] = [],
-  comparisonMessage?: string | null
+  comparisonMessage?: string | null,
+  comparisonStates: ContractComparisonState[] = [],
+  realizedSavings: RealizedSavingRecord[] = []
 ): Promise<void> {
   const doc = new jsPDF({
     orientation: "portrait",
@@ -87,7 +96,12 @@ export async function generatePdfReport(
   });
 
   const navy = [20, 34, 56] as const;
-  const lightSage = [240, 250, 245] as const;
+  const financialSummary = buildFinancialSummary(
+    analysis,
+    alternatives,
+    comparisonStates,
+    realizedSavings
+  );
 
   let y = 20;
   let logoDataUrl: string | null = null;
@@ -133,28 +147,79 @@ export async function generatePdfReport(
   doc.text("1. Résumé global", 20, y);
 
   y += 10;
-  doc.setFillColor(lightSage[0], lightSage[1], lightSage[2]);
-  doc.roundedRect(20, y, 170, 35, 3, 3, "F");
+  const summaryCards = [
+    {
+      x: 20,
+      title: "Dépenses actuelles",
+      monthly: financialSummary.currentMonthlyAmount,
+      yearly: financialSummary.currentYearlyAmount,
+      fill: [238, 246, 255] as const,
+      text: [16, 42, 76] as const
+    },
+    {
+      x: 78,
+      title: "Économies potentielles",
+      monthly: financialSummary.potentialMonthlySaving,
+      yearly: financialSummary.potentialYearlySaving,
+      fill: [255, 247, 237] as const,
+      text: [217, 119, 6] as const
+    },
+    {
+      x: 136,
+      title: "Économies réalisées",
+      monthly: financialSummary.realizedMonthlySaving,
+      yearly: financialSummary.realizedYearlySaving,
+      fill: [240, 253, 244] as const,
+      text: [21, 128, 61] as const
+    }
+  ];
+  summaryCards.forEach((card, index) => {
+    doc.setFillColor(card.fill[0], card.fill[1], card.fill[2]);
+    doc.roundedRect(card.x, y, 54, 34, 2, 2, "F");
+    doc.setTextColor(card.text[0], card.text[1], card.text[2]);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(8);
+    doc.text(card.title, card.x + 4, y + 8);
+    doc.setFontSize(index === 1 && financialSummary.potentialStatus === "undetermined" ? 10 : 14);
+    doc.text(
+      index === 1 && financialSummary.potentialStatus === "undetermined"
+        ? "Non déterminé"
+        : `${formatCurrency(card.monthly)}/mois`,
+      card.x + 4,
+      y + 20
+    );
+    doc.setFontSize(8);
+    doc.text(`${formatCurrency(card.yearly)}/an`, card.x + 4, y + 28);
+  });
 
+  y += 40;
+  doc.setFillColor(navy[0], navy[1], navy[2]);
+  doc.roundedRect(20, y, 170, 22, 2, 2, "F");
+  doc.setTextColor(255, 255, 255);
+  doc.setFont("helvetica", "bold");
   doc.setFontSize(10);
-  doc.setTextColor(100, 100, 100);
-  doc.text("Montant mensuel estimé", 30, y + 10);
-  doc.text("Pistes annuelles possibles", 110, y + 10);
+  doc.text("Votre budget après optimisation", 26, y + 8);
+  doc.setFontSize(13);
+  doc.text(
+    financialSummary.potentialStatus === "undetermined"
+      ? "Projection non calculable"
+      : `${formatCurrency(financialSummary.projectedMonthlyAmount)}/mois`,
+    184,
+    y + 9,
+    { align: "right" }
+  );
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(7);
+  doc.text("Projection non garantie, sans double comptabilisation des économies réalisées.", 26, y + 16);
 
-  doc.setFontSize(20);
-  doc.setTextColor(navy[0], navy[1], navy[2]);
-  doc.text(formatCurrency(analysis.totalMonthlyAmount), 30, y + 22);
-
-  doc.setTextColor(0, 120, 0);
-  doc.text(formatCurrency(analysis.yearlyPotentialSavings), 110, y + 22);
-
-  y += 50;
+  y += 35;
 
   const contractComparisons = analysis.expenses.slice(0, 15).map((expense) => ({
     expense,
-    offer: getBestAlternativeForExpense(expense.id, alternatives, analysis)
+    offer: getBestAlternativeForExpense(expense.id, alternatives, analysis),
+    comparisonState: comparisonStates.find((state) => state.expenseId === expense.id)
   }));
-  ensurePageSpace(24 + contractComparisons.length * 8);
+  ensurePageSpace(24 + contractComparisons.length * 14);
   doc.setTextColor(navy[0], navy[1], navy[2]);
   doc.setFontSize(16);
   doc.setFont("helvetica", "bold");
@@ -171,13 +236,14 @@ export async function generatePdfReport(
   doc.line(20, y + 2, 190, y + 2);
 
   y += 8;
-  contractComparisons.forEach(({ expense, offer }) => {
-    const hasSaving = Boolean(offer && offer.estimatedYearlySaving > 0);
+  contractComparisons.forEach(({ expense, offer, comparisonState }) => {
+    const contractFinancial = financialSummary.contracts[expense.id];
+    const hasSaving = contractFinancial.potentialYearlySaving > 0;
     doc.setFont("helvetica", hasSaving ? "bold" : "normal");
     doc.setTextColor(hasSaving ? navy[0] : 125, hasSaving ? navy[1] : 125, hasSaving ? navy[2] : 125);
     doc.text(
       truncateText(
-        `${getExpenseDisplayLabel(expense)} - ${normalizeDisplayText(expense.provider)} - ${formatCurrency(expense.monthlyAmount)}/mois`,
+        `${getExpenseDisplayLabel(expense)} - ${normalizeDisplayText(expense.provider)} - ${formatCurrency(contractFinancial.currentMonthlyAmount)}/mois - ${expense.sourceDocumentName ?? "Saisie manuelle"}`,
         39
       ),
       25,
@@ -188,17 +254,27 @@ export async function generatePdfReport(
       truncateText(
         hasSaving && offer
           ? `${normalizeDisplayText(offer.provider)} - ${normalizeDisplayText(offer.name)}`
-          : "Aucune offre plus compétitive trouvée",
+          : comparisonState?.message ?? "Comparaison non disponible",
         48
       ),
       88,
       y
     );
     doc.setTextColor(hasSaving ? 0 : 125, hasSaving ? 120 : 125, hasSaving ? 0 : 125);
-    doc.text(`${formatCurrency(offer?.estimatedYearlySaving ?? 0)}/an`, 185, y, {
+    doc.text(`${formatCurrency(contractFinancial.potentialYearlySaving)}/an`, 185, y, {
       align: "right"
     });
     y += 8;
+    if (contractFinancial.realizedYearlySaving > 0) {
+      doc.setFontSize(8);
+      doc.setTextColor(21, 128, 61);
+      doc.text(
+        `Économie réalisée: ${formatCurrency(contractFinancial.realizedYearlySaving)}/an`,
+        30,
+        y
+      );
+      y += 6;
+    }
   });
 
   const reducedDataAlternatives = alternatives.filter(
@@ -320,8 +396,18 @@ export async function generatePdfReport(
   }
 
   y += 12;
-  const categorySummaries = summarizeExpensesByCategory(analysis.expenses);
-  const topExpenses = getTopExpenses(analysis.expenses, 5);
+  const currentExpenses = analysis.expenses.map((expense) => {
+    const contract = financialSummary.contracts[expense.id];
+    return contract
+      ? {
+          ...expense,
+          monthlyAmount: contract.currentMonthlyAmount,
+          yearlyAmount: contract.currentYearlyAmount
+        }
+      : expense;
+  });
+  const categorySummaries = summarizeExpensesByCategory(currentExpenses);
+  const topExpenses = getTopExpenses(currentExpenses, 5);
   const overviewHeight = 20 + Math.max(categorySummaries.length, topExpenses.length) * 8;
   ensurePageSpace(overviewHeight);
   doc.setTextColor(navy[0], navy[1], navy[2]);

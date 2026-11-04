@@ -2,7 +2,7 @@
 
 import { ChangeEvent, DragEvent, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { FileUp, Loader2, ShieldCheck, Trash2 } from "lucide-react";
+import { FilePlus2, FileUp, Loader2, ShieldCheck, Trash2 } from "lucide-react";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
@@ -155,6 +155,7 @@ function isLikelyMultiContractInsuranceDocument(document: UploadedDocument) {
 export function ImportDocumentsPanel() {
   const router = useRouter();
   const inputRef = useRef<HTMLInputElement>(null);
+  const replacementInputRef = useRef<HTMLInputElement>(null);
   const uploadInProgressRef = useRef(false);
   const [documents, setDocuments] = useState<UploadedDocument[]>([]);
   const [isDragging, setIsDragging] = useState(false);
@@ -168,7 +169,6 @@ export function ImportDocumentsPanel() {
     profileName: string;
   } | null>(null);
   const [hasExistingAudit, setHasExistingAudit] = useState(false);
-  const [pendingFiles, setPendingFiles] = useState<File[] | null>(null);
   const [documentCorrections, setDocumentCorrections] = useState<
     Record<string, DocumentUserCorrections>
   >({});
@@ -194,20 +194,10 @@ export function ImportDocumentsPanel() {
     storeUploadedDocuments(documents);
   }, [documents, hasLoadedDocuments]);
 
-  function shouldAskAuditMode() {
-    return hasExistingAudit && documents.some((document) => document.status !== "error");
-  }
-
-  function queueFilesForAuditChoice(fileList: FileList | File[]) {
+  function appendFiles(fileList: FileList | File[]) {
     const filesArray = Array.from(fileList);
 
     if (filesArray.length === 0) {
-      return;
-    }
-
-    if (shouldAskAuditMode()) {
-      setPendingFiles(filesArray);
-      setStatusMessage(null);
       return;
     }
 
@@ -236,7 +226,6 @@ export function ImportDocumentsPanel() {
     const filesArray = requestedFiles;
 
     if (filesArray.length === 0) {
-      setPendingFiles(null);
       setStatusMessage(
         duplicateFileNames.length > 0
           ? `Document déjà présent dans cet audit : ${duplicateFileNames.join(", ")}.`
@@ -283,7 +272,6 @@ export function ImportDocumentsPanel() {
           clearStoredAnalysis();
           window.localStorage.removeItem(SELECTED_ALTERNATIVE_OFFER_STORAGE_KEY);
           setHasExistingAudit(false);
-          setPendingFiles(null);
           setStatusMessage(
             "Nouvel audit créé. Seuls les nouveaux documents seront analysés."
           );
@@ -380,7 +368,6 @@ export function ImportDocumentsPanel() {
         }
       }
 
-      setPendingFiles(null);
       setStatusMessage(
         failedCount > 0
           ? `${uploadedCount} document(s) ajouté(s), ${failedCount} échec(s) d'enregistrement serveur.`
@@ -396,7 +383,14 @@ export function ImportDocumentsPanel() {
 
   function handleFileInputChange(event: ChangeEvent<HTMLInputElement>) {
     if (event.target.files) {
-      queueFilesForAuditChoice(event.target.files);
+      appendFiles(event.target.files);
+      event.target.value = "";
+    }
+  }
+
+  function handleReplacementInputChange(event: ChangeEvent<HTMLInputElement>) {
+    if (event.target.files) {
+      void addFiles(event.target.files, "replace");
       event.target.value = "";
     }
   }
@@ -404,7 +398,7 @@ export function ImportDocumentsPanel() {
   function handleDrop(event: DragEvent<HTMLDivElement>) {
     event.preventDefault();
     setIsDragging(false);
-    queueFilesForAuditChoice(event.dataTransfer.files);
+    appendFiles(event.dataTransfer.files);
   }
 
   function updateDocumentType(id: string, documentType: UploadedDocumentType) {
@@ -647,6 +641,14 @@ export function ImportDocumentsPanel() {
           ref={inputRef}
           type="file"
         />
+        <input
+          accept={acceptedExtensions}
+          className="hidden"
+          multiple
+          onChange={handleReplacementInputChange}
+          ref={replacementInputRef}
+          type="file"
+        />
         <Button
           className="mt-6"
           disabled={isUploading}
@@ -662,40 +664,26 @@ export function ImportDocumentsPanel() {
         </p>
       </div>
 
-      {pendingFiles ? (
+      {hasExistingAudit || documents.some((document) => document.status !== "error") ? (
         <Card className="border-amber-200 bg-amber-50">
           <h2 className="text-lg font-semibold text-navy-900">
-            Un audit existe déjà
+            Commencer un nouvel audit
           </h2>
           <p className="mt-2 text-sm leading-6 text-amber-900">
-            Vous ajoutez {pendingFiles.length} nouveau(x) fichier(s). Choisissez
-            si vous voulez compléter l'audit actuel ou repartir sur un nouvel audit.
+            Utilisez cette action uniquement pour créer un nouveau périmètre d'analyse.
+            L'audit actuel reste conservé jusqu'à ce que tous les nouveaux documents
+            soient enregistrés et que le remplacement soit confirmé.
           </p>
-          <div className="mt-4 flex flex-wrap gap-3">
-            <Button
-              disabled={isUploading}
-              onClick={() => void addFiles(pendingFiles, "append")}
-              type="button"
-              variant="secondary"
-            >
-              Ajouter à cet audit
-            </Button>
-            <Button
-              disabled={isUploading}
-              onClick={() => void addFiles(pendingFiles, "replace")}
-              type="button"
-            >
-              Créer un nouvel audit
-            </Button>
-            <Button
-              disabled={isUploading}
-              onClick={() => setPendingFiles(null)}
-              type="button"
-              variant="ghost"
-            >
-              Annuler
-            </Button>
-          </div>
+          <Button
+            className="mt-4"
+            disabled={isUploading}
+            onClick={() => replacementInputRef.current?.click()}
+            type="button"
+            variant="secondary"
+          >
+            <FilePlus2 size={16} />
+            Choisir les documents du nouvel audit
+          </Button>
         </Card>
       ) : null}
 

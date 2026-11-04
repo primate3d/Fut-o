@@ -521,6 +521,41 @@ function catalogLoader(sector: Parameters<typeof buildEnabledCommercialCompariso
   return async () => ({ sector, offers, status, verifiedAt: status === "fresh" ? NOW : null, sources: 1 }) as never;
 }
 
+test("les etats de comparaison distinguent desactivation, informations manquantes et absence d'offre", async () => {
+  const incomplete = expenseFromExtractedText(
+    "electricity_invoice",
+    "Facture electricite sans caracteristiques tarifaires.",
+    1200
+  ).expense;
+  const disabled = await buildEnabledCommercialComparisons(analysisFor(incomplete), new Date(NOW), {
+    environment: {},
+  });
+  assert.equal(disabled.comparisonStates[0]?.status, "disabled");
+
+  const missing = await buildEnabledCommercialComparisons(analysisFor(incomplete), new Date(NOW), {
+    environment: { COMMERCIAL_CATALOG_ELECTRICITY_ENABLED: "1" },
+    loadCatalog: catalogLoader("electricity", []),
+  });
+  assert.equal(missing.comparisonStates[0]?.status, "missing_information");
+  assert.ok((missing.comparisonStates[0]?.missingFields?.length ?? 0) > 0);
+
+  const complete = expenseFromExtractedText(
+    "internet_invoice",
+    "Offre Fibre. Abonnement 49,99 EUR par mois. Sans engagement. Debit descendant 1 Gbit/s. TV incluse.",
+    599.88
+  ).expense;
+  const noBetter = await buildEnabledCommercialComparisons(analysisFor(complete), new Date(NOW), {
+    environment: { COMMERCIAL_CATALOG_INTERNET_ENABLED: "1" },
+    loadCatalog: catalogLoader("internet", [verifiedOffer({
+      monthlyPrice: 99,
+      activationFees: 49,
+      downloadMbps: 1000,
+      includedServices: ["TV"],
+    })]),
+  });
+  assert.equal(noBetter.comparisonStates[0]?.status, "no_better_offer");
+});
+
 test("document Internet -> extraction -> comparaison verifiee", async () => {
   const { expense } = expenseFromExtractedText("internet_invoice", `Offre Fibre Max\nAbonnement 49,99 EUR / mois. Promotion 39,99 EUR pendant 12 mois puis 49,99 EUR.\nSans engagement. Frais de mise en service 49 EUR. Frais de resiliation 59 EUR.\nDebit descendant 2 Gbit/s, debit montant 700 Mbit/s. TV et Wi-Fi 6 inclus.`, 599.88);
   assert.equal(expense.contractDetails?.kind, "internet");
@@ -532,6 +567,7 @@ test("document Internet -> extraction -> comparaison verifiee", async () => {
   });
   assert.equal(result.alternatives[0]?.savingKind, "certified");
   assert.ok((result.alternatives[0]?.estimatedYearlySaving ?? 0) > 0);
+  assert.equal(result.comparisonStates[0]?.status, "alternative_found");
 });
 
 test("document electricite -> extraction Base -> cout annuel", async () => {
@@ -590,6 +626,27 @@ test("une confirmation reste limitee au contrat et survit a la reouverture", () 
   assert.equal(analysis.expenses[0]?.contractDetails && "powerKva" in analysis.expenses[0].contractDetails ? analysis.expenses[0].contractDetails.powerKva : undefined, undefined);
 });
 
+test("une ancienne ligne Engie electricite mal typee est confirmee comme electricite", () => {
+  const { expense } = expenseFromExtractedText(
+    "gas_invoice",
+    "Echeancier Engie. Consommation annuelle gaz 4349 kWh.",
+    814.8
+  );
+  const legacyExpense: Expense = {
+    ...expense,
+    subcategory: ExpenseSubcategory.ELECTRICITY,
+  };
+  const updated = applyContractConfirmation(analysisFor(legacyExpense), {
+    expenseId: legacyExpense.id,
+    details: { powerKva: 6, tariffOption: "HPHC", annualConsumptionKwh: 1369 },
+  });
+  assert.equal(updated.expenses[0]?.contractDetails?.kind, "electricity");
+  assert.deepEqual(getMissingContractFields(updated.expenses[0]!), [
+    "consommation heures pleines",
+    "consommation heures creuses",
+  ]);
+});
+
 test("les index Tempo et la periode IA sont valides sans invention", () => {
   const details = normalizeAiContractDetails({
     kind: "electricity",
@@ -633,6 +690,7 @@ test("une donnee IA ou un catalogue perime ne certifie aucune economie", async (
   const staleResult = await buildEnabledCommercialComparisons(analysisFor({ ...expense, contractDetails: { ...expense.contractDetails!, source: "document" } }), new Date(NOW), {
     environment: { COMMERCIAL_CATALOG_INTERNET_ENABLED: "1" }, loadCatalog: catalogLoader("internet", [offer], "stale"),
   });
+  assert.equal(staleResult.comparisonStates[0]?.status, "unavailable");
   assert.equal(staleResult.alternatives.length, 0);
   assert.match(staleResult.messages.join(" "), /périmé/);
 });

@@ -900,9 +900,16 @@ function createLetter(
   };
 }
 
-function getLetterTypesForExpense(expense: Expense, _analysis: MockAnalysis) {
+function getLetterTypesForExpense(
+  expense: Expense,
+  _analysis: MockAnalysis,
+  hasVerifiedOffer: boolean
+) {
   const context = getLetterContextCategory(expense);
-  return context ? letterTypesByCategory[context] : defaultLetterTypes;
+  const types = context ? letterTypesByCategory[context] : defaultLetterTypes;
+  return hasVerifiedOffer
+    ? types
+    : types.filter((type) => type !== "offer_change" && type !== "comparison_report");
 }
 
 export function generateLettersFromAnalysis(
@@ -910,7 +917,11 @@ export function generateLettersFromAnalysis(
   selectedOffer?: SelectedAlternativeOffer | null
 ): GeneratedLetter[] {
   const letters = analysis.expenses.flatMap((expense) =>
-    getLetterTypesForExpense(expense, analysis).map((type) =>
+    getLetterTypesForExpense(
+      expense,
+      analysis,
+      selectedOffer?.sourceExpenseId === expense.id
+    ).map((type) =>
       createLetter(type, expense, analysis, selectedOffer)
     )
   );

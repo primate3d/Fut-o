@@ -747,6 +747,10 @@ test("analysis completion reuses the saved result even when documents have corre
 
   assert.equal(selectReusableAnalysis([saved], [document]), saved);
   assert.equal(
+    selectReusableAnalysis([saved], [{ ...document, status: "purged" }]),
+    saved
+  );
+  assert.equal(
     selectReusableAnalysis([saved], [{ ...document, id: randomUUID() }]),
     null
   );
@@ -754,6 +758,9 @@ test("analysis completion reuses the saved result even when documents have corre
   const source = await fs.readFile("features/analysis/AnalysisRunner.tsx", "utf8");
   assert.match(source, /router\.replace\("\/resultats"\)/);
   assert.doesNotMatch(source, /hasEnrichedCurrentAnalysis\s*&&\s*!hasCorrectedDocuments/);
+  assert.doesNotMatch(source, /removeItem\(MOCK_ANALYSIS_STORAGE_KEY\)/);
+  assert.match(source, /error\.details\.status === 409/);
+  assert.match(source, /completedAnalysis = await getStoredAnalysisServer\(\)/);
   assert.match(source, /setHasFailed\(true\)[\s\S]{0,120}setIsComplete\(false\)/);
 });
 
@@ -848,6 +855,163 @@ test("adding a document analyzes only the new source and preserves the existing 
   assert.equal((await retryResponse.json() as { cached: boolean }).cached, true);
   assert.equal(aiRequests, callsBeforeRetry);
   assert.equal((await repo.findKeyByCode(key.code))?.usesRemaining, 8);
+});
+
+test("purged sources keep validated contracts while EDF, SFR and Engie are added once", async () => {
+  const { POST: analyze } = await import("../app/api/analyse/route");
+  const { POST: upload, DELETE: mutateDocuments } = await import("../app/api/documents/route");
+  const key = { ...fakeKey(), plan: "famille" as const };
+  await repo.saveKey(key);
+
+  const edfId = randomUUID();
+  const edf = (await (await uploadRequest(
+    key.code,
+    edfId,
+    undefined,
+    "edf"
+  )).json()).document as UploadedDocument;
+  aiReply = remapAiPayload({ edf: edfId });
+  const callsBeforeEdf = aiRequests;
+  const edfResponse = await analyze(incrementalAnalysisRequest(key.code, [edf]));
+  assert.equal(edfResponse.status, 200);
+  const edfAnalysis = (await edfResponse.json() as { analysis: MockAnalysis }).analysis;
+  const edfExpenseId = edfAnalysis.expenses.find(
+    (expense) => expense.sourceDocumentId === edfId
+  )?.id;
+  assert.ok(edfExpenseId);
+  assert.equal(aiRequests, callsBeforeEdf + 1);
+
+  const purgeResponse = await mutateDocuments(new Request(
+    "http://local.test/api/documents",
+    { method: "DELETE", body: JSON.stringify({ code: key.code, purge: true }) }
+  ));
+  assert.equal(purgeResponse.status, 200);
+  assert.equal((await repo.getDocumentsByKey(key.code))[0].status, "purged");
+
+  const sfrId = randomUUID();
+  const sfr = (await (await uploadRequest(
+    key.code,
+    sfrId,
+    undefined,
+    "sfr"
+  )).json()).document as UploadedDocument;
+  aiReply = remapAiPayload({ sfr: sfrId });
+  const callsBeforeSfr = aiRequests;
+  const sfrResponse = await analyze(incrementalAnalysisRequest(key.code, [sfr]));
+  assert.equal(sfrResponse.status, 200);
+  const sfrAnalysis = (await sfrResponse.json() as { analysis: MockAnalysis }).analysis;
+  assert.equal(aiRequests, callsBeforeSfr + 1);
+  assert.deepEqual(
+    sfrAnalysis.documents.map((document) => document.id).sort(),
+    [edfId, sfrId].sort()
+  );
+  assert.equal(
+    sfrAnalysis.expenses.find((expense) => expense.sourceDocumentId === edfId)?.id,
+    edfExpenseId
+  );
+
+  const engieId = randomUUID();
+  const engieMetadata: UploadedDocument = {
+    ...householdDocuments[0],
+    id: engieId,
+    fileName: "engie.pdf",
+    provider: "ENGIE",
+    documentType: "gas_invoice",
+    detectedCategory: ExpenseCategory.ENERGY
+  };
+  const engieForm = new FormData();
+  engieForm.set("code", key.code);
+  engieForm.set("document", JSON.stringify(engieMetadata));
+  engieForm.set("file", pdfFile(
+    "engie.pdf",
+    "Monsieur Jean DUPONT ENGIE Gaz 80 EUR par mois Electricite 60 EUR par mois"
+  ));
+  const engieUpload = await upload(new Request(
+    "http://local.test/api/documents",
+    { method: "POST", body: engieForm }
+  ));
+  assert.equal(engieUpload.status, 200);
+  const engie = (await engieUpload.json()).document as UploadedDocument;
+  aiReply = {
+    detectedParties: {
+      customer: { fullName: "Jean DUPONT", firstName: "Jean", lastName: "DUPONT" },
+      documents: {
+        [engieId]: {
+          documentId: engieId,
+          documentType: "gas_invoice",
+          providerName: "ENGIE",
+          invoiceAmount: 140
+        }
+      }
+    },
+    expenses: [
+      {
+        sourceDocumentId: engieId,
+        documentType: "gas_invoice",
+        provider: "ENGIE",
+        label: "Gaz",
+        category: ExpenseCategory.ENERGY,
+        subcategory: ExpenseSubcategory.GAS,
+        monthlyAmount: 80,
+        yearlyAmount: 960,
+        recurrence: "monthly",
+        isRecurring: true
+      },
+      {
+        sourceDocumentId: engieId,
+        documentType: "electricity_invoice",
+        provider: "ENGIE",
+        label: "Electricite",
+        category: ExpenseCategory.ENERGY,
+        subcategory: ExpenseSubcategory.ELECTRICITY,
+        monthlyAmount: 60,
+        yearlyAmount: 720,
+        recurrence: "monthly",
+        isRecurring: true
+      }
+    ],
+    recommendations: [],
+    anomalies: []
+  };
+  const callsBeforeEngie = aiRequests;
+  const engieResponse = await analyze(
+    incrementalAnalysisRequest(key.code, [sfr, engie])
+  );
+  assert.equal(engieResponse.status, 200);
+  const engieAnalysis = (await engieResponse.json() as { analysis: MockAnalysis }).analysis;
+  assert.equal(aiRequests, callsBeforeEngie + 1);
+  assert.deepEqual(
+    engieAnalysis.documents.map((document) => document.id).sort(),
+    [edfId, sfrId, engieId].sort()
+  );
+  assert.equal(
+    engieAnalysis.expenses.filter((expense) => expense.sourceDocumentId === engieId).length,
+    2
+  );
+  assert.equal(new Set(engieAnalysis.expenses.map((expense) => expense.id)).size, 4);
+  assert.equal((await repo.findKeyByCode(key.code))?.usesRemaining, 7);
+
+  const callsBeforeRetry = aiRequests;
+  const retryResponse = await analyze(
+    incrementalAnalysisRequest(key.code, [sfr, engie])
+  );
+  assert.equal(retryResponse.status, 200);
+  assert.equal((await retryResponse.json() as { cached: boolean }).cached, true);
+  assert.equal(aiRequests, callsBeforeRetry);
+
+  const deleteResponse = await mutateDocuments(new Request(
+    "http://local.test/api/documents",
+    { method: "DELETE", body: JSON.stringify({ code: key.code, documentId: edfId }) }
+  ));
+  assert.equal(deleteResponse.status, 200);
+  const afterDeleteResponse = await analyze(
+    incrementalAnalysisRequest(key.code, [sfr, engie])
+  );
+  assert.equal(afterDeleteResponse.status, 200);
+  const afterDelete = (await afterDeleteResponse.json() as { analysis: MockAnalysis }).analysis;
+  assert.equal(aiRequests, callsBeforeRetry);
+  assert.ok(!afterDelete.documents.some((document) => document.id === edfId));
+  assert.ok(!afterDelete.expenses.some((expense) => expense.sourceDocumentId === edfId));
 });
 
 test("contract deduplication uses a strong identity and prefers an invoice over a schedule", async () => {
@@ -1069,6 +1233,11 @@ test("mixed EDF / MACIF multi-contract / SFR box / mobile preserves every docume
   assert.ok(letters.every((letter) => !letter.offerName));
   assert.ok(
     letters.every((letter) =>
+      letter.type !== "offer_change" && letter.type !== "comparison_report"
+    )
+  );
+  assert.ok(
+    letters.every((letter) =>
       result.expenses.some((expense) => expense.id === letter.sourceExpenseId)
     )
   );
@@ -1116,9 +1285,18 @@ test("the report targets existing letters without triggering a second analysis",
   assert.match(lettersSource, /Contenu modifiable avant téléchargement/);
   assert.match(lettersSource, /savePreparedLetter\(letterAuditId, snapshot\)/);
   assert.match(lettersSource, /saveFollowupLetter\(sourceLetterRecordId, snapshot\)/);
-  assert.match(reportSource, /Courrier préparé le/);
-  assert.match(reportSource, /Relance préparée le/);
+  assert.match(lettersSource, /saveLetterAsPrepared\(letter, content\)/);
+  assert.match(lettersSource, /sourceRecord\.status !== "sent"/);
+  assert.match(lettersSource, /!sourceRecord\.sentAt/);
+  assert.match(lettersSource, /sourceRecord\.auditId !== currentAuditId/);
+  assert.match(lettersSource, /record\.auditId === currentAuditId/);
+  assert.match(lettersSource, /confirmedSourceRecord\.sentAt/);
+  assert.doesNotMatch(lettersSource, /sentAt \?\? sourceRecord\.createdAt/);
+  assert.match(reportSource, /Préparé le \{formatActionDate\(initialLetter\.createdAt\)\}/);
+  assert.match(reportSource, /Relance préparée/);
   assert.match(reportSource, /Confirmer l&apos;envoi/);
+  assert.match(reportSource, /Date réelle d&apos;envoi/);
+  assert.match(reportSource, /initialLetter\.status === "sent" && initialLetter\.sentAt/);
   assert.doesNotMatch(lettersSource, /handleForceAnalysis|deleteStoredAnalysisServer/);
   const letterServiceSource = await fs.readFile("features/letters/service.ts", "utf8");
   assert.doesNotMatch(letterServiceSource, /findAlternativeOffers/);
@@ -1191,6 +1369,22 @@ test("letter tracking persists prepared, sent and follow-up states without dupli
     assert.equal(getStoredLetterRecords("audit-one").length, 1);
     assert.equal(getStoredLetterRecord(prepared.id)?.status, "prepared");
 
+    const historicalPreparedAt = "2026-10-01T10:00:00.000Z";
+    const historical = savePreparedLetter(
+      "audit-history",
+      {
+        ...initialSnapshot,
+        letter: {
+          ...initialLetter,
+          id: "letter-expense-historical",
+          sourceExpenseId: "expense-historical"
+        }
+      },
+      historicalPreparedAt
+    );
+    assert.equal(historical?.createdAt, historicalPreparedAt);
+    assert.equal(confirmLetterSent(historical!.id, "2026-10-02")?.status, "sent");
+
     addAuditActionLog({
       type: "letter_downloaded",
       label: "Courrier téléchargé",
@@ -1198,10 +1392,32 @@ test("letter tracking persists prepared, sent and follow-up states without dupli
       letterSnapshot: initialSnapshot
     });
     assert.equal(getStoredLetterRecord(prepared.id)?.status, "prepared");
+    assert.equal(
+      saveFollowupLetter(prepared.id, {
+        ...initialSnapshot,
+        letter: {
+          ...initialLetter,
+          id: "premature-followup",
+          type: "provider_followup"
+        }
+      }),
+      null
+    );
+    assert.equal(confirmLetterSent(prepared.id, "not-a-date"), null);
+    assert.equal(confirmLetterSent(prepared.id, "2099-01-01"), null);
+    assert.equal(getStoredLetterRecord(prepared.id)?.status, "prepared");
 
-    const sentAt = "2026-11-03T10:00:00.000Z";
+    const sentAt = new Date().toISOString().slice(0, 10);
     assert.equal(confirmLetterSent(prepared.id, sentAt)?.status, "sent");
     assert.equal(getStoredLetterRecord(prepared.id)?.sentAt, sentAt);
+    savePreparedLetter("audit-one", {
+      ...initialSnapshot,
+      renderedContent: "Modification postérieure à l'envoi"
+    });
+    assert.equal(
+      getStoredLetterRecord(prepared.id)?.snapshot.renderedContent,
+      "Courrier personnalisé"
+    );
 
     const followupLetter: GeneratedLetter = {
       ...initialLetter,
@@ -1671,6 +1887,42 @@ test("EDF-only analysis produces one electricity expense", async () => {
   assert.equal(result.expenses[0].documentType, "electricity_invoice");
 });
 
+test("EDF invoice keeps the TTC total as a one-time amount, not a monthly charge", async () => {
+  const {
+    attachDocumentProfileToExpense,
+    buildDocumentPartyProfiles,
+  } = await import("../features/analysis/document-profiles");
+  const document: UploadedDocument & { extractedText: string } = {
+    id: "edf-real-shape",
+    fileName: "facture edf.jpeg",
+    fileSize: 150_000,
+    mimeType: "image/jpeg",
+    documentType: "electricity_invoice",
+    detectedCategory: ExpenseCategory.ENERGY,
+    provider: "EDF",
+    status: "ready",
+    uploadedAt: new Date().toISOString(),
+    extractedText: "Facture EDF du 04/08/2025. Electricite releve estime 80,31 EUR. TVA 16,33 EUR. Facture TTC 96,64 EUR. A payer avant le 19/08/2025.",
+  };
+  const expense = attachDocumentProfileToExpense({
+    id: "edf-expense",
+    label: "Electricite",
+    provider: "EDF",
+    category: ExpenseCategory.ENERGY,
+    subcategory: ExpenseSubcategory.ELECTRICITY,
+    isRecurring: true,
+    monthlyAmount: 96.64,
+    yearlyAmount: 1159.68,
+    documentType: "electricity_invoice",
+    sourceDocumentId: document.id,
+    recurrence: "monthly",
+  }, buildDocumentPartyProfiles([document]));
+
+  assert.equal(expense.monthlyAmount, 0);
+  assert.equal(expense.yearlyAmount, 96.64);
+  assert.equal(expense.recurrence, "one_time");
+});
+
 test("ENGIE multi-line schedule preserves gas and electricity expenses", async () => {
   const { analyzeDocumentsWithAI } = await import("../features/analysis/ai-service");
   const document = {
@@ -1682,7 +1934,8 @@ test("ENGIE multi-line schedule preserves gas and electricity expenses", async (
     extractedText: [
       "Monsieur Jean DUPONT", "1 rue Exemple", "75001 PARIS", "ENGIE Echeancier",
       "Gaz", "Janvier 80,00 EUR", "Fevrier 80,00 EUR",
-      "Electricite", "Janvier 60,00 EUR", "Fevrier 60,00 EUR", "Total prelevement 140,00 EUR"
+      "Electricite", "Janvier 60,00 EUR", "Fevrier 60,00 EUR", "Total prelevement 140,00 EUR",
+      "Votre consommation en Gaz : 4349 kWh", "Votre consommation en Electricite : 1369 kWh"
     ].join("\n")
   };
   aiReply = {
@@ -1702,6 +1955,12 @@ test("ENGIE multi-line schedule preserves gas and electricity expenses", async (
   assert.equal(result.expenses.length, 2);
   assert.deepEqual(result.expenses.map((expense) => expense.subcategory).sort(), ["ELECTRICITY", "GAS"]);
   assert.deepEqual(result.expenses.map((expense) => expense.monthlyAmount).sort((a, b) => a - b), [60, 80]);
+  const gas = result.expenses.find((expense) => expense.subcategory === ExpenseSubcategory.GAS);
+  const electricity = result.expenses.find((expense) => expense.subcategory === ExpenseSubcategory.ELECTRICITY);
+  assert.equal(gas?.contractDetails?.kind, "gas");
+  assert.equal(electricity?.contractDetails?.kind, "electricity");
+  assert.equal(gas?.contractDetails?.kind === "gas" && gas.contractDetails.annualConsumptionKwh, 4349);
+  assert.equal(electricity?.contractDetails?.kind === "electricity" && electricity.contractDetails.annualConsumptionKwh, 1369);
 });
 
 test("MACIF-only analysis preserves three distinct contracts", async () => {
@@ -2701,6 +2960,226 @@ test("application sources do not generate access-key query strings", async () =>
     const source = await fs.readFile(file, "utf8");
     assert.doesNotMatch(source, /\/api\/(?:keys\/status|documents|analyse)\?code=/, file);
   }
+});
+
+test("progressive imports append directly and keep new audit as a distinct action", async () => {
+  const source = await fs.readFile("features/upload/ImportDocumentsPanel.tsx", "utf8");
+  assert.doesNotMatch(source, /Ajouter à cet audit|pendingFiles|queueFilesForAuditChoice/);
+  assert.match(source, /Commencer un nouvel audit/);
+  assert.match(source, /addFiles\(event\.target\.files, "replace"\)/);
+  assert.match(source, /appendFiles\(event\.target\.files\)/);
+});
+
+test("optimization score stays undetermined until comparisons are conclusive", async () => {
+  const { getOptimizationScore } = await import("../features/reports/ReportPanel");
+  const analysis = analysisWithProvider("SCORE", "EDF");
+  const disabled = [{
+    expenseId: analysis.expenses[0].id,
+    status: "disabled" as const,
+    message: "Comparateur desactive",
+  }];
+  const conclusive = [{
+    expenseId: analysis.expenses[0].id,
+    status: "no_better_offer" as const,
+    message: "Aucune meilleure offre",
+  }];
+
+  assert.equal(getOptimizationScore(analysis, []), null);
+  assert.equal(getOptimizationScore(analysis, disabled), null);
+  assert.equal(getOptimizationScore(analysis, conclusive), 100);
+});
+
+test("financial summary separates current, potential and realized savings without double counting", async () => {
+  const { buildFinancialSummary } = await import("../features/reports/financial-summary");
+  const analysis = analysisWithProvider("FINANCIAL", "Free");
+  analysis.expenses[0] = {
+    ...analysis.expenses[0],
+    id: "expense-recurring",
+    isRecurring: true,
+    recurrence: "monthly",
+    monthlyAmount: 50,
+    yearlyAmount: 600
+  };
+  analysis.expenses.push({
+    ...analysis.expenses[0],
+    id: "expense-one-time",
+    label: "Facture ponctuelle",
+    provider: "EDF",
+    isRecurring: false,
+    recurrence: "one_time",
+    monthlyAmount: 0,
+    yearlyAmount: 96.64
+  });
+  analysis.totalMonthlyAmount = 50;
+  analysis.totalYearlyAmount = 696.64;
+  const alternatives = [{
+    id: "alternative_expense-recurring_verified",
+    sourceExpenseId: "expense-recurring",
+    category: analysis.expenses[0].category,
+    provider: "Alternative fiable",
+    name: "Tarif vérifié",
+    url: "https://example.invalid/offer",
+    monthlyPrice: 30,
+    yearlyPrice: 360,
+    estimatedYearlySaving: 240,
+    reason: "Comparaison fiable",
+    action: "Vérifier",
+    comparisonKind: "equivalent" as const,
+    savingKind: "certified" as const
+  }];
+  const realizedSavings = [{
+    id: "expense-recurring:confirmed-reduction",
+    auditId: analysis.id,
+    expenseId: "expense-recurring",
+    previousMonthlyAmount: 50,
+    newMonthlyAmount: 40,
+    effectiveDate: "2026-11-01",
+    confirmedAt: "2026-10-31T12:00:00.000Z",
+    updatedAt: "2026-10-31T12:00:00.000Z"
+  }];
+  const states = [{
+    expenseId: "expense-recurring",
+    status: "alternative_found" as const,
+    message: "Alternative disponible"
+  }];
+
+  const summary = buildFinancialSummary(
+    analysis,
+    alternatives,
+    states,
+    realizedSavings,
+    new Date("2026-11-04T12:00:00.000Z")
+  );
+  assert.equal(summary.currentMonthlyAmount, 40);
+  assert.equal(summary.currentYearlyAmount, 576.64);
+  assert.equal(summary.realizedMonthlySaving, 10);
+  assert.equal(summary.realizedYearlySaving, 120);
+  assert.equal(summary.potentialMonthlySaving, 10);
+  assert.equal(summary.potentialYearlySaving, 120);
+  assert.equal(summary.projectedMonthlyAmount, 30);
+  assert.equal(summary.projectedYearlyAmount, 456.64);
+  assert.equal(summary.contracts["expense-one-time"].currentYearlyAmount, 96.64);
+});
+
+test("future reductions and unreliable offers are not counted as achieved or guaranteed", async () => {
+  const { buildFinancialSummary } = await import("../features/reports/financial-summary");
+  const analysis = analysisWithProvider("FUTURE-SAVING", "EDF");
+  analysis.expenses[0] = {
+    ...analysis.expenses[0],
+    id: "expense-future",
+    monthlyAmount: 50,
+    yearlyAmount: 600,
+    isRecurring: true,
+    recurrence: "monthly"
+  };
+  analysis.totalMonthlyAmount = 50;
+  analysis.totalYearlyAmount = 600;
+  const unreliableOffer = [{
+    id: "alternative_expense-future_partial",
+    sourceExpenseId: "expense-future",
+    category: analysis.expenses[0].category,
+    provider: "Offre partielle",
+    name: "Conditions inconnues",
+    url: "https://example.invalid/partial",
+    monthlyPrice: 20,
+    yearlyPrice: 240,
+    estimatedYearlySaving: 360,
+    reason: "Frais inconnus",
+    action: "Confirmer",
+    comparisonKind: "requires_validation" as const,
+    savingKind: "recurring_only" as const
+  }];
+  const futureSaving = [{
+    id: "expense-future:confirmed-reduction",
+    auditId: analysis.id,
+    expenseId: "expense-future",
+    previousMonthlyAmount: 50,
+    newMonthlyAmount: 40,
+    effectiveDate: "2026-12-01",
+    confirmedAt: "2026-11-04T12:00:00.000Z",
+    updatedAt: "2026-11-04T12:00:00.000Z"
+  }];
+  const summary = buildFinancialSummary(
+    analysis,
+    unreliableOffer,
+    [{ expenseId: "expense-future", status: "unavailable", message: "Catalogue incomplet" }],
+    futureSaving,
+    new Date("2026-11-04T12:00:00.000Z")
+  );
+
+  assert.equal(summary.currentMonthlyAmount, 50);
+  assert.equal(summary.realizedYearlySaving, 0);
+  assert.equal(summary.potentialYearlySaving, 0);
+  assert.equal(summary.potentialStatus, "undetermined");
+  assert.equal(summary.contracts["expense-future"].realizedSavingIsEffective, false);
+});
+
+test("confirmed reductions persist per access key and preserve the original amount", async () => {
+  const originalWindow = globalThis.window;
+  const values = new Map<string, string>();
+  const localStorage = {
+    getItem: (key: string) => values.get(key) ?? null,
+    setItem: (key: string, value: string) => values.set(key, value),
+    removeItem: (key: string) => values.delete(key),
+    clear: () => values.clear(),
+    key: (index: number) => [...values.keys()][index] ?? null,
+    get length() { return values.size; }
+  };
+  Object.defineProperty(globalThis, "window", {
+    configurable: true,
+    value: { localStorage }
+  });
+
+  try {
+    const {
+      confirmRealizedSaving,
+      getRealizedSavingRecords
+    } = await import("../features/reports/financial-summary");
+    const analysis = analysisWithProvider("PERSISTED-SAVING", "SFR");
+    const expense = {
+      ...analysis.expenses[0],
+      id: "expense-persisted",
+      monthlyAmount: 50,
+      yearlyAmount: 600,
+      isRecurring: true,
+      recurrence: "monthly" as const
+    };
+    confirmRealizedSaving("KEY-A", {
+      auditId: analysis.id,
+      expense,
+      newMonthlyAmount: 40,
+      effectiveDate: "2026-11-01"
+    }, new Date("2026-11-02T10:00:00.000Z"));
+    confirmRealizedSaving("KEY-A", {
+      auditId: analysis.id,
+      expense: { ...expense, monthlyAmount: 40 },
+      newMonthlyAmount: 35,
+      effectiveDate: "2026-11-03"
+    }, new Date("2026-11-03T10:00:00.000Z"));
+
+    const records = getRealizedSavingRecords("KEY-A");
+    assert.equal(records.length, 1);
+    assert.equal(records[0].previousMonthlyAmount, 50);
+    assert.equal(records[0].newMonthlyAmount, 35);
+    assert.equal(records[0].effectiveDate, "2026-11-03");
+    assert.deepEqual(getRealizedSavingRecords("KEY-B"), []);
+  } finally {
+    Object.defineProperty(globalThis, "window", {
+      configurable: true,
+      value: originalWindow
+    });
+  }
+});
+
+test("report exposes the financial overview and requires explicit reduction confirmation", async () => {
+  const reportSource = await fs.readFile("features/reports/ReportPanel.tsx", "utf8");
+  const financialSource = await fs.readFile("features/reports/financial-summary.ts", "utf8");
+  assert.match(reportSource, /Vos dépenses actuelles/);
+  assert.match(reportSource, /Vos économies potentielles/);
+  assert.match(reportSource, /Vos économies réalisées/);
+  assert.match(reportSource, /Votre budget après optimisation/);
+  assert.match(reportSource, /Confirmer une réduction effectivement obtenue/);
+  assert.doesNotMatch(financialSource, /letter_downloaded|letter_email_prepared|report_downloaded/);
 });
 
 test("activation and status endpoints are rate limited per IP", async () => {

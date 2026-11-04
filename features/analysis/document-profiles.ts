@@ -30,6 +30,7 @@ type EnergyServiceLineInfo = {
   subcategory: ExpenseSubcategory.GAS | ExpenseSubcategory.ELECTRICITY;
   monthlyAmount: number;
   yearlyAmount: number;
+  annualConsumptionKwh?: number;
 };
 
 type InsuranceContractInfo = {
@@ -198,6 +199,17 @@ function firstAmountNearLabel(text: string, labels: RegExp[]) {
   return undefined;
 }
 
+function firstKwhNearLabel(text: string, labels: RegExp[]) {
+  for (const label of labels) {
+    const match = text.match(
+      new RegExp(`${label.source}.{0,90}?([0-9][0-9\\s.,]*)\\s*kwh`, "i")
+    );
+    const amount = parseAmount(match?.[1]);
+    if (amount) return amount;
+  }
+  return undefined;
+}
+
 function extractAmounts(text?: string) {
   return [...(text ?? "").matchAll(/([0-9][0-9\s.,]*[,.][0-9]{2})/g)]
     .map((match) => parseAmount(match[1]))
@@ -236,6 +248,12 @@ function extractEnergyServiceLines(
   const electricityMonthlyAmount = mostRepeatedAmount(
     extractAmounts(scheduleMatch[2])
   );
+  const gasAnnualConsumptionKwh = firstKwhNearLabel(normalizedText, [
+    /consommation\s+en\s+gaz/
+  ]);
+  const electricityAnnualConsumptionKwh = firstKwhNearLabel(normalizedText, [
+    /consommation\s+en\s+electricite/
+  ]);
   const lines: EnergyServiceLineInfo[] = [];
 
   if (gasMonthlyAmount) {
@@ -243,7 +261,8 @@ function extractEnergyServiceLines(
       label: "Gaz",
       subcategory: ExpenseSubcategory.GAS,
       monthlyAmount: normalizeAmount(gasMonthlyAmount),
-      yearlyAmount: normalizeAmount(gasMonthlyAmount * 12)
+      yearlyAmount: normalizeAmount(gasMonthlyAmount * 12),
+      annualConsumptionKwh: gasAnnualConsumptionKwh
     });
   }
 
@@ -252,7 +271,8 @@ function extractEnergyServiceLines(
       label: "Electricite",
       subcategory: ExpenseSubcategory.ELECTRICITY,
       monthlyAmount: normalizeAmount(electricityMonthlyAmount),
-      yearlyAmount: normalizeAmount(electricityMonthlyAmount * 12)
+      yearlyAmount: normalizeAmount(electricityMonthlyAmount * 12),
+      annualConsumptionKwh: electricityAnnualConsumptionKwh
     });
   }
 
@@ -1569,6 +1589,7 @@ export function attachDocumentProfileToExpense(
   const inferredCategory = inferExpenseCategoryFromDocumentType(inferenceDocumentType);
   const inferredSubcategory = inferExpenseSubcategoryFromDocumentType(inferenceDocumentType);
   const energyBilling = getEnergyBillingInfoFromProfile(profile);
+  const energyServiceLines = getEnergyServiceLinesFromProfile(profile);
   const internetBox = getInternetBoxInfoFromProfile(profile);
   const mobilePlan = getMobilePlanInfoFromProfile(profile);
   const mobileBilling = getMobileBillingInfoFromProfile(profile);
@@ -1598,7 +1619,8 @@ export function attachDocumentProfileToExpense(
       expense.subcategory === ExpenseSubcategory.ELECTRICITY) &&
     typeof expense.monthlyAmount === "number" &&
     Number.isFinite(expense.monthlyAmount) &&
-    expense.monthlyAmount > 0;
+    expense.monthlyAmount > 0 &&
+    energyServiceLines.some((line) => line.subcategory === expense.subcategory);
   const finalSubcategory =
     inferredCategory === ExpenseCategory.ENERGY &&
     energyBilling?.hasElectricity &&
@@ -1641,10 +1663,13 @@ export function attachDocumentProfileToExpense(
           Number.isFinite(expense.yearlyAmount)
         ? expense.yearlyAmount
       : safeMonthlyAmount * 12;
+  const contractDetails = isSeparatedEnergyExpense
+    ? mergeContractDetails(expense.contractDetails, profile.contractDetails)
+    : mergeContractDetails(profile.contractDetails, expense.contractDetails);
 
   return {
     ...expense,
-    contractDetails: mergeContractDetails(profile.contractDetails, expense.contractDetails),
+    contractDetails,
     ...(internetBox
       ? {
           internetAccessTechnology: internetBox.technology,

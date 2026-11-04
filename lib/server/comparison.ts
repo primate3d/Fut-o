@@ -1,4 +1,8 @@
-import { ExpenseSubcategory, type MockAnalysis } from "@/types";
+import {
+  ExpenseSubcategory,
+  type ContractComparisonState,
+  type MockAnalysis,
+} from "@/types";
 import {
   findAlternativeOffers,
   isPrimaryAlternative,
@@ -69,12 +73,65 @@ export async function buildServerComparison(analysis: MockAnalysis, now = new Da
     ...existingAlternatives.filter((offer) => !offer.sourceExpenseId || !commercial.replacedExpenseIds.has(offer.sourceExpenseId)),
     ...commercial.alternatives,
   ];
+  const mobileComparisonStates: ContractComparisonState[] = mobileExpenses.map((expense) => {
+    if (catalog.status !== "fresh") {
+      return {
+        expenseId: expense.id,
+        status: "unavailable",
+        message: "La comparaison des offres n'est pas disponible actuellement.",
+      };
+    }
+    if (
+      !expense.mobileDataUnlimited &&
+      typeof expense.mobileIncludedDataGB !== "number" &&
+      typeof expense.mobileDataGB !== "number"
+    ) {
+      return {
+        expenseId: expense.id,
+        status: "missing_information",
+        message: "Complétez les caractéristiques nécessaires pour comparer ce contrat.",
+        missingFields: ["volume de données inclus"],
+      };
+    }
+    if (
+      expense.mobileAllowLowerDataOffers === true &&
+      (typeof expense.mobileMinimumDataGB !== "number" || expense.mobileMinimumDataGB <= 0)
+    ) {
+      return {
+        expenseId: expense.id,
+        status: "missing_information",
+        message: "Complétez les caractéristiques nécessaires pour comparer ce contrat.",
+        missingFields: ["volume minimum acceptable"],
+      };
+    }
+    const hasAlternative = alternatives.some(
+      (offer) => offer.sourceExpenseId === expense.id && isPrimaryAlternative(offer)
+    );
+    return hasAlternative
+      ? {
+          expenseId: expense.id,
+          status: "alternative_found",
+          message: "Une alternative plus avantageuse a été identifiée parmi les offres vérifiées.",
+        }
+      : {
+          expenseId: expense.id,
+          status: "no_better_offer",
+          message: "Aucune alternative plus avantageuse n'a été identifiée parmi les offres vérifiées.",
+        };
+  });
+  const comparisonStates = [...mobileComparisonStates, ...commercial.comparisonStates];
   const comparisonMessage = [
     getMobileComparisonMessage(analysis, catalog, alternatives),
     ...commercial.messages,
   ].filter(Boolean).join(" ") || null;
 
-  return { alternatives, catalog, commercialCatalogs: commercial.catalogs, comparisonMessage };
+  return {
+    alternatives,
+    catalog,
+    commercialCatalogs: commercial.catalogs,
+    comparisonMessage,
+    comparisonStates,
+  };
 }
 
 export function canReferenceOfferInLetter(offer: AlternativeOffer) {

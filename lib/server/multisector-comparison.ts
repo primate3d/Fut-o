@@ -17,7 +17,12 @@ import type {
   InsuranceOffer,
   InternetOffer,
 } from "@/experiments/commercial-catalog/types";
-import { ExpenseCategory, type Expense, type MockAnalysis } from "@/types";
+import {
+  ExpenseCategory,
+  type ContractComparisonState,
+  type Expense,
+  type MockAnalysis,
+} from "@/types";
 import { loadCommercialCatalog } from "./commercial-catalog";
 
 type CatalogSnapshot = Awaited<ReturnType<typeof loadCommercialCatalog>>;
@@ -34,12 +39,17 @@ function categoryForSector(sector: CommercialSector) {
 }
 
 function detailsSector(expense: Expense): CommercialSector | null {
-  if (expense.contractDetails) return expense.contractDetails.kind;
+  if (expense.subcategory === "INTERNET") return "internet";
+  if (expense.subcategory === "ELECTRICITY") return "electricity";
+  if (expense.subcategory === "GAS") return "gas";
+  if (expense.subcategory === "HOME_INSURANCE") return "home_insurance";
+  if (expense.subcategory === "CAR_INSURANCE") return "car_insurance";
   if (expense.documentType === "internet_invoice") return "internet";
   if (expense.documentType === "electricity_invoice") return "electricity";
   if (expense.documentType === "gas_invoice") return "gas";
   if (expense.documentType === "home_insurance") return "home_insurance";
   if (expense.documentType === "car_insurance") return "car_insurance";
+  if (expense.contractDetails) return expense.contractDetails.kind;
   return null;
 }
 
@@ -164,8 +174,19 @@ export async function buildEnabledCommercialComparisons(
   const enabledSectors = SUPPORTED_SECTORS.filter((sector) => isCommercialSectorEnabled(sector, environment));
   const alternatives: AlternativeOffer[] = [];
   const messages: string[] = [];
+  const comparisonStates: ContractComparisonState[] = [];
   const replacedExpenseIds = new Set<string>();
   const catalogs: Partial<Record<CommercialSector, Pick<CatalogSnapshot, "status" | "verifiedAt" | "sources">>> = {};
+
+  for (const sector of SUPPORTED_SECTORS.filter((candidate) => !enabledSectors.includes(candidate))) {
+    for (const expense of analysis.expenses.filter((candidate) => detailsSector(candidate) === sector)) {
+      comparisonStates.push({
+        expenseId: expense.id,
+        status: "disabled",
+        message: "La comparaison des offres n'est pas disponible actuellement.",
+      });
+    }
+  }
 
   for (const sector of enabledSectors) {
     const expenses = analysis.expenses.filter((expense) => detailsSector(expense) === sector);
@@ -176,21 +197,55 @@ export async function buildEnabledCommercialComparisons(
       replacedExpenseIds.add(expense.id);
       const missing = getMissingContractFields(expense);
       if (missing.length > 0) {
-        messages.push(`${expense.provider}: confirmez ${missing.join(", ")} pour obtenir une comparaison fiable.`);
+        const message = "Complétez les caractéristiques nécessaires pour comparer ce contrat.";
+        comparisonStates.push({ expenseId: expense.id, status: "missing_information", message, missingFields: missing });
+        messages.push(`${expense.provider}: ${message}`);
         continue;
       }
       if (catalog.status !== "fresh") {
-        messages.push(`${expense.provider}: le catalogue ${sector} est ${catalog.status === "stale" ? "périmé" : "indisponible"}; aucune économie n'est annoncée.`);
+        const message = "La comparaison des offres n'est pas disponible actuellement.";
+        comparisonStates.push({ expenseId: expense.id, status: "unavailable", message });
+        messages.push(
+          `${expense.provider}: le catalogue ${sector} est ${catalog.status === "stale" ? "périmé" : "indisponible"}; ${message}`
+        );
         continue;
       }
       const results = compareExpense(expense, catalog);
       const reliableInput = expense.contractDetails?.source !== "ai" &&
         !Object.values(expense.contractDetails?.fieldSources ?? {}).includes("ai");
-      alternatives.push(...results.map((result) => toAlternative(expense, result, reliableInput)).filter((offer): offer is AlternativeOffer => Boolean(offer)));
-      const message = conclusionMessage(expense, catalogConclusion(results));
+      const expenseAlternatives = results
+        .map((result) => toAlternative(expense, result, reliableInput))
+        .filter((offer): offer is AlternativeOffer => Boolean(offer));
+      alternatives.push(...expenseAlternatives);
+      const conclusion = catalogConclusion(results);
+      const hasCertifiedAlternative = expenseAlternatives.some(
+        (offer) => offer.savingKind === "certified" && offer.estimatedYearlySaving > 0
+      );
+      if (hasCertifiedAlternative) {
+        comparisonStates.push({
+          expenseId: expense.id,
+          status: "alternative_found",
+          message: "Une alternative plus avantageuse a été identifiée parmi les offres vérifiées.",
+        });
+      } else if (conclusion === "KEEP_CURRENT_CONTRACT") {
+        comparisonStates.push({
+          expenseId: expense.id,
+          status: "no_better_offer",
+          message: "Aucune alternative plus avantageuse n'a été identifiée parmi les offres vérifiées.",
+        });
+      } else {
+        comparisonStates.push({
+          expenseId: expense.id,
+          status: "unavailable",
+          message: conclusion === "CATALOG_INSUFFICIENT"
+            ? "La couverture des offres vérifiées est insuffisante pour conclure."
+            : "La comparaison nécessite une vérification complémentaire.",
+        });
+      }
+      const message = conclusionMessage(expense, conclusion);
       if (message) messages.push(message);
     }
   }
 
-  return { alternatives, messages, replacedExpenseIds, catalogs };
+  return { alternatives, messages, replacedExpenseIds, catalogs, comparisonStates };
 }

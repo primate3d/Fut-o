@@ -1,11 +1,12 @@
-import type {
-  ContractDetails,
-  ElectricityContractDetails,
-  Expense,
-  GasContractDetails,
-  InsuranceContractDetails,
-  InternetContractDetails,
-  UploadedDocumentType,
+import {
+  ExpenseSubcategory,
+  type ContractDetails,
+  type ElectricityContractDetails,
+  type Expense,
+  type GasContractDetails,
+  type InsuranceContractDetails,
+  type InternetContractDetails,
+  type UploadedDocumentType,
 } from "@/types";
 
 function normalize(value: string) {
@@ -333,6 +334,18 @@ export function mergeContractDetails(primary?: ContractDetails, fallback?: Contr
 
 export function getMissingContractFields(expense: Expense) {
   const details = expense.contractDetails;
+  const expectedKind = expense.subcategory === ExpenseSubcategory.INTERNET ? "internet"
+    : expense.subcategory === ExpenseSubcategory.ELECTRICITY ? "electricity"
+      : expense.subcategory === ExpenseSubcategory.GAS ? "gas"
+        : expense.subcategory === ExpenseSubcategory.CAR_INSURANCE ? "car_insurance"
+          : expense.subcategory === ExpenseSubcategory.HOME_INSURANCE ? "home_insurance"
+            : undefined;
+  if (expectedKind && details?.kind !== expectedKind) {
+    if (expectedKind === "internet") return ["technologie", "engagement", "debit descendant", "services inclus"];
+    if (expectedKind === "electricity") return ["puissance kVA", "option tarifaire", "consommation annuelle"];
+    if (expectedKind === "gas") return ["consommation annuelle", "zone tarifaire", "classe de consommation"];
+    return ["garanties", "franchises"];
+  }
   if (!details) return ["caracteristiques contractuelles"];
   if (details.kind === "internet") {
     return [

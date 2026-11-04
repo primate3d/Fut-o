@@ -109,11 +109,14 @@ export function getStoredLetterRecord(recordId: string) {
 
 export function savePreparedLetter(
   auditId: string,
-  snapshot: LetterActionSnapshot
+  snapshot: LetterActionSnapshot,
+  preparedAt?: string
 ) {
   if (typeof window === "undefined" || !snapshot.letter.sourceExpenseId) return null;
 
   const now = new Date().toISOString();
+  const preparedAtValue =
+    preparedAt && !Number.isNaN(new Date(preparedAt).getTime()) ? preparedAt : now;
   const records = getStoredLetterRecords();
   const recordId = `${auditId}:${snapshot.letter.id}`;
   const existing = records.find((record) => record.id === recordId);
@@ -123,10 +126,10 @@ export function savePreparedLetter(
     expenseId: snapshot.letter.sourceExpenseId,
     letterType: snapshot.letter.type,
     status: existing?.status === "sent" ? "sent" : "prepared",
-    createdAt: existing?.createdAt ?? now,
+    createdAt: existing?.createdAt ?? preparedAtValue,
     updatedAt: now,
     sentAt: existing?.sentAt,
-    snapshot
+    snapshot: existing?.status === "sent" ? existing.snapshot : snapshot
   };
   storeLetterRecords([
     ...records.filter((candidate) => candidate.id !== recordId),
@@ -137,18 +140,42 @@ export function savePreparedLetter(
 
 export function confirmLetterSent(
   recordId: string,
-  sentAt = new Date().toISOString()
+  sentAt: string
 ): StoredLetterRecord | null {
   if (typeof window === "undefined") return null;
 
+  const sentDate = new Date(sentAt);
+  const today = new Date();
+  const todayKey = [
+    today.getFullYear(),
+    String(today.getMonth() + 1).padStart(2, "0"),
+    String(today.getDate()).padStart(2, "0")
+  ].join("-");
+  const sentDateKey = sentAt.slice(0, 10);
+  if (
+    !/^\d{4}-\d{2}-\d{2}/.test(sentAt) ||
+    Number.isNaN(sentDate.getTime()) ||
+    sentDateKey > todayKey
+  ) {
+    return null;
+  }
+
+  const storedRecords = getStoredLetterRecords();
+  const sourceRecord = storedRecords.find((record) => record.id === recordId);
+  if (
+    !sourceRecord ||
+    sourceRecord.parentRecordId ||
+    sentDateKey < sourceRecord.createdAt.slice(0, 10)
+  ) return null;
+
   let updatedRecord: StoredLetterRecord | null = null;
-  const records = getStoredLetterRecords().map((record) => {
+  const records = storedRecords.map((record) => {
     if (record.id !== recordId || record.parentRecordId) return record;
     updatedRecord = {
       ...record,
       status: "sent",
       sentAt,
-      updatedAt: sentAt
+      updatedAt: new Date().toISOString()
     };
     return updatedRecord;
   });
@@ -165,7 +192,12 @@ export function saveFollowupLetter(
 
   const records = getStoredLetterRecords();
   const sourceRecord = records.find((record) => record.id === sourceRecordId);
-  if (!sourceRecord || sourceRecord.parentRecordId) return null;
+  if (
+    !sourceRecord ||
+    sourceRecord.parentRecordId ||
+    sourceRecord.status !== "sent" ||
+    !sourceRecord.sentAt
+  ) return null;
 
   const now = new Date().toISOString();
   const recordId = `${sourceRecord.id}:followup`;

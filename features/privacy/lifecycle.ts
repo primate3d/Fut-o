@@ -7,6 +7,7 @@ import {
   storeUploadedDocuments
 } from "@/features/upload/storage";
 import { SELECTED_ALTERNATIVE_OFFER_STORAGE_KEY } from "@/features/recommendations/selected-offer";
+import { REALIZED_SAVINGS_STORAGE_PREFIX } from "@/features/reports/financial-summary";
 import { LETTER_TRACKING_STORAGE_PREFIX } from "./action-log";
 
 function removeAuditLocalStorageResidues(activeKeyCode?: string) {
@@ -23,6 +24,9 @@ function removeAuditLocalStorageResidues(activeKeyCode?: string) {
     activeKeyCode
       ? `${LETTER_TRACKING_STORAGE_PREFIX}.${activeKeyCode}`
       : `${LETTER_TRACKING_STORAGE_PREFIX}.anonymous`,
+    activeKeyCode
+      ? `${REALIZED_SAVINGS_STORAGE_PREFIX}.${activeKeyCode}`
+      : `${REALIZED_SAVINGS_STORAGE_PREFIX}.anonymous`,
     activeKeyCode
       ? `futeo.auditActions.${activeKeyCode}`
       : "futeo.auditActions.anonymous"

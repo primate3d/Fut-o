@@ -17,7 +17,6 @@ import { expenseCategoryLabels, summarizeExpensesByCategory } from "@/lib/expens
 import type { MockAnalysis, UploadedDocument } from "@/types";
 import {
   AnalysisServerError,
-  MOCK_ANALYSIS_STORAGE_KEY,
   getStoredAnalysisServer,
   getStoredMockAnalysis,
   refreshStoredAnalysisServer,
@@ -123,6 +122,13 @@ export function AnalysisRunner() {
                 documentCount: error.details.documentCount,
                 status: error.details.status
               });
+              if (error.details.status === 409) {
+                const completedAnalysis = await getStoredAnalysisServer();
+                refreshedAnalysis = selectReusableAnalysis(
+                  [completedAnalysis],
+                  storedDocuments
+                );
+              }
             } else {
               failureMessage = error instanceof Error ? error.message : failureMessage;
               console.warn("[FUTEO_ANALYSIS_BLOCKED]");
@@ -130,7 +136,6 @@ export function AnalysisRunner() {
           }
 
           if (!refreshedAnalysis) {
-            window.localStorage.removeItem(MOCK_ANALYSIS_STORAGE_KEY);
             setAnalysis(null);
             setServiceMessage(
               hasMultiContractInsurance
