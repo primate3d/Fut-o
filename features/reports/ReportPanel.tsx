@@ -29,6 +29,7 @@ import {
   isPrimaryAlternative,
   type AlternativeOffer
 } from "@/features/recommendations/service";
+import { formatOfferPrice } from "@/features/recommendations/offer-pricing";
 import {
   findSelectedAlternativeOffer,
   getSelectedAlternativeOffer,
@@ -52,7 +53,7 @@ import {
   getTopExpenses,
   summarizeExpensesByCategory
 } from "@/lib/expense-summary";
-import type { ContractComparisonState, GeneratedLetter, MockAnalysis } from "@/types";
+import { ExpenseSubcategory, type ContractComparisonState, type GeneratedLetter, type MockAnalysis } from "@/types";
 import {
   buildFinancialSummary,
   confirmRealizedSaving,
@@ -847,6 +848,21 @@ export function ReportPanel() {
                         ? `Alternative vérifiée : ${normalizeDisplayText(offer.provider)} - ${normalizeDisplayText(offer.name)}`
                         : comparisonState?.message ?? recommendation?.description ?? "La comparaison des offres n'est pas disponible actuellement."}
                     </p>
+                    {offer && expense.subcategory === ExpenseSubcategory.INTERNET ? (
+                      <div className="mt-2 text-xs leading-5 text-slate-600 md:text-sm">
+                        <p>Tarif : {formatOfferPrice(offer, formatCurrency)}.</p>
+                        {typeof offer.durableYearlySaving === "number" ? (
+                          <p>
+                            Économie durable estimée : {formatCurrency(offer.durableYearlySaving)} / an · économie estimée sur les 12 premiers mois : {formatCurrency(offer.estimatedYearlySaving)}.
+                          </p>
+                        ) : null}
+                        {offer.entryFeesKnown === false ? (
+                          <p className="text-amber-800">
+                            Des frais de mise en service ou de résiliation peuvent réduire les économies estimées.
+                          </p>
+                        ) : null}
+                      </div>
+                    ) : null}
                     {getMissingContractFields(expense).length > 0 ? (
                       <p className="mt-1 text-xs font-medium text-amber-700">
                         Informations manquantes : {getMissingContractFields(expense).join(", ")}

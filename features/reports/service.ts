@@ -9,6 +9,7 @@ import {
   isPrimaryAlternative,
   type AlternativeOffer
 } from "@/features/recommendations/service";
+import { formatOfferPrice } from "@/features/recommendations/offer-pricing";
 import {
   findSelectedAlternativeOffer,
   type SelectedAlternativeOffer
@@ -405,14 +406,19 @@ export async function generatePdfReport(
         y += 5;
         doc.setFont("helvetica", "normal");
         doc.setTextColor(80, 80, 80);
+        const offerPrice = expense.subcategory === ExpenseSubcategory.INTERNET
+          ? formatOfferPrice(offer, formatCurrency)
+          : `${formatCurrency(offer.monthlyPrice)}/mois`;
         doc.text(
-          truncateText(`${offer.provider} - ${offer.name} - ${formatCurrency(offer.monthlyPrice)}/mois`, 105),
+          truncateText(`${offer.provider} - ${offer.name} - ${offerPrice}`, 105),
           30,
           y
         );
         y += 5;
-        const savingText = offer.savingKind === "certified"
-          ? `Économie nette 12 mois : ${formatCurrency(offer.estimatedYearlySaving)}`
+        const savingText = expense.subcategory === ExpenseSubcategory.INTERNET && typeof offer.durableYearlySaving === "number"
+          ? `Économie durable estimée : ${formatCurrency(offer.durableYearlySaving)}/an; 12 premiers mois : ${formatCurrency(offer.estimatedYearlySaving)}`
+          : offer.savingKind === "certified"
+          ? `Économie estimée sur 12 mois : ${formatCurrency(offer.estimatedYearlySaving)}`
           : offer.savingKind === "recurring_only"
             ? `Écart récurrent informatif : ${formatCurrency(offer.recurringYearlySaving ?? 0)}/an; frais incomplets`
             : "Compromis ou promotion temporaire, exclu du total principal";

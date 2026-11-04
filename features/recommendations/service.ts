@@ -48,6 +48,7 @@ export type AlternativeOffer = {
     | "requires_validation";
   savingKind?: "certified" | "temporary" | "recurring_only";
   recurringYearlySaving?: number;
+  durableYearlySaving?: number;
   netFirstYearSaving?: number;
   publicMonthlyPrice?: number;
   promotionPrice?: number;
@@ -58,6 +59,7 @@ export type AlternativeOffer = {
   terminationFees?: number;
   commitmentMonths?: number;
   technology?: string;
+  downloadMbps?: number;
   conditions?: string[];
   conditionalPrices?: ConditionalPrice[];
   verifiedAt?: string;

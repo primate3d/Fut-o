@@ -29,6 +29,7 @@ import {
   isPrimaryAlternative,
   type AlternativeOffer
 } from "@/features/recommendations/service";
+import { formatOfferPrice } from "@/features/recommendations/offer-pricing";
 import {
   SELECTED_ALTERNATIVE_OFFER_STORAGE_KEY,
   getSelectedAlternativeOffer,
@@ -77,12 +78,17 @@ function formatCurrency(value: number) {
 }
 
 function formatOfferBilling(
-  offer: Pick<AlternativeOffer, "monthlyPrice" | "billingPrice" | "billingPeriodDays">
+  offer: Pick<
+    AlternativeOffer,
+    | "monthlyPrice"
+    | "billingPrice"
+    | "billingPeriodDays"
+    | "promotionPrice"
+    | "promotionDurationMonths"
+    | "priceAfterPromotion"
+  >
 ) {
-  if (offer.billingPeriodDays && typeof offer.billingPrice === "number") {
-    return `${formatCurrency(offer.billingPrice)} tous les ${offer.billingPeriodDays} jours (soit ${formatCurrency(offer.monthlyPrice)} / mois civil)`;
-  }
-  return `${formatCurrency(offer.monthlyPrice)} / mois`;
+  return formatOfferPrice(offer, formatCurrency);
 }
 
 function hasUsableAmounts(analysis: MockAnalysis | null) {
@@ -719,6 +725,10 @@ export function ResultsPanel() {
   const topExpenses = useMemo(
     () => getTopExpenses(currentDisplayExpenses, 5),
     [currentDisplayExpenses]
+  );
+  const hasMobileExpense = useMemo(
+    () => analysis?.expenses.some((expense) => expense.subcategory === ExpenseSubcategory.MOBILE) ?? false,
+    [analysis]
   );
   const primaryAlternatives = useMemo(
     () => alternatives.filter(isPrimaryAlternative),
@@ -1383,7 +1393,9 @@ export function ResultsPanel() {
                 {formatOfferBilling(selectedOffer)}
               </p>
               <p className="text-sm font-semibold text-sage-700">
-                {selectedOffer.savingKind === "recurring_only"
+                {typeof selectedOffer.durableYearlySaving === "number"
+                  ? `${formatCurrency(selectedOffer.durableYearlySaving)} / an d'économie durable · ${formatCurrency(selectedOffer.estimatedYearlySaving)} estimés sur 12 mois`
+                  : selectedOffer.savingKind === "recurring_only"
                   ? `${formatCurrency(selectedOffer.estimatedYearlySaving / 12)} / mois · ${formatCurrency(selectedOffer.estimatedYearlySaving)} / an estimés hors frais ponctuels`
                   : `${formatCurrency(selectedOffer.estimatedYearlySaving)} / an estimés`}
               </p>
@@ -1630,7 +1642,7 @@ export function ResultsPanel() {
                 })}
               </p>
             ) : null}
-            {catalogStatus && catalogStatus !== "fresh" ? (
+            {hasMobileExpense && catalogStatus && catalogStatus !== "fresh" ? (
               <p className="mt-1 text-xs font-semibold text-amber-700">
                 Catalogue mobile non exploitable actuellement.
               </p>
@@ -1712,9 +1724,11 @@ export function ResultsPanel() {
                     ) : null}
                   </div>
                   <p className="font-semibold text-sage-700">
-                    {offer.savingKind === "recurring_only"
+                    {sourceExpense?.subcategory === ExpenseSubcategory.INTERNET && typeof offer.durableYearlySaving === "number"
+                      ? `Économie durable : ${formatCurrency(offer.durableYearlySaving)} / an · 12 premiers mois : ${formatCurrency(verifiedSaving)}`
+                      : offer.savingKind === "recurring_only"
                       ? `Économie tarifaire estimée : ${formatCurrency(offer.estimatedYearlySaving / 12)} / mois · ${formatCurrency(offer.estimatedYearlySaving)} / an`
-                      : `Économie nette 12 mois : ${formatCurrency(verifiedSaving)}`}
+                      : `Économie estimée sur 12 mois : ${formatCurrency(verifiedSaving)}`}
                   </p>
                 </div>
                 {sourceExpense ? (
@@ -1727,7 +1741,9 @@ export function ResultsPanel() {
                   <div>
                     <h3 className="font-semibold text-navy-900">{offer.name}</h3>
                     <p className="text-sm text-slate-500">
-                      {offer.provider} - {formatCurrency(offer.monthlyPrice)} / mois
+                      {offer.provider} - {sourceExpense?.subcategory === ExpenseSubcategory.INTERNET
+                        ? formatOfferBilling(offer)
+                        : `${formatCurrency(offer.monthlyPrice)} / mois`}
                     </p>
                   </div>
                 </div>
@@ -1753,9 +1769,9 @@ export function ResultsPanel() {
                   <Button onClick={() => handleSelectOffer(offer)} type="button" variant="secondary">
                     Choisir pour mon courrier et mon rapport
                   </Button>
-                  {offer.savingKind === "recurring_only" ? (
+                  {offer.entryFeesKnown === false ? (
                     <p className="basis-full text-sm text-amber-800">
-                      Des frais ponctuels peuvent réduire les économies estimées. Vérifiez les conditions du fournisseur.
+                      Des frais de mise en service ou de résiliation peuvent réduire les économies estimées.
                     </p>
                   ) : null}
                   <a

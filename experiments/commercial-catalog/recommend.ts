@@ -17,13 +17,19 @@ function saving(current: number | null, alternative: number | null) {
 }
 
 export function annualInternetCost(offer: InternetOffer) {
-  if (offer.monthlyPrice === null || offer.activationFees === null) return null;
+  const recurring = annualInternetRecurringCost(offer);
+  if (recurring === null || offer.activationFees === null) return null;
+  const automaticRefund = offer.activationFeeRefundConditional ? 0 : offer.activationFeeRefund ?? 0;
+  return money(recurring + offer.activationFees - automaticRefund);
+}
+
+export function annualInternetRecurringCost(offer: InternetOffer) {
+  if (offer.monthlyPrice === null) return null;
   const recurring = offer.promotionPrice !== null && offer.promotionDurationMonths !== null && offer.priceAfterPromotion !== null
     ? offer.promotionPrice * Math.min(12, offer.promotionDurationMonths) +
       offer.priceAfterPromotion * Math.max(0, 12 - offer.promotionDurationMonths)
     : offer.monthlyPrice * 12;
-  const automaticRefund = offer.activationFeeRefundConditional ? 0 : offer.activationFeeRefund ?? 0;
-  return money(recurring + offer.activationFees - automaticRefund);
+  return money(recurring);
 }
 
 export function compareInternetContract(input: InternetContractInput, offers: InternetOffer[]) {
@@ -42,11 +48,22 @@ export function compareInternetContract(input: InternetContractInput, offers: In
       kind = "COMPROMISE";
       reasons.push("Le service TV requis n'est pas etabli comme inclus.");
     }
+    if (
+      typeof input.commitmentMonths === "number" && offer.commitmentMonths !== null &&
+      offer.commitmentMonths > input.commitmentMonths
+    ) {
+      kind = "COMPROMISE";
+      reasons.push("L'offre impose un engagement plus long que le contrat actuel.");
+    }
     if (offer.activationFeeRefundConditional) reasons.push("Le remboursement des frais d'activation reste conditionnel et n'est pas deduit.");
+    const feesKnown = offer.activationFees !== null && offer.terminationFees !== null;
+    if (!feesKnown) {
+      reasons.push("Des frais de mise en service ou de resiliation peuvent s'appliquer et reduire l'economie estimee.");
+    }
     const current = money(input.monthlyPrice * 12);
-    const alternative = annualInternetCost(offer);
+    const alternative = feesKnown ? annualInternetCost(offer) : annualInternetRecurringCost(offer);
     const estimatedSaving = kind === "EQUIVALENT" ? saving(current, alternative) : null;
-    return { offer, comparisonKind: kind, confidence: alternative === null ? "INSUFFICIENT" : "CERTIFIED",
+    return { offer, comparisonKind: kind, confidence: alternative === null ? "INSUFFICIENT" : feesKnown ? "CERTIFIED" : "ESTIMATED",
       currentAnnualCost: current, alternativeAnnualCost: alternative, estimatedAnnualSaving: estimatedSaving, reasons };
   }).sort((left, right) => (right.estimatedAnnualSaving ?? -1) - (left.estimatedAnnualSaving ?? -1));
 }

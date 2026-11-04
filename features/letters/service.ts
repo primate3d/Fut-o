@@ -1,4 +1,5 @@
 import type { SelectedAlternativeOffer } from "@/features/recommendations/selected-offer";
+import { formatOfferPrice } from "@/features/recommendations/offer-pricing";
 import { ExpenseCategory, ExpenseSubcategory } from "@/types";
 import type {
   CustomerProfile,
@@ -471,6 +472,11 @@ function buildBodyTemplate(params: {
   offerName?: string;
   offerProvider?: string;
   offerMonthlyPrice?: number;
+  offerPromotionPrice?: number;
+  offerPromotionDurationMonths?: number;
+  offerPriceAfterPromotion?: number;
+  offerDurableYearlySaving?: number;
+  offerEntryFeesKnown?: boolean;
   offerSavingKind?: SelectedAlternativeOffer["savingKind"];
   offerBillingPrice?: number;
   offerBillingPeriodDays?: number;
@@ -515,11 +521,16 @@ function buildBodyTemplate(params: {
     params.offerName
       ? `J'ai également repéré une offre comparable qui pourrait mieux correspondre à mon usage : ${
           params.offerProvider ? `${params.offerProvider} - ` : ""
-        }${params.offerName}${typeof params.offerBillingPrice === "number" && params.offerBillingPeriodDays
-          ? `, à ${formatCurrency(params.offerBillingPrice)} tous les ${params.offerBillingPeriodDays} jours (soit ${formatCurrency(params.offerMonthlyPrice ?? params.offerBillingPrice)} par mois civil en moyenne)`
-          : typeof params.offerMonthlyPrice === "number"
-            ? `, à ${formatCurrency(params.offerMonthlyPrice)} / mois`
-            : ""}${
+        }${params.offerName}${typeof params.offerMonthlyPrice === "number"
+          ? `, à ${formatOfferPrice({
+              monthlyPrice: params.offerMonthlyPrice,
+              billingPrice: params.offerBillingPrice,
+              billingPeriodDays: params.offerBillingPeriodDays,
+              promotionPrice: params.offerPromotionPrice,
+              promotionDurationMonths: params.offerPromotionDurationMonths,
+              priceAfterPromotion: params.offerPriceAfterPromotion,
+            }, formatCurrency)}`
+          : ""}${
           params.offerUrl ? ` (${params.offerUrl})` : ""
         }.`
       : "",
@@ -531,10 +542,16 @@ function buildBodyTemplate(params: {
     params.offerSavingKind === "recurring_only"
       ? "L'économie indiquée compare les tarifs récurrents. Des frais ponctuels peuvent la réduire : cette estimation n'est ni nette ni garantie."
       : "",
-    params.offerSavingKind === "recurring_only" ? "" : "",
+    params.offerEntryFeesKnown === false && params.offerSavingKind !== "recurring_only"
+      ? "Des frais de mise en service ou de résiliation peuvent réduire les économies estimées."
+      : "",
+    params.offerDurableYearlySaving !== undefined && params.potentialSaving > 0
+      ? `L'écart tarifaire durable estimé est d'environ ${formatCurrency(params.offerDurableYearlySaving)} par an. L'économie estimée sur les 12 premiers mois est d'environ ${formatCurrency(params.potentialSaving)}.`
+      : "",
+    params.offerSavingKind === "recurring_only" || params.offerEntryFeesKnown === false || params.offerDurableYearlySaving !== undefined ? "" : "",
     params.request,
     "",
-    params.potentialSaving > 0
+    params.potentialSaving > 0 && params.offerDurableYearlySaving === undefined
       ? `D'après les éléments dont je dispose, l'économie possible serait d'environ ${formatCurrency(
           params.potentialSaving
         )} par an. Avant de prendre une décision, je souhaite savoir si vous pouvez me proposer de meilleures conditions ou une offre plus adaptée.`
@@ -880,6 +897,11 @@ function createLetter(
     offerName: bestOffer?.name,
     offerProvider: bestOffer?.provider,
     offerMonthlyPrice: bestOffer?.monthlyPrice,
+    offerPromotionPrice: expense.subcategory === ExpenseSubcategory.INTERNET ? bestOffer?.promotionPrice : undefined,
+    offerPromotionDurationMonths: expense.subcategory === ExpenseSubcategory.INTERNET ? bestOffer?.promotionDurationMonths : undefined,
+    offerPriceAfterPromotion: expense.subcategory === ExpenseSubcategory.INTERNET ? bestOffer?.priceAfterPromotion : undefined,
+    offerDurableYearlySaving: expense.subcategory === ExpenseSubcategory.INTERNET ? bestOffer?.durableYearlySaving : undefined,
+    offerEntryFeesKnown: expense.subcategory === ExpenseSubcategory.INTERNET ? bestOffer?.entryFeesKnown : undefined,
     offerEstimatedYearlySaving: bestOffer?.estimatedYearlySaving,
     offerSavingKind: bestOffer?.savingKind,
     offerBillingPrice: bestOffer?.billingPrice,
@@ -902,6 +924,11 @@ function createLetter(
       offerName: bestOffer?.name,
       offerProvider: bestOffer?.provider,
       offerMonthlyPrice: bestOffer?.monthlyPrice,
+      offerPromotionPrice: expense.subcategory === ExpenseSubcategory.INTERNET ? bestOffer?.promotionPrice : undefined,
+      offerPromotionDurationMonths: expense.subcategory === ExpenseSubcategory.INTERNET ? bestOffer?.promotionDurationMonths : undefined,
+      offerPriceAfterPromotion: expense.subcategory === ExpenseSubcategory.INTERNET ? bestOffer?.priceAfterPromotion : undefined,
+      offerDurableYearlySaving: expense.subcategory === ExpenseSubcategory.INTERNET ? bestOffer?.durableYearlySaving : undefined,
+      offerEntryFeesKnown: expense.subcategory === ExpenseSubcategory.INTERNET ? bestOffer?.entryFeesKnown : undefined,
       offerSavingKind: bestOffer?.savingKind,
       offerBillingPrice: bestOffer?.billingPrice,
       offerBillingPeriodDays: bestOffer?.billingPeriodDays,

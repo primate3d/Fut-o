@@ -317,6 +317,11 @@ export type GeneratedLetter = {
   offerName?: string;
   offerProvider?: string;
   offerMonthlyPrice?: number;
+  offerPromotionPrice?: number;
+  offerPromotionDurationMonths?: number;
+  offerPriceAfterPromotion?: number;
+  offerDurableYearlySaving?: number;
+  offerEntryFeesKnown?: boolean;
   offerEstimatedYearlySaving?: number;
   offerSavingKind?: "certified" | "temporary" | "recurring_only";
   offerBillingPrice?: number;

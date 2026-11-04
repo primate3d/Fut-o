@@ -35,6 +35,7 @@ function commonStatus(offer: CommercialOffer, source: CommercialSourceDefinition
   let status: VerificationStatus = "VERIFIED";
   try {
     assertApprovedSourceUrl(offer.sourceUrl, source);
+    if (offer.offerUrl) assertApprovedSourceUrl(offer.offerUrl, source);
     for (const item of offer.evidence) assertApprovedSourceUrl(item.sourceUrl, source);
   } catch {
     status = "FAILED";
@@ -67,11 +68,11 @@ export function validateInternetOffer(
   if (invalidNumber(numbers) || promotionContradiction) computed = "FAILED";
   if (computed !== "FAILED") {
     const required = ["offerName", offer.promotionPrice !== null ? "promotionPrice" : "monthlyPrice",
-      "technology", "commitmentMonths", "activationFees", "terminationFees"];
+      "technology", "commitmentMonths", "downloadMbps"];
     if (
       offer.monthlyPrice === null || offer.technology === "UNKNOWN" || offer.commitmentMonths === null ||
-      offer.activationFees === null || offer.terminationFees === null || offer.downloadMbps === null ||
-      offer.eligibilityConditions.length === 0 || promotionIncomplete || required.some((field) => !hasEvidence(offer, field))
+      offer.downloadMbps === null || offer.eligibilityConditions.length === 0 || promotionIncomplete ||
+      required.some((field) => !hasEvidence(offer, field))
     ) computed = "PARTIAL";
   }
   return finalize(offer, computed);

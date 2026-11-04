@@ -14,10 +14,16 @@ export type SelectedAlternativeOffer = Pick<
   | "yearlyPrice"
   | "estimatedYearlySaving"
   | "recurringYearlySaving"
+  | "durableYearlySaving"
   | "savingKind"
   | "comparisonKind"
   | "entryFeesKnown"
   | "knownEntryFees"
+  | "promotionPrice"
+  | "promotionDurationMonths"
+  | "priceAfterPromotion"
+  | "commitmentMonths"
+  | "downloadMbps"
   | "conditions"
   | "verifiedAt"
   | "billingPrice"
@@ -44,10 +50,16 @@ export function toSelectedAlternativeOffer(offer: AlternativeOffer): SelectedAlt
     yearlyPrice: offer.yearlyPrice,
     estimatedYearlySaving: offer.estimatedYearlySaving,
     recurringYearlySaving: offer.recurringYearlySaving,
+    durableYearlySaving: offer.durableYearlySaving,
     savingKind: offer.savingKind,
     comparisonKind: offer.comparisonKind,
     entryFeesKnown: offer.entryFeesKnown,
     knownEntryFees: offer.knownEntryFees,
+    promotionPrice: offer.promotionPrice,
+    promotionDurationMonths: offer.promotionDurationMonths,
+    priceAfterPromotion: offer.priceAfterPromotion,
+    commitmentMonths: offer.commitmentMonths,
+    downloadMbps: offer.downloadMbps,
     conditions: offer.conditions,
     verifiedAt: offer.verifiedAt,
     billingPrice: offer.billingPrice,

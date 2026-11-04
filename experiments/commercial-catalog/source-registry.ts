@@ -25,6 +25,36 @@ export const INTERNET_SOURCES: CommercialSourceDefinition[] = [
     allowedHosts: ["free.fr", "www.free.fr", "adsl.free.fr"],
     approvalStatus: "APPROVED", parser: "free-html-v1", discoveryEnabled: true,
   },
+  {
+    id: "internet-orange-livebox", sector: "internet", provider: "Orange",
+    sourceUrl: "https://boutique.orange.fr/internet/offres-fibre",
+    allowedHosts: ["boutique.orange.fr", "orange.fr", "www.orange.fr"],
+    approvalStatus: "APPROVED", parser: "orange-html-v1", discoveryEnabled: true,
+  },
+  {
+    id: "internet-sfr-box", sector: "internet", provider: "SFR",
+    sourceUrl: "https://www.sfr.fr/offre-internet",
+    allowedHosts: ["sfr.fr", "www.sfr.fr", "static.s-sfr.fr"],
+    approvalStatus: "APPROVED", parser: "sfr-html-v1", discoveryEnabled: true,
+  },
+  {
+    id: "internet-bouygues-bbox", sector: "internet", provider: "Bouygues Telecom",
+    sourceUrl: "https://www.bouyguestelecom.fr/offres-internet",
+    allowedHosts: ["bouyguestelecom.fr", "www.bouyguestelecom.fr"],
+    approvalStatus: "APPROVED", parser: "bouygues-bbox-html-v1", discoveryEnabled: true,
+  },
+  {
+    id: "internet-freebox-pop-s", sector: "internet", provider: "Free",
+    sourceUrl: "https://www.free.fr/freebox/freebox-pop-s",
+    allowedHosts: ["free.fr", "www.free.fr", "adsl.free.fr"],
+    approvalStatus: "APPROVED", parser: "free-pop-s-html-v1", discoveryEnabled: true,
+  },
+  {
+    id: "internet-freebox-revolution-light", sector: "internet", provider: "Free",
+    sourceUrl: "https://www.free.fr/freebox/freebox-revolution-light",
+    allowedHosts: ["free.fr", "www.free.fr", "adsl.free.fr"],
+    approvalStatus: "APPROVED", parser: "free-revolution-light-html-v1", discoveryEnabled: true,
+  },
 ];
 
 export const ELECTRICITY_SOURCES: CommercialSourceDefinition[] = [

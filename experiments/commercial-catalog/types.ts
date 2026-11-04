@@ -21,6 +21,7 @@ export interface CommercialOfferBase {
   provider: string;
   offerName: string;
   sourceUrl: string;
+  offerUrl?: string | null;
   retrievedAt: string;
   verifiedAt: string | null;
   validFrom: string | null;
@@ -184,6 +185,7 @@ export interface InternetContractInput {
   technology: InternetTechnology;
   minimumDownloadMbps: number | null;
   requiresTv: boolean;
+  commitmentMonths?: number | null;
 }
 
 export interface ElectricityContractInput {

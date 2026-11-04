@@ -28,6 +28,7 @@ import { getProviderBranding } from "@/lib/provider-branding";
 import {
   getSelectedAlternativeOffer
 } from "@/features/recommendations/selected-offer";
+import { formatOfferPrice } from "@/features/recommendations/offer-pricing";
 import {
   addAuditActionLog,
   getAuditActionLogs,
@@ -227,7 +228,14 @@ function getLetterOfferLabel(letter: GeneratedLetter) {
     letter.offerProvider,
     letter.offerName,
     typeof letter.offerMonthlyPrice === "number"
-      ? `${formatCurrency(letter.offerMonthlyPrice)} / mois`
+      ? formatOfferPrice({
+          monthlyPrice: letter.offerMonthlyPrice,
+          billingPrice: letter.offerBillingPrice,
+          billingPeriodDays: letter.offerBillingPeriodDays,
+          promotionPrice: letter.offerPromotionPrice,
+          promotionDurationMonths: letter.offerPromotionDurationMonths,
+          priceAfterPromotion: letter.offerPriceAfterPromotion,
+        }, formatCurrency)
       : undefined
   ]
     .filter(Boolean)

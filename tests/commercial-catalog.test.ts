@@ -19,6 +19,7 @@ import {
 } from "../experiments/commercial-catalog/source-registry";
 import {
   annualInternetCost,
+  annualInternetRecurringCost,
   catalogConclusion,
   compareElectricityContract,
   compareGasContract,
@@ -42,7 +43,15 @@ import type {
 } from "../experiments/commercial-catalog/types";
 import { validateAndDedupeCommercialOffers, validateAndDedupeInternetOffers } from "../experiments/commercial-catalog/validate";
 import { filterFreshCommercialOffers } from "../lib/server/commercial-catalog";
-import { buildEnabledCommercialComparisons } from "../lib/server/multisector-comparison";
+import {
+  DEFAULT_INTERNET_MIN_YEARLY_SAVING,
+  buildEnabledCommercialComparisons,
+  selectInternetAlternatives,
+} from "../lib/server/multisector-comparison";
+import type { AlternativeOffer } from "../features/recommendations/service";
+import { formatOfferPrice } from "../features/recommendations/offer-pricing";
+import { generateLettersFromAnalysis } from "../features/letters/service";
+import { toSelectedAlternativeOffer } from "../features/recommendations/selected-offer";
 import { applyContractConfirmation } from "../lib/server/contract-confirmation";
 import {
   extractContractDetails,
@@ -54,7 +63,7 @@ import { attachDocumentProfileToExpense, buildDocumentPartyProfiles } from "../f
 import { ExpenseCategory, ExpenseSubcategory, type Expense, type MockAnalysis, type UploadedDocumentType } from "../types";
 
 const NOW = "2026-11-03T10:00:00.000Z";
-const SOURCE = INTERNET_SOURCES[0];
+const SOURCE = INTERNET_SOURCES.find((source) => source.provider === "RED by SFR")!;
 const fixturePath = path.resolve(
   process.cwd(),
   "experiments/commercial-catalog/fixtures/internet-boxes.html",
@@ -253,7 +262,7 @@ test("RED distingue le remboursement conditionnel des frais automatiques", () =>
     Offre sous réserve d'éligibilité technique. Frais de résiliation : 59€.
     Débit jusqu'à ↓ 1 Gb/s ↑ 1 Gb/s et WiFi 5.
     Débit jusqu'à ↓ 2 Gb/s partagés ↑ 1 Gb/s et WiFi 6 +1€/mois.</main>`;
-  const offers = parseInternetOffers(html, INTERNET_SOURCES[0], NOW).offers;
+  const offers = parseInternetOffers(html, SOURCE, NOW).offers;
   assert.equal(offers.length, 2);
   assert.equal(offers[0]?.activationFeeRefundConditional, true);
   assert.equal(annualInternetCost(offers[0]!), 314.88);
@@ -288,6 +297,151 @@ test("Free conserve prix promotionnel, duree et prix recurrent", () => {
   assert.equal(offer?.promotionDurationMonths, 12);
   assert.equal(offer?.priceAfterPromotion, 39.99);
   assert.equal(annualInternetCost(offer!), 408.88);
+});
+
+test("les pages officielles SFR, Bouygues et Orange conservent prix, promotion et services", () => {
+  const eligibility = "Offres sous réserve d'éligibilité fibre.";
+  const sfr = INTERNET_SOURCES.find((item) => item.provider === "SFR")!;
+  const sfrOffers = parseInternetOffers(`<main>
+    SFR Fibre Starter Le très haut débit à petit prix 27,99 €/mois Engagement 12 mois
+    Fibre jusqu'à 1 Gb/s ↓ 1 Gb/s ↑ WiFi 5 160 chaînes TV incluses.
+    Frais d'ouverture de service de 49€. Frais de résiliation de 59€. ${eligibility}
+  </main>`, sfr, NOW).offers;
+  assert.equal(sfrOffers[0]?.verificationStatus, "VERIFIED");
+  assert.equal(sfrOffers[0]?.monthlyPrice, 27.99);
+  assert.equal(sfrOffers[0]?.downloadMbps, 1000);
+
+  const bouygues = INTERNET_SOURCES.find((item) => item.provider === "Bouygues Telecom")!;
+  const bboxOffers = parseInternetOffers(`<main>
+    Bbox fit L'essentiel du WiFi 6 et b.tv inclus 37 €99 / mois 30 €99 / mois
+    30.99 euros par mois, au lieu de 37.99 € par mois pendant 12 mois puis 37,99€ /mois.
+    Engagement 1 an. Fibre jusqu'à ↓ 1 Gb/s ↑ 700 Mb/s. Plus de 180 chaînes avec b.tv.
+    Frais de mise en service : 48€. Frais de résiliation : 69€. ${eligibility}
+  </main>`, bouygues, NOW).offers;
+  assert.equal(bboxOffers[0]?.promotionPrice, 30.99);
+  assert.equal(bboxOffers[0]?.priceAfterPromotion, 37.99);
+  assert.equal(bboxOffers[0]?.offerUrl, "https://www.bouyguestelecom.fr/offres-internet/bbox-fit");
+
+  const orange = INTERNET_SOURCES.find((item) => item.provider === "Orange")!;
+  const orangeOffers = parseInternetOffers(`<main>
+    Livebox Classic Fibre 29,99 €/mois pendant 12 mois puis 42,99 €/mois. Engagement 12 mois.
+    Fibre jusqu'à ↓ 2 Gb/s ↑ 800 Mb/s. 200 chaînes TV et décodeur TV inclus.
+    Frais de mise en service : 49€. Frais de résiliation : 69€. ${eligibility}
+  </main>`, orange, NOW).offers;
+  assert.equal(orangeOffers[0]?.verificationStatus, "VERIFIED");
+  assert.equal(orangeOffers[0]?.promotionPrice, 29.99);
+  assert.equal(orangeOffers[0]?.priceAfterPromotion, 42.99);
+});
+
+test("les sources officielles Free distinguent tarif stable et promotion", () => {
+  const eligibility = "Testez votre éligibilité à la Fibre.";
+  const popSource = INTERNET_SOURCES.find((item) => item.id === "internet-freebox-pop-s")!;
+  const [pop] = parseInternetOffers(`<main>
+    Freebox Pop S 24 € 99 /mois. Fibre jusqu'à 5 Gbit/s descendant et 900 Mbit/s montant.
+    Wi-Fi 7. Sans engagement. ${eligibility}
+  </main>`, popSource, NOW).offers;
+  assert.equal(pop?.verificationStatus, "VERIFIED");
+  assert.equal(pop?.promotionPrice, null);
+  assert.equal(pop?.monthlyPrice, 24.99);
+
+  const revolutionSource = INTERNET_SOURCES.find((item) => item.id === "internet-freebox-revolution-light")!;
+  const [revolution] = parseInternetOffers(`<main>
+    Freebox Révolution Light Fibre 1 Gbit/s descendant 900 Mbit/s montant, Wi-Fi 5 et 300 chaines TV.
+    24 € 99 /mois pendant 1 an puis 29,99 € /mois. Sans engagement. ${eligibility}
+  </main>`, revolutionSource, NOW).offers;
+  assert.equal(revolution?.verificationStatus, "VERIFIED");
+  assert.equal(revolution?.promotionPrice, 24.99);
+  assert.equal(revolution?.priceAfterPromotion, 29.99);
+});
+
+test("les frais inconnus produisent une economie tarifaire indicative mais selectionnable", async () => {
+  const offer = verifiedOffer({
+    provider: "Offre indicative",
+    monthlyPrice: 24.99,
+    activationFees: null,
+    terminationFees: null,
+    downloadMbps: 2000,
+    includedServices: ["TV"],
+  });
+  const comparison = compareInternetContract({
+    monthlyPrice: 44.99,
+    technology: "FIBER",
+    minimumDownloadMbps: 1000,
+    requiresTv: true,
+    commitmentMonths: 12,
+  }, [offer]);
+  assert.equal(comparison[0]?.confidence, "ESTIMATED");
+  assert.equal(annualInternetCost(offer), null);
+  assert.equal(annualInternetRecurringCost(offer), 299.88);
+
+  const expense = expenseFromExtractedText(
+    "internet_invoice",
+    "Offre Fibre. Abonnement 44,99 EUR par mois. Engagement 12 mois. Debit descendant 1 Gbit/s. TV incluse.",
+    539.88,
+  ).expense;
+  const result = await buildEnabledCommercialComparisons(analysisFor(expense), new Date(NOW), {
+    environment: { COMMERCIAL_CATALOG_INTERNET_ENABLED: "1" },
+    loadCatalog: catalogLoader("internet", [offer]),
+  });
+  assert.equal(result.alternatives[0]?.savingKind, "recurring_only");
+  assert.equal(result.alternatives[0]?.comparisonKind, "equivalent");
+  assert.equal(result.alternatives[0]?.estimatedYearlySaving, 240);
+});
+
+test("le seuil Box, la television et l'engagement evitent les changements peu pertinents", () => {
+  const expensive = verifiedOffer({ monthlyPrice: 42.99, activationFees: 0, terminationFees: 0, includedServices: ["TV"] });
+  const lowSaving = compareInternetContract({ monthlyPrice: 44.99, technology: "FIBER", minimumDownloadMbps: 1000,
+    requiresTv: true, commitmentMonths: 12 }, [expensive]);
+  assert.equal(lowSaving[0]?.estimatedAnnualSaving, 24);
+
+  const withoutTv = verifiedOffer({ monthlyPrice: 24.99, activationFees: 0, terminationFees: 0, includedServices: [] });
+  const withLongerCommitment = verifiedOffer({ monthlyPrice: 24.99, activationFees: 0, terminationFees: 0,
+    commitmentMonths: 12, includedServices: ["TV"] });
+  const incompatible = compareInternetContract({ monthlyPrice: 44.99, technology: "FIBER", minimumDownloadMbps: 1000,
+    requiresTv: true, commitmentMonths: 0 }, [withoutTv, withLongerCommitment]);
+  assert.ok(incompatible.every((result) => result.comparisonKind === "COMPROMISE"));
+  assert.ok(incompatible.every((result) => result.estimatedAnnualSaving === null));
+});
+
+test("une box deja competitive ne produit aucune recommandation insignifiante", async () => {
+  const expense = expenseFromExtractedText(
+    "internet_invoice",
+    "Offre Fibre. Abonnement 19,99 EUR par mois. Sans engagement. Debit descendant 1 Gbit/s. Wi-Fi 6 inclus.",
+    239.88,
+  ).expense;
+  const offer = verifiedOffer({ monthlyPrice: 18.99, activationFees: 0, terminationFees: 0 });
+  const result = await buildEnabledCommercialComparisons(analysisFor(expense), new Date(NOW), {
+    environment: { COMMERCIAL_CATALOG_INTERNET_ENABLED: "1" },
+    loadCatalog: catalogLoader("internet", [offer]),
+  });
+  assert.equal(result.alternatives.length, 0);
+  assert.equal(result.comparisonStates[0]?.status, "no_better_offer");
+});
+
+test("la selection Box retient deux offres et une troisieme seulement si elle est distincte", () => {
+  const alternative = (id: string, provider: string, saving: number, overrides: Partial<AlternativeOffer> = {}): AlternativeOffer => ({
+    id, provider, name: id, url: "https://example.com", category: ExpenseCategory.TELECOM,
+    monthlyPrice: 20, yearlyPrice: 240, estimatedYearlySaving: saving,
+    comparisonKind: "equivalent", savingKind: "certified", reason: "", action: "", ...overrides,
+  });
+  const selected = selectInternetAlternatives([
+    alternative("promotion", "A", 240, { durableYearlySaving: 180, downloadMbps: 1000, commitmentMonths: 0 }),
+    alternative("stable", "B", 155, { durableYearlySaving: 204, downloadMbps: 1000, commitmentMonths: 12 }),
+    alternative("duplicate", "B", 170, { durableYearlySaving: 190, downloadMbps: 1100, commitmentMonths: 12 }),
+    alternative("distinct", "C", 120, { durableYearlySaving: 120, downloadMbps: 8000, commitmentMonths: 0 }),
+    alternative("insignificant", "D", 300, { durableYearlySaving: DEFAULT_INTERNET_MIN_YEARLY_SAVING - 1 }),
+  ]);
+  assert.deepEqual(selected.map((offer) => offer.id), ["stable", "promotion", "distinct"]);
+});
+
+test("le prix Box affiche immédiatement la promotion et son tarif durable", () => {
+  const formatted = formatOfferPrice({
+    monthlyPrice: 24.99,
+    promotionPrice: 24.99,
+    promotionDurationMonths: 12,
+    priceAfterPromotion: 29.99,
+  }, (value) => `${value.toFixed(2)} €`);
+  assert.equal(formatted, "24.99 € / mois pendant 12 mois, puis 29.99 € / mois");
 });
 
 function edfFixture() {
@@ -568,6 +722,39 @@ test("document Internet -> extraction -> comparaison verifiee", async () => {
   assert.equal(result.alternatives[0]?.savingKind, "certified");
   assert.ok((result.alternatives[0]?.estimatedYearlySaving ?? 0) > 0);
   assert.equal(result.comparisonStates[0]?.status, "alternative_found");
+});
+
+test("promotion Box, économie durable et courrier restent cohérents", async () => {
+  const { expense } = expenseFromExtractedText(
+    "internet_invoice",
+    "Offre Fibre. Abonnement 44,99 EUR par mois. Engagement 12 mois. Debit descendant 1 Gbit/s. TV incluse.",
+    539.88,
+  );
+  const offer = verifiedOffer({
+    provider: "Free",
+    offerName: "Freebox Révolution Light",
+    monthlyPrice: 24.99,
+    promotionPrice: 24.99,
+    promotionDurationMonths: 12,
+    priceAfterPromotion: 29.99,
+    activationFees: 49,
+    terminationFees: 69,
+    downloadMbps: 1000,
+    includedServices: ["TV"],
+  });
+  const analysis = analysisFor(expense);
+  const result = await buildEnabledCommercialComparisons(analysis, new Date(NOW), {
+    environment: { COMMERCIAL_CATALOG_INTERNET_ENABLED: "1" },
+    loadCatalog: catalogLoader("internet", [offer]),
+  });
+  const alternative = result.alternatives[0]!;
+  assert.equal(alternative.estimatedYearlySaving, 191);
+  assert.equal(alternative.durableYearlySaving, 180);
+  const selected = toSelectedAlternativeOffer(alternative);
+  const letter = generateLettersFromAnalysis(analysis, selected)[0]!;
+  assert.equal(letter.offerPriceAfterPromotion, 29.99);
+  assert.match(letter.bodyTemplate, /24,99\s*€ \/ mois pendant 12 mois, puis 29,99\s*€ \/ mois/);
+  assert.match(letter.bodyTemplate, /durable estimé est d'environ 180,00\s*€/);
 });
 
 test("document electricite -> extraction Base -> cout annuel", async () => {
