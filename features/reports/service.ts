@@ -5,8 +5,14 @@ import {
   type GeneratedLetter,
   type MockAnalysis,
 } from "@/types";
-import type { AlternativeOffer } from "@/features/recommendations/service";
-import type { SelectedAlternativeOffer } from "@/features/recommendations/selected-offer";
+import {
+  isPrimaryAlternative,
+  type AlternativeOffer
+} from "@/features/recommendations/service";
+import {
+  findSelectedAlternativeOffer,
+  type SelectedAlternativeOffer
+} from "@/features/recommendations/selected-offer";
 import type { AuditActionLog } from "@/features/privacy/action-log";
 import {
   buildFinancialSummary,
@@ -68,8 +74,21 @@ function getExpenseIdFromAlternativeId(offer: AlternativeOffer, analysis: MockAn
 function getBestAlternativeForExpense(
   expenseId: string,
   alternatives: AlternativeOffer[],
-  analysis: MockAnalysis
+  analysis: MockAnalysis,
+  selectedOffer?: SelectedAlternativeOffer | null
 ) {
+  const currentSelectedOffer = findSelectedAlternativeOffer(
+    selectedOffer ?? null,
+    alternatives
+  );
+  if (
+    currentSelectedOffer &&
+    isPrimaryAlternative(currentSelectedOffer) &&
+    getExpenseIdFromAlternativeId(currentSelectedOffer, analysis) === expenseId
+  ) {
+    return currentSelectedOffer;
+  }
+
   return alternatives
     .filter(
       (offer) =>
@@ -83,7 +102,7 @@ export async function generatePdfReport(
   analysis: MockAnalysis,
   alternatives: AlternativeOffer[] = [],
   _letters: GeneratedLetter[] = [],
-  _selectedOffer?: SelectedAlternativeOffer | null,
+  selectedOffer?: SelectedAlternativeOffer | null,
   actionLogs: AuditActionLog[] = [],
   comparisonMessage?: string | null,
   comparisonStates: ContractComparisonState[] = [],
@@ -216,7 +235,12 @@ export async function generatePdfReport(
 
   const contractComparisons = analysis.expenses.slice(0, 15).map((expense) => ({
     expense,
-    offer: getBestAlternativeForExpense(expense.id, alternatives, analysis),
+    offer: getBestAlternativeForExpense(
+      expense.id,
+      alternatives,
+      analysis,
+      selectedOffer
+    ),
     comparisonState: comparisonStates.find((state) => state.expenseId === expense.id)
   }));
   ensurePageSpace(24 + contractComparisons.length * 14);
@@ -239,8 +263,15 @@ export async function generatePdfReport(
   contractComparisons.forEach(({ expense, offer, comparisonState }) => {
     const contractFinancial = financialSummary.contracts[expense.id];
     const hasSaving = contractFinancial.potentialYearlySaving > 0;
-    doc.setFont("helvetica", hasSaving ? "bold" : "normal");
-    doc.setTextColor(hasSaving ? navy[0] : 125, hasSaving ? navy[1] : 125, hasSaving ? navy[2] : 125);
+    const hasIndicativeSelectedOffer = Boolean(
+      offer &&
+      selectedOffer?.id === offer.id &&
+      offer.savingKind === "recurring_only" &&
+      offer.estimatedYearlySaving > 0
+    );
+    const hasDisplayedOffer = hasSaving || hasIndicativeSelectedOffer;
+    doc.setFont("helvetica", hasDisplayedOffer ? "bold" : "normal");
+    doc.setTextColor(hasDisplayedOffer ? navy[0] : 125, hasDisplayedOffer ? navy[1] : 125, hasDisplayedOffer ? navy[2] : 125);
     doc.text(
       truncateText(
         `${getExpenseDisplayLabel(expense)} - ${normalizeDisplayText(expense.provider)} - ${formatCurrency(contractFinancial.currentMonthlyAmount)}/mois - ${expense.sourceDocumentName ?? "Saisie manuelle"}`,
@@ -252,7 +283,7 @@ export async function generatePdfReport(
     doc.setFont("helvetica", "normal");
     doc.text(
       truncateText(
-        hasSaving && offer
+        hasDisplayedOffer && offer
           ? `${normalizeDisplayText(offer.provider)} - ${normalizeDisplayText(offer.name)}`
           : comparisonState?.message ?? "Comparaison non disponible",
         48
@@ -260,11 +291,21 @@ export async function generatePdfReport(
       88,
       y
     );
-    doc.setTextColor(hasSaving ? 0 : 125, hasSaving ? 120 : 125, hasSaving ? 0 : 125);
-    doc.text(`${formatCurrency(contractFinancial.potentialYearlySaving)}/an`, 185, y, {
+    doc.setTextColor(hasDisplayedOffer ? 0 : 125, hasDisplayedOffer ? 120 : 125, hasDisplayedOffer ? 0 : 125);
+    const displayedYearlySaving = hasIndicativeSelectedOffer && offer
+      ? offer.estimatedYearlySaving
+      : contractFinancial.potentialYearlySaving;
+    doc.text(`${hasIndicativeSelectedOffer ? "~ " : ""}${formatCurrency(displayedYearlySaving)}/an`, 185, y, {
       align: "right"
     });
     y += 8;
+    if (hasIndicativeSelectedOffer) {
+      doc.setFontSize(8);
+      doc.setTextColor(146, 64, 14);
+      doc.text("Estimation tarifaire hors frais ponctuels, non garantie.", 88, y);
+      y += 6;
+      doc.setFontSize(10);
+    }
     if (contractFinancial.realizedYearlySaving > 0) {
       doc.setFontSize(8);
       doc.setTextColor(21, 128, 61);

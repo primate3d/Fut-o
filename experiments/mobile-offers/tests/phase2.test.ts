@@ -3,12 +3,16 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import test from "node:test";
 import { parseCdiscountOffers } from "../collectors/cdiscount";
+import { parseLaPosteOffers } from "../collectors/laposte";
+import { collectLebaraOffers } from "../collectors/lebara";
+import { parseLycaOffers } from "../collectors/lyca";
 import { collectNrjOffers, parseNrjOffers } from "../collectors/nrj";
 import { parseOrangeOffers } from "../collectors/orange";
 import { parsePrixtelOffer } from "../collectors/prixtel";
 import { parseRedOffers } from "../collectors/red";
 import { parseSfrOffers } from "../collectors/sfr";
 import { parseSoshOffers } from "../collectors/sosh";
+import { parseSymaOffers } from "../collectors/syma";
 import { compareSnapshots } from "../compare-snapshots";
 import { resultIsDegraded } from "../run";
 import type {
@@ -36,6 +40,10 @@ const providers: Provider[] = [
   "Prixtel",
   "NRJ Mobile",
   "Cdiscount Mobile",
+  "Lyca Mobile",
+  "Lebara",
+  "Syma Mobile",
+  "La Poste Mobile",
 ];
 
 async function fixture(name: string): Promise<string> {
@@ -264,4 +272,44 @@ test("une source fiable devenue vide ne remplace pas le dernier catalogue", asyn
     }),
     true,
   );
+});
+
+test("Lyca conserve le cycle réel de trente jours", async () => {
+  const result = parseLycaOffers(await fixture("lyca.html"), NOW);
+  const offer = findOffer(result, "Forfait 200GB 5G");
+  assert.equal(offer.monthlyPrice, 8.99);
+  assert.equal(offer.includedDataGB, 200);
+  assert.equal(offer.billingPeriodDays, 30);
+  assert.equal(offer.autoRenewal, true);
+  assert.equal(offer.verificationStatus, "VERIFIED");
+});
+
+test("Syma conserve les frais d'activation sans inventer les frais SIM", async () => {
+  const result = parseSymaOffers(await fixture("syma.html"), NOW);
+  const offer = findOffer(result, "Forfait Syma le neuf 100 Go");
+  assert.equal(offer.monthlyPrice, 9.99);
+  assert.equal(offer.activationFees, 10);
+  assert.equal(offer.simFees, null);
+  assert.equal(offer.autoRenewal, true);
+  assert.equal(offer.verificationStatus, "VERIFIED");
+});
+
+test("La Poste Mobile conserve le lien exact publié pour l'offre", async () => {
+  const result = parseLaPosteOffers(await fixture("laposte.html"), NOW);
+  const offer = findOffer(result, "Forfait SIM La Poste Mobile 200 Go");
+  assert.equal(offer.monthlyPrice, 11.99);
+  assert.equal(
+    offer.offerUrl,
+    "https://www.lapostemobile.fr/offres-mobiles/forfaits-sans-engagement?ajouterforfait=947",
+  );
+  assert.equal(offer.verificationStatus, "VERIFIED");
+});
+
+test("Lebara échoue sans contourner sa protection d'accès", async () => {
+  const result = await collectLebaraOffers({
+    fetchImpl: async () => new Response("Just a moment...", { status: 403 }),
+    now: () => new Date(NOW),
+  });
+  assert.equal(result.offers.length, 0);
+  assert.equal(result.failures[0]?.code, "FETCH_FAILED");
 });

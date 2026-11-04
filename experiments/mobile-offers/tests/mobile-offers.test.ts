@@ -61,6 +61,10 @@ function snapshot(offers: MobileOffer[]): CollectionSnapshot {
       Prixtel: { detected: 0, verified: 0, partial: 0, failed: 0 },
       "NRJ Mobile": { detected: 0, verified: 0, partial: 0, failed: 0 },
       "Cdiscount Mobile": { detected: 0, verified: 0, partial: 0, failed: 0 },
+      "Lyca Mobile": { detected: 0, verified: 0, partial: 0, failed: 0 },
+      Lebara: { detected: 0, verified: 0, partial: 0, failed: 0 },
+      "Syma Mobile": { detected: 0, verified: 0, partial: 0, failed: 0 },
+      "La Poste Mobile": { detected: 0, verified: 0, partial: 0, failed: 0 },
     },
   };
 }

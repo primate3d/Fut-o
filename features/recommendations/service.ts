@@ -34,6 +34,7 @@ export type AlternativeOffer = {
   logoUrl?: string;
   name: string;
   url: string;
+  sourceUrl?: string;
   monthlyPrice: number;
   yearlyPrice: number;
   estimatedYearlySaving: number;
@@ -63,6 +64,9 @@ export type AlternativeOffer = {
   priceRange?: { min: number; max: number };
   mobileDataLimitGB?: number;
   mobileDataUnlimited?: boolean;
+  billingPrice?: number;
+  billingPeriodDays?: number;
+  autoRenewal?: boolean;
 };
 
 export type ConditionalSupportOffer = {
@@ -419,6 +423,8 @@ type MobilePrice = {
   publicMonthlyPrice: number;
   durableMonthlyPrice: number;
   firstYearRecurringCost: number;
+  billingPrice?: number;
+  billingPeriodDays?: number;
   promotionPrice?: number;
   promotionDurationMonths?: number;
   priceAfterPromotion?: number;
@@ -427,6 +433,18 @@ type MobilePrice = {
 
 function roundMoney(value: number) {
   return Math.round(value * 100) / 100;
+}
+
+export const MOBILE_MIN_MEANINGFUL_MONTHLY_SAVING = 3;
+const MOBILE_MIN_MEANINGFUL_YEARLY_SAVING =
+  MOBILE_MIN_MEANINGFUL_MONTHLY_SAVING * 12;
+
+function billingCyclesPerYear(offer: MobileOffer) {
+  return offer.billingPeriodDays ? 365 / offer.billingPeriodDays : 12;
+}
+
+function monthlyEquivalent(price: number, offer: MobileOffer) {
+  return roundMoney(price * billingCyclesPerYear(offer) / 12);
 }
 
 export const MOBILE_CONSUMPTION_SAFETY_MARGIN = 1.2;
@@ -468,18 +486,23 @@ function tierForConsumption(tiers: PricingTier[], consumption: number) {
 
 function mobilePrice(offer: MobileOffer, expense: Expense): MobilePrice | null {
   if (offer.pricingTiers.length > 0) {
-    const prices = offer.pricingTiers.map((tier) => tier.monthlyPrice);
+    const prices = offer.pricingTiers.map((tier) => monthlyEquivalent(tier.monthlyPrice, offer));
     const selectedTier = typeof expense.mobileConsumedDataGB === "number"
       ? tierForConsumption(offer.pricingTiers, expense.mobileConsumedDataGB)
       : [...offer.pricingTiers].sort(
           (left, right) => right.monthlyPrice - left.monthlyPrice
         )[0];
     if (!selectedTier) return null;
+    const selectedMonthlyPrice = monthlyEquivalent(selectedTier.monthlyPrice, offer);
     return {
-      monthlyPrice: selectedTier.monthlyPrice,
-      publicMonthlyPrice: selectedTier.monthlyPrice,
-      durableMonthlyPrice: selectedTier.monthlyPrice,
-      firstYearRecurringCost: roundMoney(selectedTier.monthlyPrice * 12),
+      monthlyPrice: selectedMonthlyPrice,
+      publicMonthlyPrice: selectedMonthlyPrice,
+      durableMonthlyPrice: selectedMonthlyPrice,
+      firstYearRecurringCost: roundMoney(
+        selectedTier.monthlyPrice * billingCyclesPerYear(offer)
+      ),
+      billingPrice: selectedTier.monthlyPrice,
+      ...(offer.billingPeriodDays ? { billingPeriodDays: offer.billingPeriodDays } : {}),
       priceRange: {
         min: Math.min(...prices),
         max: Math.max(...prices)
@@ -494,11 +517,16 @@ function mobilePrice(offer: MobileOffer, expense: Expense): MobilePrice | null {
     offer.priceAfterPromotion !== null &&
     !isConditionalPromotion(offer);
   if (!publicPromotion) {
+    const equivalentMonthlyPrice = monthlyEquivalent(offer.monthlyPrice, offer);
     return {
-      monthlyPrice: offer.monthlyPrice,
-      publicMonthlyPrice: offer.monthlyPrice,
-      durableMonthlyPrice: offer.monthlyPrice,
-      firstYearRecurringCost: roundMoney(offer.monthlyPrice * 12)
+      monthlyPrice: equivalentMonthlyPrice,
+      publicMonthlyPrice: equivalentMonthlyPrice,
+      durableMonthlyPrice: equivalentMonthlyPrice,
+      firstYearRecurringCost: roundMoney(
+        offer.monthlyPrice * billingCyclesPerYear(offer)
+      ),
+      billingPrice: offer.monthlyPrice,
+      ...(offer.billingPeriodDays ? { billingPeriodDays: offer.billingPeriodDays } : {})
     };
   }
 
@@ -590,8 +618,14 @@ function mobileReason(
     price.priceRange
       ? `Tarif évolutif de ${formatCurrency(price.priceRange.min)} à ${formatCurrency(price.priceRange.max)} selon la consommation.`
       : null,
+    price.billingPeriodDays
+      ? `Tarif facturé ${formatCurrency(price.billingPrice ?? price.monthlyPrice)} tous les ${price.billingPeriodDays} jours, soit ${formatCurrency(price.monthlyPrice)} par mois civil en moyenne.`
+      : null,
+    offer.autoRenewal === true
+      ? "Renouvellement automatique prévu par l'opérateur; vérifier ses modalités de désactivation."
+      : null,
     !entryFeesKnown
-      ? "Frais d'entrée incomplets : économie nette sur 12 mois non certifiable."
+      ? "Des frais de souscription ou de résiliation peuvent s'appliquer et réduire les économies estimées."
       : null
   ].filter((note): note is string => Boolean(note));
   return notes.join(" ");
@@ -620,6 +654,10 @@ function mobileAlternativesForExpense(
     const entryFeesKnown =
       offer.activationFees !== null && offer.simFees !== null;
     const firstYearCost = roundMoney(price.firstYearRecurringCost + knownEntryFees);
+    const tariffFirstYearSaving = Math.max(
+      0,
+      roundMoney(currentYearlyCost - price.firstYearRecurringCost)
+    );
     const netFirstYearSaving = entryFeesKnown
       ? Math.max(0, roundMoney(currentYearlyCost - firstYearCost))
       : undefined;
@@ -642,8 +680,11 @@ function mobileAlternativesForExpense(
       return [];
     }
 
-    const estimatedYearlySaving =
-      savingKind === "certified" ? netFirstYearSaving ?? 0 : 0;
+    const estimatedYearlySaving = savingKind === "certified"
+      ? netFirstYearSaving ?? 0
+      : savingKind === "recurring_only"
+        ? tariffFirstYearSaving
+        : 0;
     const idToken = offer.catalogId ?? getMobileCatalogOfferId(offer);
 
     return [{
@@ -653,7 +694,8 @@ function mobileAlternativesForExpense(
       provider: offer.provider,
       logoUrl: getProviderBranding(offer.provider).logoUrl,
       name: offer.offerName,
-      url: offer.sourceUrl,
+      url: offer.offerUrl ?? offer.sourceUrl,
+      sourceUrl: offer.sourceUrl,
       monthlyPrice: price.monthlyPrice,
       publicMonthlyPrice: price.publicMonthlyPrice,
       yearlyPrice: firstYearCost,
@@ -661,7 +703,9 @@ function mobileAlternativesForExpense(
       recurringYearlySaving,
       ...(netFirstYearSaving !== undefined ? { netFirstYearSaving } : {}),
       reason: mobileReason(offer, expense, comparisonKind, price, entryFeesKnown),
-      action: "Vérifier les conditions sur la source officielle avant toute souscription.",
+      action: offer.offerUrl
+        ? "Vérifier les conditions sur la source officielle avant toute souscription."
+        : `Ouvrir la page officielle et rechercher l'offre « ${offer.offerName} » avant toute souscription.`,
       comparisonKind,
       savingKind,
       ...(price.promotionPrice !== undefined
@@ -685,28 +729,31 @@ function mobileAlternativesForExpense(
       ...(typeof offer.includedDataGB === "number"
         ? { mobileDataLimitGB: offer.includedDataGB }
         : {}),
-      ...(offer.unlimitedData ? { mobileDataUnlimited: true } : {})
+      ...(offer.unlimitedData ? { mobileDataUnlimited: true } : {}),
+      ...(price.billingPrice !== undefined ? { billingPrice: price.billingPrice } : {}),
+      ...(price.billingPeriodDays !== undefined
+        ? { billingPeriodDays: price.billingPeriodDays }
+        : {}),
+      ...(offer.autoRenewal !== null && offer.autoRenewal !== undefined
+        ? { autoRenewal: offer.autoRenewal }
+        : {})
     }];
   });
 
-  const hasVerifiedNetSaving = (offer: AlternativeOffer) =>
-    typeof offer.netFirstYearSaving === "number" &&
-    Number.isFinite(offer.netFirstYearSaving);
+  const comparableYearlySaving = (offer: AlternativeOffer) =>
+    offer.netFirstYearSaving ?? offer.estimatedYearlySaving ?? offer.recurringYearlySaving ?? 0;
   const compareEconomicInterest = (left: AlternativeOffer, right: AlternativeOffer) => {
-    const leftHasVerifiedNetSaving = hasVerifiedNetSaving(left);
-    const rightHasVerifiedNetSaving = hasVerifiedNetSaving(right);
-    if (leftHasVerifiedNetSaving !== rightHasVerifiedNetSaving) {
-      return rightHasVerifiedNetSaving ? 1 : -1;
-    }
-
-    if (leftHasVerifiedNetSaving && rightHasVerifiedNetSaving) {
-      const netSavingDifference = right.netFirstYearSaving! - left.netFirstYearSaving!;
-      if (netSavingDifference !== 0) return netSavingDifference;
-    }
+    const comparableSavingDifference =
+      comparableYearlySaving(right) - comparableYearlySaving(left);
+    if (comparableSavingDifference !== 0) return comparableSavingDifference;
 
     const recurringSavingDifference =
       (right.recurringYearlySaving ?? 0) - (left.recurringYearlySaving ?? 0);
     if (recurringSavingDifference !== 0) return recurringSavingDifference;
+
+    const leftIsPromotion = left.promotionPrice !== undefined;
+    const rightIsPromotion = right.promotionPrice !== undefined;
+    if (leftIsPromotion !== rightIsPromotion) return leftIsPromotion ? 1 : -1;
 
     if (left.mobileDataUnlimited !== right.mobileDataUnlimited) {
       return right.mobileDataUnlimited ? 1 : -1;
@@ -720,12 +767,61 @@ function mobileAlternativesForExpense(
     if (commitmentDifference !== 0) return commitmentDifference;
     return left.id.localeCompare(right.id);
   };
-  const sorted = offers.sort(compareEconomicInterest);
-  const equivalent = sorted.filter(isPrimaryAlternative).slice(0, 4);
-  const temporary = sorted.filter((offer) => offer.savingKind === "temporary").slice(0, 2);
-  const compromises = sorted.filter(
+
+  const isMeaningful = (offer: AlternativeOffer) =>
+    comparableYearlySaving(offer) >= MOBILE_MIN_MEANINGFUL_YEARLY_SAVING;
+  const isNearDuplicate = (left: AlternativeOffer, right: AlternativeOffer) => {
+    if (left.provider !== right.provider) return false;
+    if (left.mobileDataUnlimited !== right.mobileDataUnlimited) return false;
+    const leftData = left.mobileDataLimitGB ?? 0;
+    const rightData = right.mobileDataLimitGB ?? 0;
+    const dataDifference = Math.abs(leftData - rightData);
+    const similarData = dataDifference <= Math.max(20, Math.min(leftData, rightData) * 0.2);
+    const savingDifference = Math.abs(
+      (left.recurringYearlySaving ?? 0) - (right.recurringYearlySaving ?? 0)
+    );
+    return similarData && savingDifference <= 12;
+  };
+  const hasDistinctAdvantage = (
+    candidate: AlternativeOffer,
+    selected: AlternativeOffer[]
+  ) => {
+    if (candidate.mobileDataUnlimited && selected.every((offer) => !offer.mobileDataUnlimited)) {
+      return true;
+    }
+    const bestSelectedData = Math.max(
+      0,
+      ...selected.map((offer) => offer.mobileDataLimitGB ?? 0)
+    );
+    if (
+      (candidate.mobileDataLimitGB ?? 0) >= bestSelectedData + 50 &&
+      (candidate.mobileDataLimitGB ?? 0) >= bestSelectedData * 1.5
+    ) {
+      return true;
+    }
+    return Boolean(
+      candidate.technology?.includes("5G") &&
+      selected.every((offer) => !offer.technology?.includes("5G"))
+    );
+  };
+  const selectOffers = (candidates: AlternativeOffer[], max = 3) => {
+    const selected: AlternativeOffer[] = [];
+    for (const candidate of candidates) {
+      if (selected.some((offer) => isNearDuplicate(candidate, offer))) continue;
+      if (selected.length < 2 || (selected.length === 2 && hasDistinctAdvantage(candidate, selected))) {
+        selected.push(candidate);
+      }
+      if (selected.length >= max) break;
+    }
+    return selected;
+  };
+
+  const sorted = offers.filter(isMeaningful).sort(compareEconomicInterest);
+  const equivalent = selectOffers(sorted.filter(isPrimaryAlternative));
+  const temporary = sorted.filter((offer) => offer.savingKind === "temporary").slice(0, 1);
+  const compromises = selectOffers(sorted.filter(
     (offer) => !isPrimaryAlternative(offer) && offer.savingKind !== "temporary"
-  ).sort(compareEconomicInterest).slice(0, 4);
+  ).sort(compareEconomicInterest), 2);
   return [...equivalent, ...temporary, ...compromises];
 }
 

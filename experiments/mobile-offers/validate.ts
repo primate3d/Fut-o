@@ -24,6 +24,7 @@ export function validateOffer(offer: MobileOffer): MobileOffer {
 
   try {
     assertOfficialUrl(offer.sourceUrl);
+    if (offer.offerUrl) assertOfficialUrl(offer.offerUrl);
   } catch {
     computed = "FAILED";
   }
@@ -38,6 +39,7 @@ export function validateOffer(offer: MobileOffer): MobileOffer {
     offer.activationFees,
     offer.simFees,
     offer.terminationFees ?? null,
+    offer.billingPeriodDays ?? null,
     ...offer.conditionalPrices.flatMap((price) => [
       price.monthlyPrice,
       price.durationMonths,
@@ -53,6 +55,10 @@ export function validateOffer(offer: MobileOffer): MobileOffer {
   const contradictoryData =
     offer.unlimitedData === true && offer.includedDataGB !== null;
   const invalidPrice = offer.monthlyPrice !== null && offer.monthlyPrice <= 0;
+  const invalidBillingPeriod =
+    offer.billingPeriodDays !== undefined &&
+    offer.billingPeriodDays !== null &&
+    (!Number.isInteger(offer.billingPeriodDays) || offer.billingPeriodDays <= 0);
   const incompletePromotion =
     offer.promotionPrice !== null &&
     (offer.promotionDuration === null || offer.priceAfterPromotion === null);
@@ -73,6 +79,7 @@ export function validateOffer(offer: MobileOffer): MobileOffer {
     invalidNumber ||
     contradictoryData ||
     invalidPrice ||
+    invalidBillingPeriod ||
     contradictoryPromotion ||
     invalidTiers ||
     !offer.offerName.trim()

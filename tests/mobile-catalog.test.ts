@@ -8,7 +8,8 @@ import {
 import {
   findAlternativeOffers,
   getMobileComparisonMinimumDataGB,
-  isPrimaryAlternative
+  isPrimaryAlternative,
+  MOBILE_MIN_MEANINGFUL_MONTHLY_SAVING
 } from "../features/recommendations/service";
 import { getMobileComparisonMessage } from "../lib/server/comparison";
 import {
@@ -168,7 +169,7 @@ test("des frais inconnus interdisent une économie nette certifiée", () => {
   assert.equal(offer.entryFeesKnown, false);
   assert.equal(offer.savingKind, "recurring_only");
   assert.equal(offer.netFirstYearSaving, undefined);
-  assert.equal(offer.estimatedYearlySaving, 0);
+  assert.equal(offer.estimatedYearlySaving, 240);
   assert.equal(offer.recurringYearlySaving, 240);
 });
 
@@ -226,7 +227,7 @@ test("plusieurs contrats conservent des identifiants stables et séparés", () =
   );
 });
 
-test("Free illimité respecte le seuil utilisateur de 300 Go", () => {
+test("Free illimité respecte le seuil utilisateur et le gain significatif", () => {
   const current = mobileExpense({
     provider: "Free Mobile",
     monthlyAmount: 9.99,
@@ -251,19 +252,16 @@ test("Free illimité respecte le seuil utilisateur de 300 Go", () => {
     )
   });
 
-  assert.ok(offers.some((offer) => offer.name === "Illimité"));
-  assert.ok(offers.some((offer) => offer.name === "500 Go"));
-  assert.ok(offers.some((offer) => offer.name === "300 Go"));
-  assert.ok(offers.every((offer) => offer.name !== "10 Go"));
+  assert.deepEqual(offers.map((offer) => offer.name), ["300 Go"]);
   assert.deepEqual(
     offers
       .filter((offer) => offer.comparisonKind === "reduced_data")
       .map((offer) => offer.mobileDataLimitGB),
-    [300, 500]
+    [300]
   );
 });
 
-test("les frais connus et les promotions sont compares sur la meme premiere annee", () => {
+test("des frais importants excluent une économie de première année insignifiante", () => {
   const current = mobileExpense({
     monthlyAmount: 9.99,
     yearlyAmount: 119.88,
@@ -293,17 +291,10 @@ test("les frais connus et les promotions sont compares sur la meme premiere anne
     )
   });
 
-  assert.deepEqual(
-    offers.map((offer) => offer.name),
-    ["300 Go promotion courte", "500 Go sans frais", "300 Go avec frais"]
-  );
-  assert.equal(offers[0]?.netFirstYearSaving, 14.38);
-  assert.equal(offers[0]?.recurringYearlySaving, 5.88);
-  assert.equal(offers[1]?.netFirstYearSaving, 12);
-  assert.equal(offers[2]?.netFirstYearSaving, 9.88);
+  assert.deepEqual(offers, []);
 });
 
-test("une economie non certifiable reste derriere une economie nette verifiee", () => {
+test("des frais inconnus n'entraînent plus une rétrogradation systématique", () => {
   const current = mobileExpense({
     monthlyAmount: 9.99,
     yearlyAmount: 119.88,
@@ -327,11 +318,12 @@ test("une economie non certifiable reste derriere une economie nette verifiee", 
 
   assert.deepEqual(
     offers.map((offer) => offer.name),
-    ["500 Go economie certifiee", "300 Go frais inconnus"]
+    ["300 Go frais inconnus"]
   );
-  assert.equal(offers[1]?.netFirstYearSaving, undefined);
-  assert.equal(offers[1]?.estimatedYearlySaving, 0);
-  assert.equal(offers[1]?.savingKind, "recurring_only");
+  assert.equal(offers[0]?.netFirstYearSaving, undefined);
+  assert.equal(offers[0]?.estimatedYearlySaving, 59.88);
+  assert.equal(offers[0]?.savingKind, "recurring_only");
+  assert.match(offers[0]?.reason ?? "", /frais de souscription ou de résiliation/i);
 });
 
 test("a economie egale le meilleur volume de donnees departage les offres", () => {
@@ -346,8 +338,8 @@ test("a economie egale le meilleur volume de donnees departage les offres", () =
   });
   const offers = findAlternativeOffers([current], {
     mobileCatalog: catalog(
-      mobileOffer({ offerName: "300 Go", monthlyPrice: 8, includedDataGB: 300 }),
-      mobileOffer({ offerName: "500 Go", monthlyPrice: 8, includedDataGB: 500 })
+      mobileOffer({ offerName: "300 Go", monthlyPrice: 6.99, includedDataGB: 300 }),
+      mobileOffer({ offerName: "500 Go", monthlyPrice: 6.99, includedDataGB: 500 })
     )
   });
 
@@ -367,7 +359,7 @@ test("une offre 300 Go est un compromis transparent, jamais un équivalent", () 
   const [offer] = findAlternativeOffers([current], {
     mobileCatalog: catalog(mobileOffer({
       offerName: "300 Go moins cher",
-      monthlyPrice: 8.49,
+      monthlyPrice: 6.99,
       includedDataGB: 300
     }))
   });
@@ -421,6 +413,112 @@ test("aucune offre satisfaisante recommande de conserver le forfait actuel", () 
     getMobileComparisonMessage(analysisFor(current), currentCatalog, offers) ?? "",
     /forfait actuel reste compétitif/i
   );
+});
+
+test("le seuil d'intérêt écarte un passage de 22 à 20 euros", () => {
+  assert.equal(MOBILE_MIN_MEANINGFUL_MONTHLY_SAVING, 3);
+  const offers = findAlternativeOffers([
+    mobileExpense({ monthlyAmount: 22, yearlyAmount: 264 })
+  ], {
+    mobileCatalog: catalog(mobileOffer({ monthlyPrice: 20 }))
+  });
+  assert.deepEqual(offers, []);
+});
+
+test("SFR 22 euros classe les économies avant la connaissance des frais", () => {
+  for (const requiredData of [20, 100, 200]) {
+    const offers = findAlternativeOffers([
+      mobileExpense({
+        provider: "SFR",
+        monthlyAmount: 22,
+        yearlyAmount: 264,
+        mobileDataGB: requiredData,
+        mobileIncludedDataGB: requiredData
+      })
+    ], {
+      mobileCatalog: catalog(
+        mobileOffer({
+          provider: "B&You",
+          offerName: "B&You 200 Go",
+          monthlyPrice: 13.99,
+          includedDataGB: 200,
+          activationFees: 0,
+          simFees: 0,
+          sourceUrl: "https://www.bouyguestelecom.fr/forfaits-mobiles/sans-engagement"
+        }),
+        mobileOffer({
+          provider: "Syma Mobile",
+          offerName: "Syma 100 Go",
+          monthlyPrice: 9.99,
+          includedDataGB: 100,
+          activationFees: 10,
+          simFees: null,
+          sourceUrl: "https://www.symamobile.com/forfait"
+        }),
+        mobileOffer({
+          provider: "NRJ Mobile",
+          offerName: "NRJ 200 Go",
+          monthlyPrice: 10.99,
+          includedDataGB: 200,
+          activationFees: null,
+          simFees: 1
+        })
+      )
+    });
+    assert.ok(offers.length <= 2);
+    assert.equal(offers[0]?.provider, requiredData <= 100 ? "Syma Mobile" : "NRJ Mobile");
+    assert.ok(offers.every((offer) => (offer.mobileDataLimitGB ?? 0) >= requiredData));
+  }
+});
+
+test("une troisième offre n'apparaît que pour un avantage de service distinct", () => {
+  const current = mobileExpense({ monthlyAmount: 22, yearlyAmount: 264 });
+  const offers = findAlternativeOffers([current], {
+    mobileCatalog: catalog(
+      mobileOffer({ provider: "NRJ Mobile", offerName: "100 Go A", monthlyPrice: 8, includedDataGB: 100 }),
+      mobileOffer({ provider: "RED by SFR", offerName: "120 Go B", monthlyPrice: 8.5, includedDataGB: 120, sourceUrl: "https://www.red-by-sfr.fr/forfaits-mobiles/" }),
+      mobileOffer({ provider: "Free Mobile", offerName: "500 Go C", monthlyPrice: 9, includedDataGB: 500, sourceUrl: "https://mobile.free.fr/" }),
+      mobileOffer({ provider: "B&You", offerName: "110 Go D", monthlyPrice: 8.6, includedDataGB: 110, sourceUrl: "https://www.bouyguestelecom.fr/forfaits-mobiles/sans-engagement" })
+    )
+  });
+  assert.deepEqual(offers.map((offer) => offer.name), ["100 Go A", "120 Go B", "500 Go C"]);
+});
+
+test("un tarif tous les 30 jours est annualisé sans le présenter comme mensuel", () => {
+  const [offer] = findAlternativeOffers([
+    mobileExpense({ monthlyAmount: 20, yearlyAmount: 240 })
+  ], {
+    mobileCatalog: catalog(mobileOffer({
+      provider: "Lyca Mobile",
+      offerName: "Lyca 100 Go",
+      monthlyPrice: 9.99,
+      includedDataGB: 100,
+      billingPeriodDays: 30,
+      autoRenewal: true,
+      sourceUrl: "https://www.lycamobile.fr/fr/bundles/forfait-prepaye/"
+    }))
+  });
+  assert.equal(offer.billingPrice, 9.99);
+  assert.equal(offer.billingPeriodDays, 30);
+  assert.equal(offer.yearlyPrice, 121.55);
+  assert.equal(offer.monthlyPrice, 10.13);
+  assert.match(offer.reason, /tous les 30 jours/i);
+});
+
+test("le lien commercial exact est distinct de la source de preuve", () => {
+  const offerUrl = "https://www.lapostemobile.fr/offres-mobiles/forfaits-sans-engagement?ajouterforfait=947";
+  const sourceUrl = "https://www.lapostemobile.fr/offres-mobiles/forfaits-sans-engagement";
+  const [offer] = findAlternativeOffers([mobileExpense()], {
+    mobileCatalog: catalog(mobileOffer({ offerUrl, sourceUrl, monthlyPrice: 10 }))
+  });
+  assert.equal(offer.url, offerUrl);
+  assert.equal(offer.sourceUrl, sourceUrl);
+
+  const [fallback] = findAlternativeOffers([mobileExpense()], {
+    mobileCatalog: catalog(mobileOffer({ offerUrl: null, sourceUrl, monthlyPrice: 10 }))
+  });
+  assert.equal(fallback.url, sourceUrl);
+  assert.match(fallback.action, /rechercher l'offre/i);
 });
 
 test("un seuil absent et un catalogue vide ou périmé restent non concluants", () => {

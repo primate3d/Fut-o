@@ -471,6 +471,9 @@ function buildBodyTemplate(params: {
   offerName?: string;
   offerProvider?: string;
   offerMonthlyPrice?: number;
+  offerSavingKind?: SelectedAlternativeOffer["savingKind"];
+  offerBillingPrice?: number;
+  offerBillingPeriodDays?: number;
   offerUrl?: string;
   offerVerifiedAt?: string;
   reason: string;
@@ -512,11 +515,11 @@ function buildBodyTemplate(params: {
     params.offerName
       ? `J'ai également repéré une offre comparable qui pourrait mieux correspondre à mon usage : ${
           params.offerProvider ? `${params.offerProvider} - ` : ""
-        }${params.offerName}${
-          typeof params.offerMonthlyPrice === "number"
+        }${params.offerName}${typeof params.offerBillingPrice === "number" && params.offerBillingPeriodDays
+          ? `, à ${formatCurrency(params.offerBillingPrice)} tous les ${params.offerBillingPeriodDays} jours (soit ${formatCurrency(params.offerMonthlyPrice ?? params.offerBillingPrice)} par mois civil en moyenne)`
+          : typeof params.offerMonthlyPrice === "number"
             ? `, à ${formatCurrency(params.offerMonthlyPrice)} / mois`
-            : ""
-        }${
+            : ""}${
           params.offerUrl ? ` (${params.offerUrl})` : ""
         }.`
       : "",
@@ -525,6 +528,10 @@ function buildBodyTemplate(params: {
       ? `Cette offre a été vérifiée le ${new Date(params.offerVerifiedAt).toLocaleDateString("fr-FR")} sur la source officielle indiquée.`
       : "",
     params.offerVerifiedAt ? "" : "",
+    params.offerSavingKind === "recurring_only"
+      ? "L'économie indiquée compare les tarifs récurrents. Des frais ponctuels peuvent la réduire : cette estimation n'est ni nette ni garantie."
+      : "",
+    params.offerSavingKind === "recurring_only" ? "" : "",
     params.request,
     "",
     params.potentialSaving > 0
@@ -874,6 +881,9 @@ function createLetter(
     offerProvider: bestOffer?.provider,
     offerMonthlyPrice: bestOffer?.monthlyPrice,
     offerEstimatedYearlySaving: bestOffer?.estimatedYearlySaving,
+    offerSavingKind: bestOffer?.savingKind,
+    offerBillingPrice: bestOffer?.billingPrice,
+    offerBillingPeriodDays: bestOffer?.billingPeriodDays,
     offerUrl: bestOffer?.url,
     offerVerifiedAt: bestOffer?.verifiedAt,
     category: expense.category,
@@ -892,6 +902,9 @@ function createLetter(
       offerName: bestOffer?.name,
       offerProvider: bestOffer?.provider,
       offerMonthlyPrice: bestOffer?.monthlyPrice,
+      offerSavingKind: bestOffer?.savingKind,
+      offerBillingPrice: bestOffer?.billingPrice,
+      offerBillingPeriodDays: bestOffer?.billingPeriodDays,
       offerUrl: bestOffer?.url,
       offerVerifiedAt: bestOffer?.verifiedAt,
       reason: preset.reason,

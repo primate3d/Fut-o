@@ -7,7 +7,11 @@ export type Provider =
   | "SFR"
   | "Prixtel"
   | "NRJ Mobile"
-  | "Cdiscount Mobile";
+  | "Cdiscount Mobile"
+  | "Lyca Mobile"
+  | "Lebara"
+  | "Syma Mobile"
+  | "La Poste Mobile";
 
 export type VerificationStatus = "VERIFIED" | "PARTIAL" | "FAILED";
 
@@ -46,7 +50,10 @@ export interface MobileOffer {
   pricingTiers: PricingTier[];
   conditions: string[];
   evidence: string[];
+  offerUrl?: string | null;
   sourceUrl: string;
+  billingPeriodDays?: number | null;
+  autoRenewal?: boolean | null;
   retrievedAt: string;
   verifiedAt: string | null;
   verificationStatus: VerificationStatus;
@@ -77,7 +84,7 @@ export interface CollectionSnapshot {
   schemaVersion: 1 | 2;
   retrievedAt: string;
   results: CollectorResult[];
-  summary: Record<Provider, CollectionSummary>;
+  summary: Partial<Record<Provider, CollectionSummary>>;
 }
 
 export type ChangeType =

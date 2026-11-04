@@ -2867,6 +2867,159 @@ test("results, report and letters use the same fresh certified mobile offer", as
   await sql`update mobile_catalog_sources set offers=${sql.json(restoredOffers)}, retrieved_at=${restoredAt} where provider='NRJ Mobile'`;
 });
 
+test("recurring-only mobile offer stays selectable without becoming certified", async () => {
+  const [storedSource] = await sql`
+    select offers, retrieved_at from mobile_catalog_sources where provider='NRJ Mobile'
+  `;
+  const originalOffers = storedSource.offers;
+  const originalRetrievedAt = storedSource.retrieved_at as string;
+  const freshAt = new Date().toISOString();
+  const recurringOffers = originalOffers.map((offer: Record<string, unknown>, index: number) => ({
+    ...offer,
+    provider: "NRJ Mobile",
+    offerName: index === 0 ? "Forfait test 100 Go" : `Forfait test ${200 + index * 100} Go`,
+    monthlyPrice: 9.99 + index,
+    includedDataGB: index === 0 ? 100 : 200 + index * 100,
+    promotionPrice: null,
+    promotionDuration: null,
+    priceAfterPromotion: null,
+    activationFees: null,
+    simFees: null,
+    billingPeriodDays: index === 0 ? 30 : null,
+    offerUrl: null,
+    retrievedAt: freshAt,
+    verifiedAt: freshAt,
+    verificationStatus: "VERIFIED"
+  }));
+  await sql`
+    update mobile_catalog_sources
+    set offers=${sql.json(recurringOffers)}, retrieved_at=${freshAt}, last_success_at=${freshAt}
+    where provider='NRJ Mobile'
+  `;
+
+  try {
+    const key = { ...fakeKey(), plan: "famille" as const };
+    await repo.saveKey(key);
+    const analysis: MockAnalysis = {
+      ...emptyAnalysis(key.code),
+      expenses: [{
+        id: "mobile-recurring-only",
+        label: "Forfait mobile SFR 100 Go",
+        provider: "SFR",
+        category: ExpenseCategory.TELECOM,
+        subcategory: ExpenseSubcategory.MOBILE,
+        isRecurring: true,
+        monthlyAmount: 22,
+        yearlyAmount: 264,
+        recurrence: "monthly",
+        documentType: "mobile_invoice",
+        mobileIncludedDataGB: 100,
+        mobileDataGB: 100
+      }],
+      totalMonthlyAmount: 22,
+      totalYearlyAmount: 264
+    };
+    await repo.saveAnalysis(key.code, analysis);
+
+    const { POST: alternativesPost } = await import("../app/api/alternatives/route");
+    const alternativesResponse = await alternativesPost(new Request("http://local.test/api/alternatives", {
+      method: "POST",
+      body: JSON.stringify({ code: key.code })
+    }));
+    const alternativesPayload = (await alternativesResponse.json()) as {
+      alternatives: Array<import("../features/recommendations/service").AlternativeOffer>;
+    };
+    const selected = alternativesPayload.alternatives.find(
+      (offer) => offer.sourceExpenseId === "mobile-recurring-only" && offer.savingKind === "recurring_only"
+    );
+    assert.ok(selected);
+    assert.ok(selected.estimatedYearlySaving > 0);
+    assert.equal(selected.netFirstYearSaving, undefined);
+    assert.equal(selected.billingPeriodDays, 30);
+
+    const { buildFinancialSummary } = await import("../features/reports/financial-summary");
+    const summary = buildFinancialSummary(
+      analysis,
+      alternativesPayload.alternatives,
+      [{
+        expenseId: "mobile-recurring-only",
+        status: "alternative_found",
+        message: "Alternative tarifaire disponible"
+      }],
+      []
+    );
+    assert.equal(summary.potentialYearlySaving, 0);
+
+    const { POST: lettersPost } = await import("../app/api/courriers/route");
+    const lettersResponse = await lettersPost(new Request("http://local.test/api/courriers", {
+      method: "POST",
+      body: JSON.stringify({ code: key.code, selectedOfferId: selected.id })
+    }));
+    assert.equal(lettersResponse.status, 200);
+    const lettersPayload = (await lettersResponse.json()) as {
+      selectionStatus: string;
+      selectedOffer: import("../features/recommendations/selected-offer").SelectedAlternativeOffer;
+      letters: GeneratedLetter[];
+    };
+    assert.equal(lettersPayload.selectionStatus, "valid");
+    assert.equal(lettersPayload.selectedOffer.savingKind, "recurring_only");
+    assert.equal(lettersPayload.selectedOffer.billingPeriodDays, 30);
+    const selectedLetter = lettersPayload.letters.find(
+      (letter) => letter.offerProvider === selected.provider
+    );
+    assert.ok(selectedLetter);
+    assert.equal(selectedLetter.offerEstimatedYearlySaving, selected.estimatedYearlySaving);
+    assert.equal(selectedLetter.offerSavingKind, "recurring_only");
+    assert.match(selectedLetter.bodyTemplate, /ni nette ni garantie/i);
+    assert.match(selectedLetter.bodyTemplate, /tous les 30 jours/i);
+
+    const { generatePdfReport } = await import("../features/reports/service");
+    let report = "";
+    const events = jsPDF.API.events;
+    const capture = ["initialized", function (this: jsPDF) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (this.save as any) = () => { report = this.output(); return this; };
+    }] as typeof events[number];
+    events.push(capture);
+    try {
+      await generatePdfReport(
+        analysis,
+        alternativesPayload.alternatives,
+        lettersPayload.letters,
+        lettersPayload.selectedOffer
+      );
+    } finally {
+      events.splice(events.indexOf(capture), 1);
+    }
+    assert.ok(report.includes(selected.provider));
+    assert.ok(report.includes("Estimation tarifaire hors frais ponctuels"));
+
+    const staleAt = new Date(Date.now() - 73 * 60 * 60 * 1000).toISOString();
+    const staleOffers = recurringOffers.map((offer: Record<string, unknown>) => ({
+      ...offer,
+      retrievedAt: staleAt,
+      verifiedAt: staleAt
+    }));
+    await sql`
+      update mobile_catalog_sources
+      set offers=${sql.json(staleOffers)}, retrieved_at=${staleAt}, last_success_at=${staleAt}
+      where provider='NRJ Mobile'
+    `;
+    const staleLetters = await lettersPost(new Request("http://local.test/api/courriers", {
+      method: "POST",
+      body: JSON.stringify({ code: key.code, selectedOfferId: selected.id })
+    }));
+    const stalePayload = (await staleLetters.json()) as { selectionStatus: string };
+    assert.equal(stalePayload.selectionStatus, "stale_or_ineligible");
+  } finally {
+    await sql`
+      update mobile_catalog_sources
+      set offers=${sql.json(originalOffers)}, retrieved_at=${originalRetrievedAt}, last_success_at=${originalRetrievedAt}
+      where provider='NRJ Mobile'
+    `;
+  }
+});
+
 test("missing and invalid expirations are rejected fail-closed", async () => {
   const { GET } = await import("../app/api/keys/status/route");
   for (const expiresAt of ["", "not-a-date"]) {

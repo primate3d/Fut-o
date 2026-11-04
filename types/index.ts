@@ -318,6 +318,9 @@ export type GeneratedLetter = {
   offerProvider?: string;
   offerMonthlyPrice?: number;
   offerEstimatedYearlySaving?: number;
+  offerSavingKind?: "certified" | "temporary" | "recurring_only";
+  offerBillingPrice?: number;
+  offerBillingPeriodDays?: number;
   offerUrl?: string;
   offerVerifiedAt?: string;
   category: ExpenseCategory;

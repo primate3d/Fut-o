@@ -3,12 +3,16 @@ import path from "node:path";
 import { collectBouyguesOffers } from "./collectors/bouygues";
 import { collectCdiscountOffers } from "./collectors/cdiscount";
 import { collectFreeOffers } from "./collectors/free";
+import { collectLaPosteOffers } from "./collectors/laposte";
+import { collectLebaraOffers } from "./collectors/lebara";
+import { collectLycaOffers } from "./collectors/lyca";
 import { collectNrjOffers } from "./collectors/nrj";
 import { collectOrangeOffers } from "./collectors/orange";
 import { collectPrixtelOffers } from "./collectors/prixtel";
 import { collectRedOffers } from "./collectors/red";
 import { collectSfrOffers } from "./collectors/sfr";
 import { collectSoshOffers } from "./collectors/sosh";
+import { collectSymaOffers } from "./collectors/syma";
 import { compareSnapshots } from "./compare-snapshots";
 import type {
   CollectionSnapshot,
@@ -27,6 +31,10 @@ export const PROVIDERS: Provider[] = [
   "Prixtel",
   "NRJ Mobile",
   "Cdiscount Mobile",
+  "Lyca Mobile",
+  "Lebara",
+  "Syma Mobile",
+  "La Poste Mobile",
 ];
 
 function summarize(result: CollectorResult): CollectionSummary {
@@ -116,6 +124,10 @@ export async function collectAllProviders(): Promise<CollectorResult[]> {
     collectPrixtelOffers(),
     collectNrjOffers(),
     collectCdiscountOffers(),
+    collectLycaOffers(),
+    collectLebaraOffers(),
+    collectSymaOffers(),
+    collectLaPosteOffers(),
   ]);
 }
 

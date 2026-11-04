@@ -9,14 +9,19 @@ export type SelectedAlternativeOffer = Pick<
   | "provider"
   | "name"
   | "url"
+  | "sourceUrl"
   | "monthlyPrice"
+  | "yearlyPrice"
   | "estimatedYearlySaving"
+  | "recurringYearlySaving"
   | "savingKind"
   | "comparisonKind"
   | "entryFeesKnown"
   | "knownEntryFees"
   | "conditions"
   | "verifiedAt"
+  | "billingPrice"
+  | "billingPeriodDays"
 > & {
   sourceExpenseId?: string;
 };
@@ -34,16 +39,40 @@ export function toSelectedAlternativeOffer(offer: AlternativeOffer): SelectedAlt
     provider: offer.provider,
     name: offer.name,
     url: offer.url,
+    sourceUrl: offer.sourceUrl,
     monthlyPrice: offer.monthlyPrice,
+    yearlyPrice: offer.yearlyPrice,
     estimatedYearlySaving: offer.estimatedYearlySaving,
+    recurringYearlySaving: offer.recurringYearlySaving,
     savingKind: offer.savingKind,
     comparisonKind: offer.comparisonKind,
     entryFeesKnown: offer.entryFeesKnown,
     knownEntryFees: offer.knownEntryFees,
     conditions: offer.conditions,
     verifiedAt: offer.verifiedAt,
+    billingPrice: offer.billingPrice,
+    billingPeriodDays: offer.billingPeriodDays,
     sourceExpenseId: getSourceExpenseId(offer)
   };
+}
+
+export function findSelectedAlternativeOffer(
+  selectedOffer: SelectedAlternativeOffer | null,
+  alternatives: AlternativeOffer[]
+) {
+  if (!selectedOffer) return undefined;
+
+  return alternatives.find((offer) => {
+    const sourceExpenseId = getSourceExpenseId(offer);
+    return (
+      offer.id === selectedOffer.id ||
+      (offer.category === selectedOffer.category &&
+        offer.provider === selectedOffer.provider &&
+        offer.name === selectedOffer.name &&
+        (!selectedOffer.sourceExpenseId ||
+          sourceExpenseId === selectedOffer.sourceExpenseId))
+    );
+  });
 }
 
 export function getSelectedAlternativeOffer(): SelectedAlternativeOffer | null {
@@ -82,17 +111,7 @@ export function refreshSelectedAlternativeOffer(
     return null;
   }
 
-  const currentOffer = alternatives.find((offer) => {
-    const sourceExpenseId = getSourceExpenseId(offer);
-    return (
-      offer.id === selectedOffer.id ||
-      (offer.category === selectedOffer.category &&
-        offer.provider === selectedOffer.provider &&
-        offer.name === selectedOffer.name &&
-        (!selectedOffer.sourceExpenseId ||
-          sourceExpenseId === selectedOffer.sourceExpenseId))
-    );
-  });
+  const currentOffer = findSelectedAlternativeOffer(selectedOffer, alternatives);
 
   if (!currentOffer) {
     if (typeof window !== "undefined") {

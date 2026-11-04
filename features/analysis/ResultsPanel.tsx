@@ -76,6 +76,15 @@ function formatCurrency(value: number) {
   }).format(value);
 }
 
+function formatOfferBilling(
+  offer: Pick<AlternativeOffer, "monthlyPrice" | "billingPrice" | "billingPeriodDays">
+) {
+  if (offer.billingPeriodDays && typeof offer.billingPrice === "number") {
+    return `${formatCurrency(offer.billingPrice)} tous les ${offer.billingPeriodDays} jours (soit ${formatCurrency(offer.monthlyPrice)} / mois civil)`;
+  }
+  return `${formatCurrency(offer.monthlyPrice)} / mois`;
+}
+
 function hasUsableAmounts(analysis: MockAnalysis | null) {
   return Boolean(
     analysis &&
@@ -715,6 +724,14 @@ export function ResultsPanel() {
     () => alternatives.filter(isPrimaryAlternative),
     [alternatives]
   );
+  const bestIndicativeAlternative = useMemo(
+    () => primaryAlternatives.find(
+      (offer) =>
+        offer.savingKind === "recurring_only" &&
+        offer.estimatedYearlySaving > 0
+    ),
+    [primaryAlternatives]
+  );
   const temporaryPromotionAlternatives = useMemo(
     () => alternatives.filter((offer) => offer.savingKind === "temporary"),
     [alternatives]
@@ -1104,6 +1121,8 @@ export function ResultsPanel() {
 
   const currentFinancialSummary = financialSummary!;
   const hasMeaningfulSavings = currentFinancialSummary.potentialYearlySaving > 0;
+  const hasIndicativeTariffSaving = Boolean(bestIndicativeAlternative);
+  const hasActionableAlternative = hasMeaningfulSavings || hasIndicativeTariffSaving;
   const isDiscoveryAccess = isDiscoveryPlan(getStoredAccessKey()?.plan);
   const conditionalSupportOffers = isDiscoveryAccess
     ? []
@@ -1122,7 +1141,7 @@ export function ResultsPanel() {
         </div>
         {isDiscoveryAccess ? (
           <Button href="/tarifs">🔓 Débloquer mon audit complet</Button>
-        ) : hasMeaningfulSavings || isManualAnalysis(analysis) ? (
+        ) : hasActionableAlternative || isManualAnalysis(analysis) ? (
           <Button href="/courriers">Préparer mes courriers</Button>
         ) : (
           <div className="flex flex-wrap gap-3">
@@ -1136,14 +1155,38 @@ export function ResultsPanel() {
 
       {!hasMeaningfulSavings ? (
         <Card className="border-sage-200 bg-sage-50">
-          <h2 className="text-lg font-semibold text-navy-900">
-            Aucune économie significative détectée
-          </h2>
-          <p className="mt-2 text-sm leading-6 text-slate-600">
-            Le montant analysé ne fait pas ressortir d'offre clairement plus avantageuse.
-            Vous pouvez conserver ce constat dans le rapport, ajouter d'autres documents
-            ou vérifier la fréquence et le montant saisis.
-          </p>
+          {bestIndicativeAlternative ? (
+            <>
+              <h2 className="text-lg font-semibold text-navy-900">
+                Économie tarifaire estimée identifiée
+              </h2>
+              <p className="mt-2 font-semibold text-navy-900">
+                {bestIndicativeAlternative.provider} - {bestIndicativeAlternative.name}
+              </p>
+              <p className="mt-1 text-sm text-slate-600">
+                {formatOfferBilling(bestIndicativeAlternative)}
+              </p>
+              <p className="mt-2 text-sm font-semibold text-sage-700">
+                Environ {formatCurrency(bestIndicativeAlternative.estimatedYearlySaving / 12)} / mois et{" "}
+                {formatCurrency(bestIndicativeAlternative.estimatedYearlySaving)} / an d'écart tarifaire.
+              </p>
+              <p className="mt-2 text-xs leading-5 text-slate-500">
+                Montant indicatif, hors frais ponctuels. Des frais ponctuels peuvent réduire les
+                économies estimées. Vérifiez les conditions du fournisseur.
+              </p>
+            </>
+          ) : (
+            <>
+              <h2 className="text-lg font-semibold text-navy-900">
+                Aucune économie significative détectée
+              </h2>
+              <p className="mt-2 text-sm leading-6 text-slate-600">
+                Le montant analysé ne fait pas ressortir d'offre clairement plus avantageuse.
+                Vous pouvez conserver ce constat dans le rapport, ajouter d'autres documents
+                ou vérifier la fréquence et le montant saisis.
+              </p>
+            </>
+          )}
         </Card>
       ) : null}
 
@@ -1337,10 +1380,12 @@ export function ResultsPanel() {
             </div>
             <div className="text-left sm:text-right">
               <p className="font-semibold text-navy-900">
-                {formatCurrency(selectedOffer.monthlyPrice)} / mois
+                {formatOfferBilling(selectedOffer)}
               </p>
               <p className="text-sm font-semibold text-sage-700">
-                {formatCurrency(selectedOffer.estimatedYearlySaving)} / an estimés
+                {selectedOffer.savingKind === "recurring_only"
+                  ? `${formatCurrency(selectedOffer.estimatedYearlySaving / 12)} / mois · ${formatCurrency(selectedOffer.estimatedYearlySaving)} / an estimés hors frais ponctuels`
+                  : `${formatCurrency(selectedOffer.estimatedYearlySaving)} / an estimés`}
               </p>
             </div>
           </div>
@@ -1668,7 +1713,7 @@ export function ResultsPanel() {
                   </div>
                   <p className="font-semibold text-sage-700">
                     {offer.savingKind === "recurring_only"
-                      ? `Écart récurrent : ${formatCurrency(recurringSaving)} / an`
+                      ? `Économie tarifaire estimée : ${formatCurrency(offer.estimatedYearlySaving / 12)} / mois · ${formatCurrency(offer.estimatedYearlySaving)} / an`
                       : `Économie nette 12 mois : ${formatCurrency(verifiedSaving)}`}
                   </p>
                 </div>
@@ -1705,15 +1750,14 @@ export function ResultsPanel() {
                   {offer.action}
                 </p>
                 <div className="mt-4 flex flex-wrap gap-2">
-                  {offer.savingKind !== "recurring_only" ? (
-                    <Button onClick={() => handleSelectOffer(offer)} type="button" variant="secondary">
-                      Choisir pour mon courrier et mon rapport
-                    </Button>
-                  ) : (
-                    <p className="text-sm text-amber-800">
-                      Vérifiez les frais de souscription avant de retenir cette offre.
+                  <Button onClick={() => handleSelectOffer(offer)} type="button" variant="secondary">
+                    Choisir pour mon courrier et mon rapport
+                  </Button>
+                  {offer.savingKind === "recurring_only" ? (
+                    <p className="basis-full text-sm text-amber-800">
+                      Des frais ponctuels peuvent réduire les économies estimées. Vérifiez les conditions du fournisseur.
                     </p>
-                  )}
+                  ) : null}
                   <a
                     className="inline-flex min-h-10 items-center justify-center gap-2 rounded-lg border border-sage-200 bg-white px-4 py-2 text-sm font-semibold text-sage-800 transition hover:bg-sage-50"
                     href={offer.url}

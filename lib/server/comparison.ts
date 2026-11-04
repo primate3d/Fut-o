@@ -137,5 +137,8 @@ export async function buildServerComparison(analysis: MockAnalysis, now = new Da
 export function canReferenceOfferInLetter(offer: AlternativeOffer) {
   if (!offer.sourceExpenseId) return false;
   if (offer.savingKind === undefined) return isPrimaryAlternative(offer);
-  return offer.savingKind === "certified" && isPrimaryAlternative(offer);
+  return (
+    (offer.savingKind === "certified" || offer.savingKind === "recurring_only") &&
+    isPrimaryAlternative(offer)
+  );
 }

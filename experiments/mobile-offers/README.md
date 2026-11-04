@@ -1,9 +1,9 @@
 # Collecteur expérimental d'offres mobiles
 
-Prototype autonome pour examiner les pages publiques officielles de neuf marques
-mobiles : Free Mobile, RED by SFR, B&You, Orange, Sosh, SFR, Prixtel,
-NRJ Mobile et Cdiscount Mobile. Il n'est connecté ni au comparateur Futéo, ni à
-une route API, ni à PostgreSQL.
+Collecteurs des pages publiques officielles de treize marques mobiles : Free
+Mobile, RED by SFR, B&You, Orange, Sosh, SFR, Prixtel, NRJ Mobile, Cdiscount
+Mobile, Lyca Mobile, Lebara, Syma Mobile et La Poste Mobile. Les résultats
+validés sont publiés dans PostgreSQL par la commande privée `mobile:refresh`.
 
 ## Principes
 
@@ -71,6 +71,15 @@ npx tsx experiments/mobile-offers/compare-snapshots.ts ancien.json nouveau.json
   données Europe/DOM.
 - **Cdiscount Mobile** : lecture des cartes HTML lorsqu'elles sont présentes. Une
   coquille JavaScript sans offre produit un échec explicite.
+- **Lyca Mobile** : lecture des forfaits prépayés officiels, avec conservation de
+  la période réelle de 30 jours et des conditions de renouvellement.
+- **Syma Mobile** : lecture des cartes officielles, y compris les frais
+  d'activation et le renouvellement mensuel.
+- **La Poste Mobile** : lecture des cartes officielles et conservation du lien
+  exact identifié par l'opérateur quand il est publié.
+- **Lebara** : la page officielle est interrogée, mais les offres restent
+  partielles ou en échec tant que les conditions critiques ne sont pas
+  accessibles sans contourner la protection du site.
 
 Les parseurs dépendent de structures éditoriales externes. Un changement de page
 doit conduire à un échec visible, jamais à une valeur inventée.

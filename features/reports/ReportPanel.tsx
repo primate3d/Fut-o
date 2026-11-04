@@ -26,9 +26,11 @@ import { getMissingContractFields } from "@/features/analysis/contract-details";
 import { getStoredAccessKey, isDiscoveryPlan } from "@/features/billing/access-keys";
 import { generateLettersFromAnalysis } from "@/features/letters/service";
 import {
+  isPrimaryAlternative,
   type AlternativeOffer
 } from "@/features/recommendations/service";
 import {
+  findSelectedAlternativeOffer,
   getSelectedAlternativeOffer,
   refreshSelectedAlternativeOffer,
   storeSelectedAlternativeOffer,
@@ -106,8 +108,21 @@ function applyAlternativeSavings(analysis: MockAnalysis, alternatives: Alternati
 function getBestAlternativeForExpense(
   expenseId: string,
   alternatives: AlternativeOffer[],
-  analysis: MockAnalysis
+  analysis: MockAnalysis,
+  selectedOffer?: SelectedAlternativeOffer | null
 ) {
+  const currentSelectedOffer = findSelectedAlternativeOffer(
+    selectedOffer ?? null,
+    alternatives
+  );
+  if (
+    currentSelectedOffer &&
+    isPrimaryAlternative(currentSelectedOffer) &&
+    getExpenseIdFromAlternativeId(currentSelectedOffer, analysis) === expenseId
+  ) {
+    return currentSelectedOffer;
+  }
+
   return alternatives
     .filter(
       (offer) =>
@@ -538,7 +553,12 @@ export function ReportPanel() {
     );
   }
 
-  const score = getOptimizationScore(analysis, comparisonStates);
+  const hasSelectedIndicativeTariff =
+    selectedOffer?.savingKind === "recurring_only" &&
+    selectedOffer.estimatedYearlySaving > 0;
+  const score = hasSelectedIndicativeTariff
+    ? null
+    : getOptimizationScore(analysis, comparisonStates);
   const scoreBadge = score === null
     ? { label: "Comparaison incomplète", tone: "amber" as const }
     : getScoreBadge(score);
@@ -548,7 +568,12 @@ export function ReportPanel() {
   const contractComparisons = analysis.expenses
     .map((expense) => ({
       expense,
-      offer: getBestAlternativeForExpense(expense.id, alternatives, analysis),
+      offer: getBestAlternativeForExpense(
+        expense.id,
+        alternatives,
+        analysis,
+        selectedOffer
+      ),
       recommendation: analysis.recommendations.find(
         (recommendation) => recommendation.category === expense.category
       ),
@@ -744,6 +769,12 @@ export function ReportPanel() {
             {contractComparisons.map(({ expense, offer, recommendation, comparisonState }) => {
               const contractFinancial = currentFinancialSummary.contracts[expense.id];
               const hasSaving = contractFinancial.potentialYearlySaving > 0;
+              const hasIndicativeSelectedOffer = Boolean(
+                offer &&
+                selectedOffer?.id === offer.id &&
+                offer.savingKind === "recurring_only" &&
+                offer.estimatedYearlySaving > 0
+              );
               const realizedSaving = contractFinancial.realizedSaving;
               const expenseRecords = letterRecords
                 .filter((record) => record.expenseId === expense.id)
@@ -790,11 +821,29 @@ export function ReportPanel() {
                         ? `Économie potentielle supplémentaire : ${formatCurrency(contractFinancial.potentialMonthlySaving)} / mois · ${formatCurrency(contractFinancial.potentialYearlySaving)} / an`
                         : "Aucune économie potentielle certifiée"}
                     </p>
+                    {hasIndicativeSelectedOffer && offer ? (
+                      <div className="mt-2 rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs leading-5 text-amber-900 md:text-sm">
+                        <p className="font-semibold">
+                          Offre tarifaire sélectionnée : {normalizeDisplayText(offer.provider)} - {normalizeDisplayText(offer.name)}
+                        </p>
+                        <p>
+                          Tarif : {offer.billingPeriodDays && typeof offer.billingPrice === "number"
+                            ? `${formatCurrency(offer.billingPrice)} tous les ${offer.billingPeriodDays} jours (soit ${formatCurrency(offer.monthlyPrice)} / mois civil)`
+                            : `${formatCurrency(offer.monthlyPrice)} / mois`}
+                        </p>
+                        <p>
+                          Économie tarifaire indicative : {formatCurrency(offer.estimatedYearlySaving / 12)} / mois · {formatCurrency(offer.estimatedYearlySaving)} / an.
+                        </p>
+                        <p>
+                          Des frais ponctuels peuvent réduire cette estimation. Elle n'est ni nette ni garantie.
+                        </p>
+                      </div>
+                    ) : null}
                     <p className="mt-1 text-xs text-slate-500 md:text-sm">
                       Document source : {expense.sourceDocumentName ?? "Saisie manuelle"}
                     </p>
                     <p className="mt-2 text-xs leading-5 text-slate-500 md:text-sm">
-                      {hasSaving && offer
+                      {(hasSaving || hasIndicativeSelectedOffer) && offer
                         ? `Alternative vérifiée : ${normalizeDisplayText(offer.provider)} - ${normalizeDisplayText(offer.name)}`
                         : comparisonState?.message ?? recommendation?.description ?? "La comparaison des offres n'est pas disponible actuellement."}
                     </p>
@@ -810,9 +859,11 @@ export function ReportPanel() {
                     </p>
                   </div>
                   <div className="flex shrink-0 flex-col items-start gap-2 lg:items-end print:hidden">
-                    <p className={`whitespace-nowrap text-sm font-semibold md:text-base ${hasSaving ? "text-emerald-600" : "text-slate-400"}`}>
+                    <p className={`whitespace-nowrap text-sm font-semibold md:text-base ${hasSaving || hasIndicativeSelectedOffer ? "text-emerald-600" : "text-slate-400"}`}>
                       {hasSaving
                         ? `+ ${formatCurrency(offer?.estimatedYearlySaving ?? 0)} / an`
+                        : hasIndicativeSelectedOffer && offer
+                          ? `~ ${formatCurrency(offer.estimatedYearlySaving)} / an hors frais`
                         : "Aucune économie certifiée"}
                     </p>
                     {initialLetters.length === 0 && legacyActions.length === 0 ? (

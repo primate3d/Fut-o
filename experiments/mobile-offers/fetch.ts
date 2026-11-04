@@ -19,6 +19,14 @@ const OFFICIAL_HOSTS = new Set([
   "www.nrjmobile.fr",
   "cdiscount.com",
   "www.cdiscount.com",
+  "lycamobile.fr",
+  "www.lycamobile.fr",
+  "lebara.fr",
+  "www.lebara.fr",
+  "symamobile.com",
+  "www.symamobile.com",
+  "lapostemobile.fr",
+  "www.lapostemobile.fr",
 ]);
 
 export function assertOfficialUrl(value: string): URL {
