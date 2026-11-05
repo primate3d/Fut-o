@@ -2728,6 +2728,154 @@ test("commercial catalog persists verified Internet offers and keeps the last va
   assert.equal(stale.status, "stale");
   assert.equal(stale.offers.length, 0);
 });
+test("commercial catalog 304 refreshes valid offers but not expired offers", async () => {
+  const { refreshCommercialCatalog, loadCommercialCatalog } = await import(
+    "../lib/server/commercial-catalog"
+  );
+
+  const { parseInternetOffers } = await import(
+    "../experiments/commercial-catalog/internet/collector"
+  );
+
+  const { INTERNET_SOURCES } = await import(
+    "../experiments/commercial-catalog/source-registry"
+  );
+
+  const source = INTERNET_SOURCES[0];
+
+  const firstAt = new Date("2026-11-03T10:00:00.000Z");
+  const recheckedAt = new Date("2026-11-05T10:00:00.000Z");
+
+  const html = await fs.readFile(
+    "experiments/commercial-catalog/fixtures/internet-boxes.html",
+    "utf8"
+  );
+
+  const parsed = parseInternetOffers(
+    html,
+    source,
+    firstAt.toISOString()
+  );
+
+  const initial = {
+    source,
+    retrievedAt: firstAt.toISOString(),
+    offers: parsed.offers,
+    failures: parsed.failures,
+    discoveredSources: [],
+    cache: {
+      etag: "refresh-test-v1",
+      lastModified: null,
+      contentHash: "refresh-test-hash"
+    },
+    notModified: false
+  };
+
+  // 1. Première collecte normale.
+  await refreshCommercialCatalog(
+    "internet",
+    [source],
+    async () => initial,
+    firstAt
+  );
+
+  const original = await loadCommercialCatalog("internet", firstAt);
+
+  assert.equal(original.offers.length, 1);
+
+  const originalOffer = original.offers[0];
+
+  // 2. Le fournisseur confirme que sa page est inchangée.
+  const unchanged = {
+    ...initial,
+    retrievedAt: recheckedAt.toISOString(),
+    offers: [],
+    failures: [],
+    notModified: true
+  };
+
+  await refreshCommercialCatalog(
+    "internet",
+    [source],
+    async () => unchanged,
+    recheckedAt
+  );
+
+  // Plus de 72 h après la première collecte,
+  // mais moins de 72 h après la nouvelle vérification.
+  const renewed = await loadCommercialCatalog(
+    "internet",
+    new Date("2026-11-06T11:00:00.000Z")
+  );
+
+  assert.equal(renewed.status, "fresh");
+  assert.equal(renewed.offers.length, 1);
+
+  assert.equal(
+    renewed.offers[0]?.verifiedAt,
+    recheckedAt.toISOString()
+  );
+
+  assert.equal(
+    renewed.offers[0]?.catalogId,
+    originalOffer?.catalogId
+  );
+
+  // 3. Une offre dont la période commerciale est expirée
+  // ne doit pas voir sa vérification renouvelée.
+  const expired = {
+    ...initial,
+    offers: initial.offers.map((offer) =>
+      offer.verificationStatus === "VERIFIED"
+        ? {
+            ...offer,
+            validUntil: "2026-11-04T23:59:59.999Z"
+          }
+        : offer
+    )
+  };
+
+  await refreshCommercialCatalog(
+    "internet",
+    [source],
+    async () => expired,
+    firstAt
+  );
+
+  await refreshCommercialCatalog(
+    "internet",
+    [source],
+    async () => unchanged,
+    recheckedAt
+  );
+
+  const [stored] = await sql`
+    select offers
+    from commercial_catalog_sources
+    where id = ${source.id}
+  `;
+
+  const storedOffers = stored.offers as Array<{
+    verificationStatus: string;
+    verifiedAt: string;
+  }>;
+
+  const storedVerified = storedOffers.find(
+    (offer) => offer.verificationStatus === "VERIFIED"
+  );
+
+  assert.equal(
+    storedVerified?.verifiedAt,
+    originalOffer?.verifiedAt
+  );
+
+  const afterExpiry = await loadCommercialCatalog(
+    "internet",
+    recheckedAt
+  );
+
+  assert.equal(afterExpiry.offers.length, 0);
+});
 
 test("commercial catalog rejects concurrent refreshes for the same sector", async () => {
   const { refreshCommercialCatalog } = await import("../lib/server/commercial-catalog");

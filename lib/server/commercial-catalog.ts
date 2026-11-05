@@ -132,13 +132,64 @@ async function persistCollection(
   await persistDiscoveredSources(result, executor);
 
   if (result.notModified) {
-    await executor.update(commercialCatalogSources).set({
-      lastAttemptAt: attemptedAt,
-      lastError: null,
-      updatedAt: attemptedAt,
-    }).where(eq(commercialCatalogSources.id, result.source.id));
-    return { accepted: true, changes: [] };
-  }
+  const previousOffers = (previous?.offers ?? []) as CommercialOffer[];
+  const nowMs = Date.parse(attemptedAt);
+
+  const refreshedOffers = previousOffers.map((offer) => {
+    if (
+      offer.verificationStatus !== "VERIFIED" ||
+      !offer.verifiedAt ||
+      !Number.isFinite(nowMs) ||
+      !Number.isFinite(Date.parse(offer.verifiedAt))
+    ) {
+      return offer;
+    }
+
+    const validFrom = offer.validFrom
+      ? Date.parse(offer.validFrom)
+      : null;
+
+    const validUntil = offer.validUntil
+      ? Date.parse(offer.validUntil)
+      : null;
+
+    if (
+      (validFrom !== null &&
+        (!Number.isFinite(validFrom) || validFrom > nowMs)) ||
+      (validUntil !== null &&
+        (!Number.isFinite(validUntil) || validUntil < nowMs))
+    ) {
+      return offer;
+    }
+
+    // Prudence : ne pas prolonger automatiquement un tarif
+    // énergétique indexé sans date de fin vérifiable.
+    const indexedEnergyWithoutExpiry =
+      (offer.sector === "electricity" || offer.sector === "gas") &&
+      "pricingMode" in offer &&
+      offer.pricingMode === "INDEXED" &&
+      !offer.validUntil;
+
+    if (indexedEnergyWithoutExpiry) {
+      return offer;
+    }
+
+    return {
+      ...offer,
+      verifiedAt: attemptedAt,
+    };
+  });
+
+  await executor.update(commercialCatalogSources).set({
+    offers: refreshedOffers,
+    lastAttemptAt: attemptedAt,
+    lastError: null,
+    updatedAt: attemptedAt,
+  }).where(eq(commercialCatalogSources.id, result.source.id));
+
+  return { accepted: true, changes: [] };
+}
+
 
   const previousOffers = (previous?.offers ?? []) as CommercialOffer[];
   const verifiedCount = countStatus(result.offers, "VERIFIED");
