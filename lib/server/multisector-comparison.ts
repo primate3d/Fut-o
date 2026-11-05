@@ -34,12 +34,26 @@ const SUPPORTED_SECTORS = [
 ] as const satisfies readonly CommercialSector[];
 
 export const DEFAULT_INTERNET_MIN_YEARLY_SAVING = 60;
+export const DEFAULT_ENERGY_MIN_YEARLY_SAVING = 60;
 
 function internetMinimumYearlySaving(environment: Record<string, string | undefined>) {
   const configured = Number(environment.COMMERCIAL_CATALOG_INTERNET_MIN_YEARLY_SAVING);
   return Number.isFinite(configured) && configured >= 0
     ? configured
     : DEFAULT_INTERNET_MIN_YEARLY_SAVING;
+}
+
+function energyMinimumYearlySaving(
+  sector: "electricity" | "gas",
+  environment: Record<string, string | undefined>,
+) {
+  const name = sector === "electricity"
+    ? "COMMERCIAL_CATALOG_ELECTRICITY_MIN_YEARLY_SAVING"
+    : "COMMERCIAL_CATALOG_GAS_MIN_YEARLY_SAVING";
+  const configured = Number(environment[name]);
+  return Number.isFinite(configured) && configured >= 0
+    ? configured
+    : DEFAULT_ENERGY_MIN_YEARLY_SAVING;
 }
 
 function hasTv(offer: AlternativeOffer) {
@@ -96,6 +110,40 @@ export function selectInternetAlternatives(
     if (selected.length === 3) break;
   }
   return selected;
+}
+
+export function selectEnergyAlternatives(
+  offers: AlternativeOffer[],
+  minimumYearlySaving = DEFAULT_ENERGY_MIN_YEARLY_SAVING,
+) {
+  const candidates = offers
+    .filter((offer) => offer.comparisonKind === "equivalent" && offer.estimatedYearlySaving >= minimumYearlySaving)
+    .sort((left, right) => right.estimatedYearlySaving - left.estimatedYearlySaving || left.id.localeCompare(right.id));
+  const selected: AlternativeOffer[] = [];
+  for (const candidate of candidates) {
+    if (selected.some((offer) => offer.provider === candidate.provider)) continue;
+    const distinctPricing = selected.length === 2 && candidate.pricingMode !== undefined &&
+      selected.every((offer) => offer.pricingMode !== candidate.pricingMode);
+    if (selected.length < 2 || distinctPricing) selected.push(candidate);
+    if (selected.length === 3) break;
+  }
+  return selected;
+}
+
+function isAnnualPeriod(period?: { start: string; end: string }) {
+  if (!period) return false;
+  const start = Date.parse(period.start);
+  const end = Date.parse(period.end);
+  return Number.isFinite(start) && Number.isFinite(end) && end - start >= 300 * 24 * 60 * 60 * 1000;
+}
+
+function comparableCurrentAnnualCost(expense: Expense) {
+  const details = expense.contractDetails;
+  if (!details || (details.kind !== "electricity" && details.kind !== "gas")) return expense.yearlyAmount;
+  if (details.documentKind === "INVOICE" && expense.recurrence === "one_time" && !isAnnualPeriod(details.period)) {
+    return null;
+  }
+  return expense.yearlyAmount;
 }
 
 function categoryForSector(sector: CommercialSector) {
@@ -162,6 +210,7 @@ function toAlternative(
   const recurringOnly = reliableInput && result.confidence === "ESTIMATED" && result.comparisonKind === "EQUIVALENT";
   const offer = result.offer;
   const internet = offer.sector === "internet" ? offer : null;
+  const energy = offer.sector === "electricity" || offer.sector === "gas" ? offer : null;
   const recurringAnnualPrice = internet ? annualInternetRecurringCost(internet) : null;
   const durableAnnualPrice = internet?.priceAfterPromotion !== null && internet?.priceAfterPromotion !== undefined
     ? internet.priceAfterPromotion * 12
@@ -184,6 +233,10 @@ function toAlternative(
     estimatedYearlySaving: saving,
     recurringYearlySaving: recurringOnly ? saving : undefined,
     durableYearlySaving,
+    pricingMode: energy?.pricingMode,
+    estimateReason: recurringOnly
+      ? internet ? "unknown_fees" : energy?.pricingMode === "INDEXED" ? "indexed_price" : energy ? "estimated_schedule" : undefined
+      : undefined,
     sourceExpenseId: expense.id,
     reason: result.reasons.join(" ") || (quoteRequired
       ? "Les garanties peuvent être comparées, mais un devis personnalisé reste indispensable."
@@ -236,7 +289,7 @@ function compareExpense(expense: Expense, catalog: CatalogSnapshot) {
       peakConsumptionKwh: details.peakConsumptionKwh,
       offPeakConsumptionKwh: details.offPeakConsumptionKwh,
       tempoConsumptionKwh: details.tempoConsumptionKwh,
-      currentAnnualCost: expense.yearlyAmount,
+      currentAnnualCost: comparableCurrentAnnualCost(expense),
       isEstimatedSchedule: details.documentKind !== "INVOICE",
     }, catalog.offers as ElectricityOffer[]);
   }
@@ -246,7 +299,8 @@ function compareExpense(expense: Expense, catalog: CatalogSnapshot) {
       annualConsumptionKwh: details.annualConsumptionKwh,
       tariffZone: details.tariffZone ?? null,
       consumptionClass: details.consumptionClass?.toUpperCase() ?? null,
-      currentAnnualCost: expense.yearlyAmount,
+      currentAnnualCost: comparableCurrentAnnualCost(expense),
+      isEstimatedSchedule: details.documentKind !== "INVOICE",
     }, catalog.offers as GasOffer[]);
   }
   return compareInsuranceContract({
@@ -330,6 +384,8 @@ export async function buildEnabledCommercialComparisons(
             ...selectInternetAlternatives(mappedAlternatives, internetMinimumYearlySaving(environment)),
             ...mappedAlternatives.filter((offer) => offer.savingKind === undefined).slice(0, 1),
           ]
+        : sector === "electricity" || sector === "gas"
+          ? selectEnergyAlternatives(mappedAlternatives, energyMinimumYearlySaving(sector, environment))
         : mappedAlternatives;
       alternatives.push(...expenseAlternatives);
       const conclusion = catalogConclusion(results);
@@ -337,13 +393,18 @@ export async function buildEnabledCommercialComparisons(
         (offer) => (offer.savingKind === "certified" || offer.savingKind === "recurring_only") &&
           offer.estimatedYearlySaving > 0
       );
+      const hasSubThresholdEnergyAlternative = (sector === "electricity" || sector === "gas") &&
+        mappedAlternatives.some((offer) =>
+          (offer.savingKind === "certified" || offer.savingKind === "recurring_only") &&
+          offer.estimatedYearlySaving > 0
+        );
       if (hasRecommendedAlternative) {
         comparisonStates.push({
           expenseId: expense.id,
           status: "alternative_found",
           message: "Une alternative plus avantageuse a été identifiée parmi les offres vérifiées.",
         });
-      } else if (conclusion === "KEEP_CURRENT_CONTRACT" || sector === "internet") {
+      } else if (conclusion === "KEEP_CURRENT_CONTRACT" || sector === "internet" || hasSubThresholdEnergyAlternative) {
         comparisonStates.push({
           expenseId: expense.id,
           status: "no_better_offer",

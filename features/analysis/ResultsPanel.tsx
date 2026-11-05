@@ -1727,7 +1727,7 @@ export function ResultsPanel() {
                     {sourceExpense?.subcategory === ExpenseSubcategory.INTERNET && typeof offer.durableYearlySaving === "number"
                       ? `Économie durable : ${formatCurrency(offer.durableYearlySaving)} / an · 12 premiers mois : ${formatCurrency(verifiedSaving)}`
                       : offer.savingKind === "recurring_only"
-                      ? `Économie tarifaire estimée : ${formatCurrency(offer.estimatedYearlySaving / 12)} / mois · ${formatCurrency(offer.estimatedYearlySaving)} / an`
+                      ? `${offer.estimateReason === "estimated_schedule" ? "Économie estimée d'après l'échéancier" : offer.estimateReason === "indexed_price" ? "Économie indicative au tarif indexé actuel" : "Économie tarifaire estimée"} : ${formatCurrency(offer.estimatedYearlySaving / 12)} / mois · ${formatCurrency(offer.estimatedYearlySaving)} / an`
                       : `Économie estimée sur 12 mois : ${formatCurrency(verifiedSaving)}`}
                   </p>
                 </div>

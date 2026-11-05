@@ -44,8 +44,10 @@ import type {
 import { validateAndDedupeCommercialOffers, validateAndDedupeInternetOffers } from "../experiments/commercial-catalog/validate";
 import { filterFreshCommercialOffers } from "../lib/server/commercial-catalog";
 import {
+  DEFAULT_ENERGY_MIN_YEARLY_SAVING,
   DEFAULT_INTERNET_MIN_YEARLY_SAVING,
   buildEnabledCommercialComparisons,
+  selectEnergyAlternatives,
   selectInternetAlternatives,
 } from "../lib/server/multisector-comparison";
 import type { AlternativeOffer } from "../features/recommendations/service";
@@ -523,13 +525,13 @@ test("electricite Tempo exige les six consommations et une puissance compatible"
   assert.equal(unsupportedPower?.confidence, "INSUFFICIENT");
 });
 
-test("un echeancier electricite estime ne produit pas d'economie certifiee", () => {
+test("un echeancier electricite produit uniquement une economie indicative", () => {
   const source = ELECTRICITY_SOURCES[0];
   const offers = validateAndDedupeCommercialOffers(parseEnergyOffers(edfFixture(), source, NOW), source, new Date(NOW)).offers as ElectricityOffer[];
   const [result] = compareElectricityContract({ powerKva: 6, tariffOption: "BASE", annualConsumptionKwh: 4000,
     currentAnnualCost: 1200, isEstimatedSchedule: true }, offers.filter((offer) => offer.tariffOption === "BASE"));
   assert.equal(result?.confidence, "ESTIMATED");
-  assert.equal(result?.estimatedAnnualSaving, null);
+  assert.ok((result?.estimatedAnnualSaving ?? 0) > 0);
 });
 
 function totalGasFixture() {
@@ -547,17 +549,114 @@ test("gaz exige une classe et une zone compatibles", () => {
   const missingZone = compareGasContract({ annualConsumptionKwh: 12000, tariffZone: null, consumptionClass: "T2", currentAnnualCost: 2200 }, offers);
   assert.ok(missingZone.every((result) => result.estimatedAnnualSaving === null));
   const exact = compareGasContract({ annualConsumptionKwh: 12000, tariffZone: "1", consumptionClass: "T2", currentAnnualCost: 2200 }, offers);
-  assert.ok(exact.some((result) => result.confidence === "CERTIFIED"));
+  assert.ok(
+  exact.some(
+    (result) =>
+      result.confidence === "ESTIMATED" &&
+      (result.estimatedAnnualSaving ?? 0) > 0
+  )
+);
 });
 
 test("une reference CRE n'est jamais presentee comme offre souscriptible", () => {
-  const source = GAS_SOURCES[1];
+  const source = GAS_SOURCES.find((candidate) => candidate.provider === "CRE")!;
   const fixture = `<main>Grille du prix repère de vente du gaz pour novembre 2026 sur la zone de GRDF.
     Cuisson/eau chaude Chauffage Abonnement TTC 152,46 360,79 Prix par kWh moyen TTC 0,19027 0,15760.</main>`;
   const offers = validateAndDedupeCommercialOffers(parseEnergyOffers(fixture, source, NOW), source, new Date(NOW)).offers as GasOffer[];
   const results = compareGasContract({ annualConsumptionKwh: 10000, tariffZone: "GRDF", consumptionClass: "chauffage", currentAnnualCost: 2000 }, offers);
   assert.ok(results.every((result) => result.comparisonKind === "NOT_COMPARABLE"));
   assert.ok(results.every((result) => result.estimatedAnnualSaving === null));
+});
+
+test("les grilles PDF officielles Mint et Plenitude produisent des offres electricite verifiees", () => {
+  const mintSource = ELECTRICITY_SOURCES.find((source) => source.provider === "Mint Energie")!;
+  const mintFixture = `Offre ONLINE & GREEN OFFRE INDEXEE TRVE Grille tarifaire applicable au 01/08/2026
+    Option tarifaire BASE Puissance Abonnement mensuel Prix du kWh EUR HTT EUR TTC EUR HTT EUR TTC
+    3 kVA 9,22 12,13 0,1211 0,1821 6 kVA 11,94 15,86 9 kVA 14,90 19,88 0,1200 0,1807
+    12 kVA 17,74 23,76 15 kVA 20,38 27,40 18 kVA 23,11 31,14
+    Puissance Abonnement mensuel Prix du kWh HP HC EUR HTT EUR TTC EUR HTT EUR TTC EUR HTT EUR TTC
+    6 kVA 11,94 16,05 0,1316 0,1947 0,0906 0,1455 9 kVA 14,90 20,16 12 kVA 17,74 24,13
+    Le tarif applicable dépend de la puissance souscrite.`;
+  const mint = validateAndDedupeCommercialOffers(parseEnergyOffers(mintFixture, mintSource, NOW), mintSource, new Date(NOW)).offers as ElectricityOffer[];
+  assert.equal(mint.length, 3);
+  assert.ok(mint.every((offer) => offer.verificationStatus === "VERIFIED"));
+  const mintBase = mint.find((offer) => offer.tariffOption === "BASE" && offer.powerKva.includes(6))!;
+  const [mintResult] = compareElectricityContract({ powerKva: 6, tariffOption: "BASE", annualConsumptionKwh: 4000,
+    currentAnnualCost: 1200, isEstimatedSchedule: false }, [mintBase]);
+  assert.equal(mintResult?.alternativeAnnualCost, 918.72);
+  assert.equal(mintResult?.confidence, "ESTIMATED");
+  assert.match(mintResult?.reasons.join(" ") ?? "", /indexe|indicative/i);
+
+  const plenitudeSource = ELECTRICITY_SOURCES.find((source) => source.provider === "Plenitude")!;
+  const plenitudeFixture = `Grille tarifaire de référence pour toute souscription du 01/10/2026 au 17/11/2026 non inclus
+    Puissance souscrite Option tarifaire Base Option tarifaire Heures Pleines HP Heures Creuses HC
+    3 kVA 134,64 174,36 0,12249 0,18373 134,64 174,36 0,13311 0,19648 0,09162 0,14669
+    6 kVA 167,28 219,15 0,12249 0,18373 167,28 219,15 0,13311 0,19648 0,09162 0,14669
+    9 kVA 202,80 267,40 0,12132 0,18233 202,80 267,40 0,13311 0,19648 0,09162 0,14669
+    Précisions sur votre offre`;
+  const plenitude = validateAndDedupeCommercialOffers(parseEnergyOffers(plenitudeFixture, plenitudeSource, NOW), plenitudeSource, new Date(NOW)).offers as ElectricityOffer[];
+  assert.equal(plenitude.length, 3);
+  assert.ok(plenitude.every((offer) => offer.verificationStatus === "VERIFIED"));
+  assert.ok(plenitude.every((offer) => offer.validFrom === "2026-10-01T00:00:00.000Z"));
+  assert.ok(plenitude.every((offer) => offer.validUntil === "2026-11-16T23:59:59.999Z"));
+  assert.equal(filterFreshCommercialOffers(plenitude, "electricity", new Date("2026-11-17T00:00:00.000Z")).length, 0);
+  assert.equal(parseEnergyOffers(plenitudeFixture.replace(/\s+non inclus/i, ""), plenitudeSource, NOW).length, 0);
+});
+
+test("les dates des grilles PDF Engie et Plenitude gouvernent leur disponibilite", () => {
+  const engieSource = GAS_SOURCES.find((source) => source.provider === "Engie")!;
+  const engieFixture = `Grille tarifaire - août 2026. Prix TTC. Plage de consommation prévisionnelle
+    Plage 0 - 3999 kWh Plage 4000 - 29999 kWh Plage 30000 - 300000 kWh HTT TTC HTT TTC HTT TTC
+    Abonnement en EUR / an 112,84 152,46 274,59 387,85 274,59 387,85 Consommation EUR / kWh
+    Niveau 1 0,12199 0,16638 0,08956 0,12746 0,08977 0,12772
+    Niveau 2 0,09024 0,12828 0,09046 0,12854 Niveau 3 0,09092 0,12910 0,09115 0,12937
+    Niveau 4 0,09160 0,12991 0,09184 0,13020 Niveau 5 0,09227 0,13072 0,09253 0,13103
+    Niveau 6 0,09295 0,13153 0,09322 0,13186 Gaz Adapt 1 an`;
+  const engie = validateAndDedupeCommercialOffers(parseEnergyOffers(engieFixture, engieSource, NOW), engieSource, new Date(NOW)).offers as GasOffer[];
+  assert.equal(engie.length, 7);
+  assert.ok(engie.every((offer) => offer.verificationStatus !== "VERIFIED"));
+  assert.ok(engie.every((offer) => offer.pricingMode === "INDEXED"));
+  assert.ok(engie.every((offer) => offer.validFrom === "2026-08-01T00:00:00.000Z"));
+  assert.ok(engie.every((offer) => offer.validUntil === "2026-08-31T23:59:59.999Z"));
+  assert.equal(filterFreshCommercialOffers(engie, "gas", new Date(NOW)).length, 0);
+
+  const currentEngieFixture = engieFixture.replace("août 2026", "novembre 2026");
+  const currentEngie = validateAndDedupeCommercialOffers(
+    parseEnergyOffers(currentEngieFixture, engieSource, NOW), engieSource, new Date(NOW),
+  ).offers as GasOffer[];
+  assert.ok(currentEngie.every((offer) => offer.verificationStatus === "VERIFIED"));
+  assert.equal(filterFreshCommercialOffers(currentEngie, "gas", new Date(NOW)).length, 7);
+  const [indexedResult] = compareGasContract({ annualConsumptionKwh: 12000, tariffZone: "1", consumptionClass: "T2",
+    currentAnnualCost: 2500, isEstimatedSchedule: false }, currentEngie);
+  assert.equal(indexedResult?.confidence, "ESTIMATED");
+  assert.match(indexedResult?.reasons.join(" ") ?? "", /indexé|indicative/i);
+
+  const plenitudeSource = GAS_SOURCES.find((source) => source.provider === "Plenitude")!;
+  const plenitudeFixture = `Grille tarifaire de référence pour toute souscription du 01/10/2026 au 17/11/2026 non inclus
+    Option tarifaire Abonnement EUR/an Consommation EUR/kWh HT TTC HT TTC
+    < 4 MWh 135,04 179,10 0,13194 0,17832 ≥ 4 MWh 274,24 387,43 0,10464 0,14556`;
+  const plenitude = validateAndDedupeCommercialOffers(parseEnergyOffers(plenitudeFixture, plenitudeSource, NOW), plenitudeSource, new Date(NOW)).offers as GasOffer[];
+  assert.equal(plenitude.length, 2);
+  assert.ok(plenitude.every((offer) => offer.validUntil === "2026-11-16T23:59:59.999Z"));
+  assert.equal(filterFreshCommercialOffers(plenitude, "gas", new Date("2026-11-17T00:00:00.000Z")).length, 0);
+  assert.equal(parseEnergyOffers(plenitudeFixture.replace(/\s+non inclus/i, ""), plenitudeSource, NOW).length, 0);
+  const t2 = plenitude.find((offer) => offer.consumptionClass === "T2")!;
+  assert.equal(compareGasContract({ annualConsumptionKwh: 12000, tariffZone: "4", consumptionClass: "T2",
+    currentAnnualCost: 2500 }, [t2])[0]?.alternativeAnnualCost, 2134.15);
+});
+
+test("la selection energie retient deux offres et une troisieme seulement pour un mode tarifaire distinct", () => {
+  const alternative = (id: string, provider: string, saving: number, pricingMode: AlternativeOffer["pricingMode"]): AlternativeOffer => ({
+    id, provider, name: id, url: "https://example.com", category: ExpenseCategory.ENERGY,
+    monthlyPrice: 80, yearlyPrice: 960, estimatedYearlySaving: saving, comparisonKind: "equivalent",
+    savingKind: "certified", reason: "", action: "", pricingMode,
+  });
+  const selected = selectEnergyAlternatives([
+    alternative("best", "A", 220, "INDEXED"), alternative("second", "B", 180, "INDEXED"),
+    alternative("duplicate-provider", "A", 170, "FIXED"), alternative("distinct", "C", 160, "FIXED"),
+    alternative("small", "D", DEFAULT_ENERGY_MIN_YEARLY_SAVING - 1, "REGULATED"),
+  ]);
+  assert.deepEqual(selected.map((offer) => offer.id), ["best", "second", "distinct"]);
 });
 
 test("assurance habitation et auto exigent toujours un devis", () => {
@@ -767,6 +866,74 @@ test("document electricite -> extraction Base -> cout annuel", async () => {
   assert.ok(result.alternatives.some((offer) => offer.savingKind === "certified"));
 });
 
+test("une grille electricite hors de sa periode de validite est exclue", () => {
+  const offers = validateAndDedupeCommercialOffers(
+    parseEnergyOffers(edfFixture(), ELECTRICITY_SOURCES[0], NOW), ELECTRICITY_SOURCES[0], new Date(NOW),
+  ).offers as ElectricityOffer[];
+  const expired = offers.map((offer) => ({ ...offer, validUntil: "2026-11-02T23:59:59.000Z" }));
+  assert.equal(filterFreshCommercialOffers(expired, "electricity", new Date(NOW)).length, 0);
+});
+
+test("une economie electricite inferieure au seuil n'est pas recommandee", async () => {
+  const { expense } = expenseFromExtractedText(
+    "electricity_invoice",
+    "Facture EDF du 01/01/2026 au 31/12/2026. Puissance souscrite 6 kVA. Option Base. Consommation annuelle 4 000 kWh. Prix du kWh 0,2100 EUR. Abonnement annuel 190,00 EUR.",
+    1030,
+  );
+  const offers = validateAndDedupeCommercialOffers(
+    parseEnergyOffers(edfFixture(), ELECTRICITY_SOURCES[0], NOW), ELECTRICITY_SOURCES[0], new Date(NOW),
+  ).offers;
+  const result = await buildEnabledCommercialComparisons(analysisFor(expense), new Date(NOW), {
+    environment: { COMMERCIAL_CATALOG_ELECTRICITY_ENABLED: "1" },
+    loadCatalog: catalogLoader("electricity", offers),
+  });
+  assert.equal(result.alternatives.length, 0);
+  assert.equal(result.comparisonStates[0]?.status, "no_better_offer");
+});
+
+test("une facture EDF ponctuelle ne devient jamais un cout annuel comparable", async () => {
+  const { expense } = expenseFromExtractedText(
+    "electricity_invoice",
+    "Facture EDF du 04/08/2025. Puissance souscrite 6 kVA. Option Base. Consommation annuelle 4 000 kWh. Facture TTC 96,64 EUR.",
+    96.64,
+  );
+  expense.recurrence = "one_time";
+  expense.monthlyAmount = 0;
+  const offers = validateAndDedupeCommercialOffers(
+    parseEnergyOffers(edfFixture(), ELECTRICITY_SOURCES[0], NOW), ELECTRICITY_SOURCES[0], new Date(NOW),
+  ).offers;
+  const result = await buildEnabledCommercialComparisons(analysisFor(expense), new Date(NOW), {
+    environment: { COMMERCIAL_CATALOG_ELECTRICITY_ENABLED: "1" },
+    loadCatalog: catalogLoader("electricity", offers),
+  });
+  assert.equal(result.alternatives.length, 0);
+  assert.notEqual(result.comparisonStates[0]?.status, "alternative_found");
+});
+
+test("un echeancier energie reste selectionnable comme estimation et conserve son avertissement", async () => {
+  const { expense } = expenseFromExtractedText(
+    "electricity_invoice",
+    "Echeancier EDF. Puissance souscrite 6 kVA. Option Base. Consommation annuelle 4 000 kWh.",
+    1200,
+  );
+  const offers = validateAndDedupeCommercialOffers(
+    parseEnergyOffers(edfFixture(), ELECTRICITY_SOURCES[0], NOW), ELECTRICITY_SOURCES[0], new Date(NOW),
+  ).offers;
+  const analysis = analysisFor(expense);
+  const result = await buildEnabledCommercialComparisons(analysis, new Date(NOW), {
+    environment: { COMMERCIAL_CATALOG_ELECTRICITY_ENABLED: "1" },
+    loadCatalog: catalogLoader("electricity", offers),
+  });
+  const alternative = result.alternatives[0]!;
+  assert.equal(alternative.savingKind, "recurring_only");
+  assert.equal(alternative.estimateReason, "estimated_schedule");
+  const selected = toSelectedAlternativeOffer(alternative);
+  assert.equal(selected.estimateReason, "estimated_schedule");
+  const letter = generateLettersFromAnalysis(analysis, selected)[0]!;
+  assert.match(letter.bodyTemplate, /échéancier prévisionnel/);
+  assert.doesNotMatch(letter.bodyTemplate, /frais ponctuels peuvent la réduire/);
+});
+
 test("document gaz -> extraction zone et classe -> comparaison", async () => {
   const { expense } = expenseFromExtractedText("gas_invoice", `Facture gaz du 01/01/2026 au 31/12/2026. Consommation annuelle 12 000 kWh. Zone tarifaire 1. Classe de consommation T2. Prix du kWh 0,1500 EUR. Abonnement annuel 360,00 EUR.`, 2500);
   assert.deepEqual(getMissingContractFields(expense), []);
@@ -774,7 +941,19 @@ test("document gaz -> extraction zone et classe -> comparaison", async () => {
   const result = await buildEnabledCommercialComparisons(analysisFor(expense), new Date(NOW), {
     environment: { COMMERCIAL_CATALOG_GAS_ENABLED: "1" }, loadCatalog: catalogLoader("gas", offers),
   });
-  assert.equal(result.alternatives.filter((offer) => offer.savingKind === "certified").length, 1);
+  assert.equal(
+  result.alternatives.filter(
+    (offer) => offer.savingKind === "recurring_only"
+  ).length,
+  1
+);
+
+assert.equal(
+  result.alternatives.filter(
+    (offer) => offer.savingKind === "certified"
+  ).length,
+  0
+);
 });
 
 test("contrats assurance auto et habitation restent soumis a devis", async () => {

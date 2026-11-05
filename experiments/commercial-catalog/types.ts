@@ -204,6 +204,7 @@ export interface GasContractInput {
   tariffZone: string | null;
   consumptionClass: string | null;
   currentAnnualCost: number | null;
+  isEstimatedSchedule?: boolean;
 }
 
 export interface InsuranceContractInput {

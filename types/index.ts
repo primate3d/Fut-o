@@ -324,6 +324,7 @@ export type GeneratedLetter = {
   offerEntryFeesKnown?: boolean;
   offerEstimatedYearlySaving?: number;
   offerSavingKind?: "certified" | "temporary" | "recurring_only";
+  offerEstimateReason?: "unknown_fees" | "estimated_schedule" | "indexed_price";
   offerBillingPrice?: number;
   offerBillingPeriodDays?: number;
   offerUrl?: string;

@@ -94,18 +94,20 @@ export function compareElectricityContract(input: ElectricityContractInput, offe
     const optionMatches = offer.tariffOption === input.tariffOption;
     const powerMatches = offer.powerKva.includes(input.powerKva);
     const complete = alternative !== null && optionMatches && powerMatches;
-    const confidence = !complete ? "INSUFFICIENT" : input.isEstimatedSchedule ? "ESTIMATED" : "CERTIFIED";
+    const confidence = !complete ? "INSUFFICIENT" : input.isEstimatedSchedule || offer.pricingMode === "INDEXED" ? "ESTIMATED" : "CERTIFIED";
     const reasons = complete ? [] : ["Puissance, option tarifaire ou repartition de consommation insuffisante."];
     if (input.isEstimatedSchedule) reasons.push("La depense actuelle provient d'un echeancier estime; l'economie n'est pas garantie.");
+    if (complete && offer.pricingMode === "INDEXED") reasons.push("Le tarif est indexe et peut evoluer; l'economie sur douze mois est indicative.");
     return { offer, comparisonKind: complete ? "EQUIVALENT" : "MORE_INFO_REQUIRED", confidence,
       currentAnnualCost: input.currentAnnualCost, alternativeAnnualCost: alternative,
-      estimatedAnnualSaving: complete && !input.isEstimatedSchedule ? saving(input.currentAnnualCost, alternative) : null, reasons };
-  });
+      estimatedAnnualSaving: complete ? saving(input.currentAnnualCost, alternative) : null, reasons };
+  }).sort((left, right) => (right.estimatedAnnualSaving ?? -1) - (left.estimatedAnnualSaving ?? -1));
 }
 
 export function annualGasCost(input: GasContractInput, offer: GasOffer) {
   if (offer.referenceOnly || offer.annualSubscription === null || offer.pricePerKwh === null) return null;
-  if (input.tariffZone === null || input.consumptionClass === null || offer.tariffZone !== input.tariffZone || offer.consumptionClass !== input.consumptionClass) return null;
+  if (input.consumptionClass === null || offer.consumptionClass !== input.consumptionClass) return null;
+  if (offer.tariffZone !== null && (input.tariffZone === null || offer.tariffZone !== input.tariffZone)) return null;
   return money(offer.annualSubscription + input.annualConsumptionKwh * offer.pricePerKwh);
 }
 
@@ -114,12 +116,16 @@ export function compareGasContract(input: GasContractInput, offers: GasOffer[]) 
     const alternative = annualGasCost(input, offer);
     const reference = offer.referenceOnly;
     return { offer, comparisonKind: reference ? "NOT_COMPARABLE" : alternative === null ? "MORE_INFO_REQUIRED" : "EQUIVALENT",
-      confidence: reference || alternative === null ? "INSUFFICIENT" : "CERTIFIED",
+      confidence: reference || alternative === null ? "INSUFFICIENT" : input.isEstimatedSchedule || offer.pricingMode === "INDEXED" ? "ESTIMATED" : "CERTIFIED",
       currentAnnualCost: input.currentAnnualCost, alternativeAnnualCost: alternative,
       estimatedAnnualSaving: alternative === null ? null : saving(input.currentAnnualCost, alternative),
       reasons: reference ? ["La reference CRE n'est pas une offre souscriptible."] : alternative === null
-        ? ["Zone tarifaire ou classe de consommation manquante ou incompatible."] : [] };
-  });
+        ? ["Zone tarifaire ou classe de consommation manquante ou incompatible."]
+        : [
+            ...(input.isEstimatedSchedule ? ["La dépense actuelle provient d'un échéancier estimé; l'économie n'est pas garantie."] : []),
+            ...(offer.pricingMode === "INDEXED" ? ["Le tarif est indexé et peut évoluer chaque mois; l'économie sur douze mois est indicative."] : []),
+          ] };
+  }).sort((left, right) => (right.estimatedAnnualSaving ?? -1) - (left.estimatedAnnualSaving ?? -1));
 }
 
 export function compareInsuranceContract(input: InsuranceContractInput, offers: InsuranceOffer[]) {

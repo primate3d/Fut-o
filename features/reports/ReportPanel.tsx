@@ -836,7 +836,11 @@ export function ReportPanel() {
                           Économie tarifaire indicative : {formatCurrency(offer.estimatedYearlySaving / 12)} / mois · {formatCurrency(offer.estimatedYearlySaving)} / an.
                         </p>
                         <p>
-                          Des frais ponctuels peuvent réduire cette estimation. Elle n'est ni nette ni garantie.
+                          {offer.estimateReason === "estimated_schedule"
+                            ? "Cette estimation repose sur un échéancier prévisionnel et non sur une facture annuelle réelle. Elle n'est pas garantie."
+                            : offer.estimateReason === "indexed_price"
+                              ? "Le tarif est indexé et peut évoluer. Cette estimation sur douze mois n'est pas garantie."
+                              : "Des frais ponctuels peuvent réduire cette estimation. Elle n'est ni nette ni garantie."}
                         </p>
                       </div>
                     ) : null}

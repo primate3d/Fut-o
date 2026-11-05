@@ -478,6 +478,7 @@ function buildBodyTemplate(params: {
   offerDurableYearlySaving?: number;
   offerEntryFeesKnown?: boolean;
   offerSavingKind?: SelectedAlternativeOffer["savingKind"];
+  offerEstimateReason?: SelectedAlternativeOffer["estimateReason"];
   offerBillingPrice?: number;
   offerBillingPeriodDays?: number;
   offerUrl?: string;
@@ -540,7 +541,11 @@ function buildBodyTemplate(params: {
       : "",
     params.offerVerifiedAt ? "" : "",
     params.offerSavingKind === "recurring_only"
-      ? "L'économie indiquée compare les tarifs récurrents. Des frais ponctuels peuvent la réduire : cette estimation n'est ni nette ni garantie."
+      ? params.offerEstimateReason === "estimated_schedule"
+        ? "L'économie indiquée est estimée à partir d'un échéancier prévisionnel et non d'une facture annuelle réelle. Elle n'est pas garantie."
+        : params.offerEstimateReason === "indexed_price"
+          ? "L'économie indiquée repose sur le tarif indexé actuellement publié, qui peut évoluer. Cette estimation sur douze mois n'est pas garantie."
+          : "L'économie indiquée compare les tarifs récurrents. Des frais ponctuels peuvent la réduire : cette estimation n'est ni nette ni garantie."
       : "",
     params.offerEntryFeesKnown === false && params.offerSavingKind !== "recurring_only"
       ? "Des frais de mise en service ou de résiliation peuvent réduire les économies estimées."
@@ -904,6 +909,7 @@ function createLetter(
     offerEntryFeesKnown: expense.subcategory === ExpenseSubcategory.INTERNET ? bestOffer?.entryFeesKnown : undefined,
     offerEstimatedYearlySaving: bestOffer?.estimatedYearlySaving,
     offerSavingKind: bestOffer?.savingKind,
+    offerEstimateReason: bestOffer?.estimateReason,
     offerBillingPrice: bestOffer?.billingPrice,
     offerBillingPeriodDays: bestOffer?.billingPeriodDays,
     offerUrl: bestOffer?.url,
@@ -930,6 +936,7 @@ function createLetter(
       offerDurableYearlySaving: expense.subcategory === ExpenseSubcategory.INTERNET ? bestOffer?.durableYearlySaving : undefined,
       offerEntryFeesKnown: expense.subcategory === ExpenseSubcategory.INTERNET ? bestOffer?.entryFeesKnown : undefined,
       offerSavingKind: bestOffer?.savingKind,
+      offerEstimateReason: bestOffer?.estimateReason,
       offerBillingPrice: bestOffer?.billingPrice,
       offerBillingPeriodDays: bestOffer?.billingPeriodDays,
       offerUrl: bestOffer?.url,

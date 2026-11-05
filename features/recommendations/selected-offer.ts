@@ -15,6 +15,8 @@ export type SelectedAlternativeOffer = Pick<
   | "estimatedYearlySaving"
   | "recurringYearlySaving"
   | "durableYearlySaving"
+  | "pricingMode"
+  | "estimateReason"
   | "savingKind"
   | "comparisonKind"
   | "entryFeesKnown"
@@ -51,6 +53,8 @@ export function toSelectedAlternativeOffer(offer: AlternativeOffer): SelectedAlt
     estimatedYearlySaving: offer.estimatedYearlySaving,
     recurringYearlySaving: offer.recurringYearlySaving,
     durableYearlySaving: offer.durableYearlySaving,
+    pricingMode: offer.pricingMode,
+    estimateReason: offer.estimateReason,
     savingKind: offer.savingKind,
     comparisonKind: offer.comparisonKind,
     entryFeesKnown: offer.entryFeesKnown,

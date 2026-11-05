@@ -70,6 +70,18 @@ export const ELECTRICITY_SOURCES: CommercialSourceDefinition[] = [
     allowedHosts: ["totalenergies.fr", "www.totalenergies.fr"], approvalStatus: "APPROVED",
     parser: "totalenergies-energy-tables-v1", discoveryEnabled: true,
   },
+  {
+    id: "electricity-mint-online-green", sector: "electricity", provider: "Mint Energie",
+    sourceUrl: "https://doc.mint-energie.com/MintEnergie/MINT_ENERGIE_Fiche_Tarifs_21912_ONLINE_GREEN.pdf",
+    allowedHosts: ["doc.mint-energie.com"], approvalStatus: "APPROVED",
+    parser: "mint-electricity-pdf-v1", discoveryEnabled: false,
+  },
+  {
+    id: "electricity-plenitude-pleniweb", sector: "electricity", provider: "Plenitude",
+    sourceUrl: "https://www.eniplenitude.fr/content/dam/plenitude-fr/documents/pages-offres/offre-pleniweb/offre-pleniweb_1an_elec.pdf",
+    allowedHosts: ["eniplenitude.fr", "www.eniplenitude.fr"], approvalStatus: "APPROVED",
+    parser: "plenitude-electricity-pdf-v1", discoveryEnabled: false,
+  },
 ];
 
 export const GAS_SOURCES: CommercialSourceDefinition[] = [
@@ -78,6 +90,18 @@ export const GAS_SOURCES: CommercialSourceDefinition[] = [
     sourceUrl: "https://www.totalenergies.fr/particuliers/electricite-et-gaz/grilles-tarifaires",
     allowedHosts: ["totalenergies.fr", "www.totalenergies.fr"], approvalStatus: "APPROVED",
     parser: "totalenergies-energy-tables-v1", discoveryEnabled: true,
+  },
+  {
+    id: "gas-engie-adapt", sector: "gas", provider: "Engie",
+    sourceUrl: "https://particuliers.engie.fr/content/dam/pdf/fiches-descriptives/fiche-descriptive-gaz-adapt.pdf",
+    allowedHosts: ["particuliers.engie.fr"], approvalStatus: "APPROVED",
+    parser: "engie-gas-pdf-v1", discoveryEnabled: false,
+  },
+  {
+    id: "gas-plenitude-pleniweb", sector: "gas", provider: "Plenitude",
+    sourceUrl: "https://www.eniplenitude.fr/content/dam/plenitude-fr/documents/pages-offres/offre-pleniweb/offre-pleniweb_1an_gaz.pdf",
+    allowedHosts: ["eniplenitude.fr", "www.eniplenitude.fr"], approvalStatus: "APPROVED",
+    parser: "plenitude-gas-pdf-v1", discoveryEnabled: false,
   },
   {
     id: "gas-cre-reference", sector: "gas", provider: "CRE",

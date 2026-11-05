@@ -49,6 +49,8 @@ export type AlternativeOffer = {
   savingKind?: "certified" | "temporary" | "recurring_only";
   recurringYearlySaving?: number;
   durableYearlySaving?: number;
+  pricingMode?: "FIXED" | "INDEXED" | "REGULATED" | "UNKNOWN";
+  estimateReason?: "unknown_fees" | "estimated_schedule" | "indexed_price";
   netFirstYearSaving?: number;
   publicMonthlyPrice?: number;
   promotionPrice?: number;
